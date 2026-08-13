@@ -1,2 +1,9 @@
 fastapi
 uvicorn[standard]
+psycopg2-binary
+python-dotenv
+pyjwt
+requests
+cryptography
+pytest
+httpx
