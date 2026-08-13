@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from db import is_db_active, get_db_cursor, get_authenticated_cursor
 from routers.auth import get_current_user
@@ -112,7 +112,7 @@ def create_incident(
                     detail="Tourist profile not found",
                 )
                 
-            # Verify location exists or create dummy/default location
+            # Verify location exists, or resolve/create one — incidents.location_id is NOT NULL
             loc_id = payload.location_id
             if loc_id:
                 cur.execute("SELECT location_id FROM public.locations WHERE location_id = %s;", (loc_id,))
@@ -122,6 +122,18 @@ def create_incident(
                         INSERT INTO public.locations (location_id, name, latitude, longitude, risk_level, recorded_at)
                         VALUES (%s, %s, %s, %s, %s, %s);
                     """, (loc_id, "Geocoded Tourist Incident Location", 0.0, 0.0, "LOW", now))
+            else:
+                # No location_id provided — create one from supplied coordinates (or a default placeholder)
+                loc_id = uuid4()
+                cur.execute("""
+                    INSERT INTO public.locations (location_id, name, latitude, longitude, risk_level, recorded_at)
+                    VALUES (%s, %s, %s, %s, %s, %s);
+                """, (
+                    loc_id, "Geocoded Tourist Incident Location",
+                    payload.latitude if payload.latitude is not None else 0.0,
+                    payload.longitude if payload.longitude is not None else 0.0,
+                    "LOW", now
+                ))
             
             cur.execute("""
                 INSERT INTO public.incidents (incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id)
@@ -154,26 +166,26 @@ def create_incident(
 
 @router.get("", response_model=list[IncidentResponse])
 def list_incidents(
-    status: str | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),
     current_user: SessionResponse = Depends(get_current_user)
 ) -> list[IncidentResponse]:
     # 1. Fallback Mode
     if not is_db_active():
         incidents = list(_in_memory_incident_store.values())
-        if status is not None:
-            incidents = [i for i in incidents if i.status.lower() == status.lower()]
+        if status_filter is not None:
+            incidents = [i for i in incidents if i.status.lower() == status_filter.lower()]
         return incidents
 
     # 2. Database Mode
     try:
         # Run using user authenticated cursor so RLS policies automatically filter incidents
         with get_authenticated_cursor(current_user.auth_user_id) as cur:
-            if status:
+            if status_filter:
                 cur.execute("""
                     SELECT incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id
                     FROM public.incidents
                     WHERE status = %s;
-                """, (status,))
+                """, (status_filter,))
             else:
                 cur.execute("""
                     SELECT incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id

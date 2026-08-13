@@ -1,4 +1,6 @@
+import hashlib
 import logging
+import secrets
 from datetime import datetime, timezone
 import json
 import requests
@@ -32,8 +34,6 @@ def _get_email_from_username(username: str) -> str:
 
 
 def _hash_password(password: str, salt: str | None = None) -> str:
-    import hashlib
-    import secrets
     if salt is None:
         salt = secrets.token_hex(16)
     key = hashlib.pbkdf2_hmac(
@@ -46,8 +46,6 @@ def _hash_password(password: str, salt: str | None = None) -> str:
 
 
 def _verify_password(password: str, password_hash: str) -> bool:
-    import hashlib
-    import secrets
     try:
         salt, key_hex = password_hash.split("$")
         recalculated = hashlib.pbkdf2_hmac(
@@ -196,6 +194,7 @@ def register(payload: RegisterRequest) -> AuthResponse:
 
         now = datetime.now(timezone.utc)
         auth_id = uuid4()
+        auth_user_id = uuid4()
         tourist_id = payload.tourist_id if user_type == "tourist" else None
         if user_type == "tourist" and not tourist_id:
             tourist_id = uuid4()
@@ -223,6 +222,7 @@ def register(payload: RegisterRequest) -> AuthResponse:
 
         auth_record = {
             "auth_id": auth_id,
+            "auth_user_id": auth_user_id,
             "tourist_id": tourist_id,
             "authority_id": authority_id,
             "username": payload.username,
@@ -350,9 +350,10 @@ def login(payload: LoginRequest) -> LoginResponse:
         now = datetime.now(timezone.utc)
         target_record["last_login_at"] = now
 
-        token = secrets.token_hex(32) if "secrets" in globals() else uuid4().hex
+        token = secrets.token_hex(32)
         session_info = {
             "auth_id": target_record["auth_id"],
+            "auth_user_id": target_record["auth_user_id"],
             "username": target_record["username"],
             "user_type": target_record["user_type"],
             "tourist_id": target_record["tourist_id"],

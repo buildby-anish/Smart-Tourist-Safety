@@ -104,10 +104,10 @@ def create_sos(
             
             # Create the SOS request record
             cur.execute("""
-                INSERT INTO public.sos_requests (sos_id, tourist_id, incident_id, location_id, status, activated_at, resolved_at)
+                INSERT INTO public.sos_requests (sos_id, tourist_id, incident_id, location_id, trigger_source, sos_status, triggered_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s)
-                RETURNING sos_id, tourist_id, incident_id, location_id, status, activated_at, resolved_at;
-            """, (sos_id, payload.tourist_id, incident_id, location_id, "ACTIVE", now, None))
+                RETURNING sos_id, tourist_id, incident_id, location_id, trigger_source, sos_status, triggered_at;
+            """, (sos_id, payload.tourist_id, incident_id, location_id, payload.trigger_source or "APP", "ACTIVE", now))
             
             row = cur.fetchone()
             return SOSResponse(
@@ -119,10 +119,10 @@ def create_sos(
                 severity="HIGH",
                 status="OPEN",
                 description="SOS Alarm Triggered",
-                triggered_at=row[5],
-                created_at=row[5],
-                trigger_source=payload.trigger_source or "APP",
-                sos_status=row[4]
+                triggered_at=row[6],
+                created_at=row[6],
+                trigger_source=row[4],
+                sos_status=row[5]
             )
     except HTTPException as he:
         raise he

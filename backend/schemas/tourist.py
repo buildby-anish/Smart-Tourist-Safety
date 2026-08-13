@@ -5,8 +5,8 @@ from pydantic import BaseModel, ConfigDict
 
 
 class TouristCreate(BaseModel):
+    full_name: str
     digital_id: str | None = None
-    full_name: str | None = None
     kyc_document_type: str | None = None
     kyc_verified: bool | None = None
     phone: str | None = None
@@ -49,4 +49,3 @@ class DigitalIdResponse(BaseModel):
     full_name: str | None = None
     kyc_document_type: str | None = None
     kyc_verified: bool | None = None
-

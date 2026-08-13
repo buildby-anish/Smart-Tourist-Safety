@@ -9,6 +9,9 @@ class Config:
     SUPABASE_URL = os.getenv("SUPABASE_URL", "")
     SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", os.getenv("SUPABASE_PUBLISHABLE_KEY", ""))
     JWT_SECRET = os.getenv("JWT_SECRET", "")
+    CORS_ALLOWED_ORIGINS = [
+        o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
+    ]
 
     @classmethod
     def is_supabase_configured(cls) -> bool:

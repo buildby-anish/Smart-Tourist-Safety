@@ -2,7 +2,7 @@ from uuid import UUID
 from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException, status, Depends
 
-from db import is_db_active, get_db_cursor
+from db import is_db_active, get_authenticated_cursor
 from routers.auth import get_current_user
 from schemas.auth import SessionResponse
 from schemas.location import LocationResponse
@@ -13,7 +13,7 @@ router = APIRouter(prefix="/locations", tags=["locations"])
 _in_memory_location_store: dict[UUID, LocationResponse] = {}
 
 
-def _get_location_or_404(location_id: UUID) -> LocationResponse:
+def _get_location_or_404(location_id: UUID, current_user: SessionResponse) -> LocationResponse:
     # 1. Fallback Mode
     if not is_db_active():
         location = _in_memory_location_store.get(location_id)
@@ -26,7 +26,7 @@ def _get_location_or_404(location_id: UUID) -> LocationResponse:
 
     # 2. Database Mode
     try:
-        with get_db_cursor() as cur:
+        with get_authenticated_cursor(current_user.auth_user_id) as cur:
             cur.execute("""
                 SELECT location_id, name, latitude, longitude, risk_level, recorded_at
                 FROM public.locations
@@ -63,7 +63,7 @@ def list_locations(current_user: SessionResponse = Depends(get_current_user)) ->
 
     # 2. Database Mode
     try:
-        with get_db_cursor() as cur:
+        with get_authenticated_cursor(current_user.auth_user_id) as cur:
             cur.execute("""
                 SELECT location_id, name, latitude, longitude, risk_level, recorded_at
                 FROM public.locations
@@ -93,4 +93,4 @@ def get_location(
     location_id: UUID,
     current_user: SessionResponse = Depends(get_current_user)
 ) -> LocationResponse:
-    return _get_location_or_404(location_id)
+    return _get_location_or_404(location_id, current_user)

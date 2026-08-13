@@ -7,6 +7,8 @@ from pydantic import BaseModel, ConfigDict
 class IncidentCreate(BaseModel):
     tourist_id: UUID
     location_id: UUID | None = None
+    latitude: float | None = None
+    longitude: float | None = None
     incident_type: str | None = "OTHER"
     severity: str | None = "MEDIUM"
     status: str = "OPEN"

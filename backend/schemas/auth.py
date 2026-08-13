@@ -47,6 +47,7 @@ class SessionResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     auth_id: UUID
+    auth_user_id: UUID
     username: str
     user_type: str
     tourist_id: UUID | None = None
