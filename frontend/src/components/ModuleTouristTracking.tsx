@@ -25,6 +25,7 @@ import {
 import { Language, TouristProfile, InterceptionReason } from '../types';
 import { i18n } from '../data/i18n';
 import { InterceptionModal } from './InterceptionModal';
+import { getAuthorityTourist } from '../lib/api';
 
 interface ModuleTouristTrackingProps {
   language: Language;
@@ -87,7 +88,7 @@ export const ModuleTouristTracking: React.FC<ModuleTouristTrackingProps> = ({
     setShowInterceptionModal(true);
   };
 
-  const handleConfirmInterception = (reason: InterceptionReason, notes: string) => {
+  const handleConfirmInterception = async (reason: InterceptionReason, notes: string) => {
     if (!pendingTouristId) return;
 
     const found = tourists.find(
@@ -103,6 +104,33 @@ export const ModuleTouristTracking: React.FC<ModuleTouristTrackingProps> = ({
         `Accessed profile & telemetry. Notes: ${notes || 'None'}`
       );
       setToastMessage(`✓ Interception Verified: Audit Logged for ${found.name}`);
+
+      // If this tourist has a real backend UUID (i.e. registered through the
+      // Tourist Portal against the live backend), refresh the record with
+      // live data via GET /api/v1/authority/tourists/{tourist_id} so the KYC
+      // panel reflects the authoritative source. Falls back silently to the
+      // already-displayed local record on any failure.
+      if (found.tourist_id) {
+        try {
+          const live = await getAuthorityTourist(found.tourist_id);
+          setSelectedTourist((prev) =>
+            prev && prev.id === found.id
+              ? {
+                  ...prev,
+                  full_name: live.full_name,
+                  digital_id: live.digital_id,
+                  kyc_verified: live.kyc_verified,
+                  kyc_document_type: live.kyc_document_type,
+                  created_at: live.created_at,
+                  phone: live.phone || prev.phone,
+                  email: live.email || prev.email
+                }
+              : prev
+          );
+        } catch (err) {
+          console.warn('Live tourist lookup failed; showing local record only:', err);
+        }
+      }
     } else {
       setToastMessage(`⚠️ Tourist ID "${pendingTouristId}" not found in database.`);
     }

@@ -19,7 +19,7 @@ import { i18n } from '../data/i18n';
 interface GatewayProps {
   language: Language;
   onSelectRole: (role: UserRole) => void;
-  onAuthenticateAuthority: (badgeId: string, otp: string) => boolean;
+  onAuthenticateAuthority: (badgeId: string, otp: string) => Promise<boolean>;
 }
 
 export const Gateway: React.FC<GatewayProps> = ({
@@ -32,18 +32,25 @@ export const Gateway: React.FC<GatewayProps> = ({
   const [badgeId, setBadgeId] = useState('IPS-7742');
   const [otp, setOtp] = useState('789012');
   const [mfaError, setMfaError] = useState('');
+  const [mfaSubmitting, setMfaSubmitting] = useState(false);
 
-  const handleMfaSubmit = (e: React.FormEvent) => {
+  const handleMfaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!badgeId.trim() || !otp.trim()) {
       setMfaError('Please provide both Badge ID and MFA Auth Code.');
       return;
     }
-    const success = onAuthenticateAuthority(badgeId, otp);
-    if (!success) {
-      setMfaError('Invalid credentials. Use demo credentials (IPS-7742 / 789012)');
-    } else {
-      setShowMfaModal(false);
+    setMfaError('');
+    setMfaSubmitting(true);
+    try {
+      const success = await onAuthenticateAuthority(badgeId, otp);
+      if (!success) {
+        setMfaError('Could not verify credentials against the command server. Please try again.');
+      } else {
+        setShowMfaModal(false);
+      }
+    } finally {
+      setMfaSubmitting(false);
     }
   };
 
@@ -248,9 +255,10 @@ export const Gateway: React.FC<GatewayProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2.5 rounded-lg bg-[#0B2447] hover:bg-[#071933] text-white text-sm font-extrabold transition shadow-lg flex items-center justify-center gap-2"
+                  disabled={mfaSubmitting}
+                  className="flex-1 px-4 py-2.5 rounded-lg bg-[#0B2447] hover:bg-[#071933] disabled:opacity-60 text-white text-sm font-extrabold transition shadow-lg flex items-center justify-center gap-2"
                 >
-                  <span>{t.mfaVerifyBtn}</span>
+                  <span>{mfaSubmitting ? 'Verifying…' : t.mfaVerifyBtn}</span>
                   <ArrowRight className="w-4 h-4 text-[#FF9933]" />
                 </button>
               </div>

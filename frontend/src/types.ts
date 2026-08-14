@@ -80,6 +80,10 @@ export interface SOSIncident {
   hazardType: string;
   notes: string;
   audioRecordingUrl?: string;
+
+  // Backend linkage (real API), used to PATCH the actual incident record.
+  // Undefined for locally-generated demo/mock incidents that have no backend counterpart.
+  backendIncidentId?: string;
 }
 
 export interface PatrollingUnit {
