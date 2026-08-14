@@ -49,7 +49,7 @@ import { ActualGoogleMap } from './ActualGoogleMap';
 import { CrowdHeatmap } from './CrowdHeatmap';
 import { getSOSLocation } from '../lib/location';
 import { queueSOSRecord } from '../lib/db';
-import { submitSOSOnline, syncQueuedSOS } from '../lib/api';
+import { submitSOSOnline, syncQueuedSOS, registerAndLoginTourist, loginTouristByPhone, updateIncidentStatus, clearSession, logoutUser, getTouristId } from '../lib/api';
 
 
 interface TouristPortalProps {
@@ -131,6 +131,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
   const [sosSendingProgress, setSosSendingProgress] = useState(0);
   const [incidentRef, setIncidentRef] = useState<string | null>(null);
   const [sosErrorMessage, setSosErrorMessage] = useState<string | null>(null);
+  const [activeBackendIncidentId, setActiveBackendIncidentId] = useState<string | null>(null);
 
   // Integrated Geo-Fence States
   const [activeGeoFenceZone, setActiveGeoFenceZone] = useState<GeoFenceZone>(MOCK_GEOFENCE_ZONES[0]); // Solang Valley (Unsafe)
@@ -150,9 +151,12 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
       setSosSendingProgress(40);
 
       // 2. Build local SOS record
+      // Prefer the real backend tourist UUID (set after registration/sign-in
+      // against the backend) over the cosmetic display ID, since the backend
+      // requires an existing tourists.tourist_id to accept the SOS request.
       const localRecord = {
         local_sos_id: crypto.randomUUID(),
-        tourist_id: authenticatedUser?.id || 'TR-88219',
+        tourist_id: authenticatedUser?.tourist_id || getTouristId(),
         triggered_at: new Date().toISOString(),
         latitude: loc.latitude,
         longitude: loc.longitude,
@@ -179,6 +183,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
           setSosSendingProgress(100);
           setSosStep('success');
           setIncidentRef(res.incident_id || res.sos_id || `INC-${Math.floor(1000 + Math.random() * 9000)}`);
+          if (res.incident_id) setActiveBackendIncidentId(res.incident_id);
           setSosActive(true);
           onTriggerSos(authenticatedUser?.name || 'Elena Rostova', `${loc.latitude?.toFixed(4) || lat.toFixed(4)}, ${loc.longitude?.toFixed(4) || lng.toFixed(4)} (${activeGeoFenceZone.name})`);
         } catch (err: any) {
@@ -203,10 +208,18 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
   };
 
   const handleResetSosFlow = () => {
+    // If this SOS created a real backend incident, mark it resolved server-side
+    // (mirrors the authority-side "Resolve Case" / "Mark Safe" PATCH flow).
+    if (activeBackendIncidentId) {
+      updateIncidentStatus(activeBackendIncidentId, { status: 'RESOLVED' }).catch((err) =>
+        console.warn('Failed to resolve backend incident on reset:', err)
+      );
+    }
     setSosStep('ready');
     setSosActive(false);
     setSirenPlaying(false);
     setIncidentRef(null);
+    setActiveBackendIncidentId(null);
     setSosErrorMessage(null);
     setSosSendingProgress(0);
   };
@@ -354,7 +367,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
   };
 
   // Verify OTP
-  const handleVerifyOtp = (e: React.FormEvent) => {
+  const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (otpValue.trim().length < 4) {
       setOtpError('Please enter a valid 6-digit OTP code.');
@@ -392,6 +405,29 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
         locationConsent: 'granted'
       };
 
+      // Create a real backend account + tourist profile behind the existing
+      // sign-up UI (see lib/api.ts registerAndLoginTourist). This is
+      // best-effort: if the backend is unreachable, the tourist still gets a
+      // fully working local session exactly as before — SOS will simply
+      // queue offline until a subsequent sync, matching existing behavior.
+      try {
+        const backendResult = await registerAndLoginTourist({
+          fullName: newProfile.name,
+          phone: newProfile.phone,
+          email: newProfile.email || '',
+          emergencyContact: newProfile.emergencyContact
+        });
+        if (backendResult?.tourist) {
+          newProfile.tourist_id = backendResult.tourist.tourist_id;
+          newProfile.digital_id = backendResult.tourist.digital_id;
+          newProfile.full_name = backendResult.tourist.full_name;
+          newProfile.kyc_verified = backendResult.tourist.kyc_verified;
+          newProfile.created_at = backendResult.tourist.created_at;
+        }
+      } catch (err) {
+        console.warn('Backend registration failed; continuing with local-only profile:', err);
+      }
+
       setAuthenticatedUser(newProfile);
       setLocationConsent('granted');
       if (onRegisterTourist) {
@@ -426,6 +462,21 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
         digitalBandId: 'BAND-3301',
         pastSOSHistory: []
       };
+
+      // Re-authenticate against the real backend using the same derived
+      // credentials established at sign-up (see lib/api.ts
+      // loginTouristByPhone). Only succeeds for a phone that registered
+      // through this app in the current backend session; otherwise this is a
+      // no-op and the existing local demo lookup above is used unchanged.
+      try {
+        const backendResult = await loginTouristByPhone(signinPhone);
+        if (backendResult?.tourist) {
+          userProfile.tourist_id = backendResult.tourist.tourist_id;
+          userProfile.digital_id = backendResult.tourist.digital_id;
+        }
+      } catch (err) {
+        console.warn('Backend sign-in failed; continuing with local demo profile:', err);
+      }
 
       setAuthenticatedUser(userProfile);
       setShowConsentModal(true);
@@ -465,6 +516,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
   };
 
   const handleSignOut = () => {
+    logoutUser().finally(() => clearSession());
     setAuthenticatedUser(null);
     setLocationConsent(null);
     setSosActive(false);

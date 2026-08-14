@@ -2407,7 +2407,18 @@ def test_authority_endpoints(auth_headers_tourist, auth_headers_authority):
 
 ## 7. Frontend Client
 
-The `frontend/` directory is currently a placeholder and does not contain any functional source code, routes, or components. 
+**Updated by the integration pass described in `frontendconnectbackend.md`.** The `frontend/` directory now contains the full "Suraksha Setu" React/Vite/TypeScript application (Gateway, Tourist Portal, and the Authority Command Center modules), previously developed separately from this backend repository and connected to it in this pass. See `frontendconnectbackend.md` for the endpoint-by-endpoint connection map.
+
+Key integration points added in `frontend/src/lib/api.ts`:
+- `registerUser` / `loginUser` / `logoutUser` / `getSession` — wrap `POST /auth/register|login|logout` and `GET /auth/session`.
+- `createTouristProfile` / `getTouristProfile` / `updateTouristProfile` / `getDigitalId` — wrap the `/tourists` endpoints.
+- `listIncidents` / `getIncident` / `updateIncidentStatus` — wrap `/incidents`, used for authority dispatch/resolve.
+- `listLocations` / `getLocation` — wrap `/locations`.
+- `createAlert` / `listAlerts` — wrap `/alerts`.
+- `authorityLoginRequest`, `getAuthorityAlerts`, `getAuthorityIncidents`, `getAuthorityTourist`, `getAuthorityIncidentLocation` — wrap `/authority/*`.
+- `submitSOSOnline` (pre-existing) — wraps `POST /sos`, now fed a real backend `tourist_id`/auth token instead of a cosmetic mock ID.
+
+Orchestration helpers built on top of these for the existing UI flows: `authenticateAuthority` (Gateway MFA form → real authority login, with auto-registration on first use since the backend starts with no seeded accounts), `registerAndLoginTourist` and `loginTouristByPhone` (Tourist Portal sign-up/sign-in → real register/login, using credentials derived from the phone number since the existing UI never collects a password).
 
 ---
 
@@ -2449,7 +2460,7 @@ A prior review found the following defects — all confirmed via direct testing 
 - `main.py` had no CORS middleware at all, which would block any browser-based frontend. Added, configurable via `CORS_ALLOWED_ORIGINS`.
 
 ### Known Issues & TODOs
-- **Frontend implementation**: The `frontend/` client workspace still needs to be built out.
+- **Frontend implementation**: Done — see §7 and `frontendconnectbackend.md`. Remaining frontend-side gaps (not backend TODOs) are itinerary, location consent, digital pass download, the AI chatbot, and the broadcast/alerts mismatch — all listed in `frontendconnectbackend.md`'s integration report.
 - **`itinerary_entries` and `responses` tables have no backend implementation.** `DATABASE.md` documents both as first-class resources (with RLS rules, an entry in the relationship map, and suggested routes: `GET/POST /itinerary`, `PATCH/DELETE /itinerary/{id}`, `GET/POST /incidents/{incident_id}/responses`, `PATCH /responses/{response_id}`), but no routers, schemas, or endpoints exist for either in this codebase. This was flagged rather than silently built out, since it's a net-new feature rather than a fix.
 - **Not verified against a live database**: all fixes above were validated by (1) the existing mock-mode test suite and (2) a simulated DB-mode harness (a fake cursor standing in for psycopg2) that exercises the authenticated/DB-mode code paths and confirms column-order and attribute correctness. No live Postgres/Supabase instance was available in this environment, so the actual RLS policies, constraints, and foreign keys have not been exercised end-to-end against a real database.
 - **Production migration confirmation**: Verification of RLS policies directly against live Supabase PostgreSQL databases during live deployment.

@@ -30,6 +30,16 @@ import { ModuleTouristTracking } from './components/ModuleTouristTracking';
 import { ModuleSOSMap } from './components/ModuleSOSMap';
 import { ModuleBroadcast } from './components/ModuleBroadcast';
 import { ModuleAnalyticsAudit } from './components/ModuleAnalyticsAudit';
+import {
+  authenticateAuthority,
+  getAuthorityIncidents,
+  getAuthorityTourist,
+  getAuthorityIncidentLocation,
+  updateIncidentStatus,
+  createAlert,
+  clearSession,
+  logoutUser
+} from './lib/api';
 
 export default function App() {
   const [language, setLanguage] = useState<Language>('en');
@@ -49,6 +59,7 @@ export default function App() {
 
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [prefilledTouristId, setPrefilledTouristId] = useState('');
+  const [authorityAuthError, setAuthorityAuthError] = useState('');
 
   // Register service worker for offline PWA compliance
   useEffect(() => {
@@ -82,9 +93,98 @@ export default function App() {
     setAuditLogs((prev) => [newLog, ...prev]);
   };
 
-  // Authority MFA Authenticate
-  const handleAuthenticateAuthority = (badgeId: string, otp: string) => {
-    // Accepts demo credentials or badge input
+  // Map a backend incident status onto the existing local SOSStatus enum.
+  const mapBackendStatus = (status: string): SOSIncident['status'] => {
+    const s = (status || '').toUpperCase();
+    if (s === 'RESOLVED' || s === 'CLOSED') return 'Resolved';
+    if (s === 'RESPONDING') return 'Units Dispatched';
+    return 'New';
+  };
+
+  const mapBackendSeverity = (severity: string | null | undefined): SOSIncident['severity'] => {
+    const s = (severity || '').toUpperCase();
+    if (s === 'CRITICAL' || s === 'HIGH') return 'Critical';
+    if (s === 'MEDIUM') return 'Warning';
+    return 'Advisory';
+  };
+
+  // Pull real incidents (created via the Tourist Portal's SOS/incident flows)
+  // from the backend and merge them into the existing local incidents state,
+  // resolving tourist and location details on a best-effort basis so the
+  // existing Kanban/Map UI can render them without any structural changes.
+  const refreshIncidentsFromBackend = async () => {
+    try {
+      const backendIncidents = await getAuthorityIncidents();
+      const mapped: SOSIncident[] = await Promise.all(
+        backendIncidents.map(async (inc: any) => {
+          let touristName = 'Registered Tourist';
+          let touristPhone = '';
+          const localTourist = tourists.find((t) => t.tourist_id === inc.tourist_id);
+          if (localTourist) {
+            touristName = localTourist.full_name || localTourist.name;
+            touristPhone = localTourist.phone;
+          } else {
+            try {
+              const backendTourist = await getAuthorityTourist(inc.tourist_id);
+              touristName = backendTourist.full_name || touristName;
+              touristPhone = backendTourist.phone || '';
+            } catch (e) {
+              // Tourist lookup failed (e.g. RLS/not found) — keep placeholder.
+            }
+          }
+
+          let lat = 32.2432;
+          let lng = 77.1892;
+          let address = inc.description || `${inc.incident_type || 'Incident'} report`;
+          try {
+            const loc = await getAuthorityIncidentLocation(inc.incident_id);
+            if (loc.latitude != null) lat = loc.latitude;
+            if (loc.longitude != null) lng = loc.longitude;
+            if (loc.name) address = loc.name;
+          } catch (e) {
+            // Location lookup failed — keep defaults.
+          }
+
+          const result: SOSIncident = {
+            id: `BE-${inc.incident_id}`,
+            backendIncidentId: inc.incident_id,
+            touristId: localTourist?.id || inc.tourist_id,
+            touristName,
+            touristPhone,
+            location: { lat, lng, address },
+            timestamp: inc.created_at
+              ? new Date(inc.created_at).toISOString().replace('T', ' ').substring(0, 19)
+              : new Date().toISOString().replace('T', ' ').substring(0, 19),
+            status: mapBackendStatus(inc.status),
+            severity: mapBackendSeverity(inc.severity),
+            hazardType: inc.incident_type || 'OTHER',
+            notes: inc.description || 'Incident synced from backend.'
+          };
+          return result;
+        })
+      );
+
+      setIncidents((prev) => {
+        const backendIds = new Set(mapped.map((m) => m.backendIncidentId));
+        const localOnly = prev.filter((p) => !p.backendIncidentId || !backendIds.has(p.backendIncidentId));
+        return [...mapped, ...localOnly];
+      });
+    } catch (err) {
+      console.warn('Failed to refresh incidents from backend:', err);
+    }
+  };
+
+  // Authority MFA Authenticate — now backed by the real /authority/login
+  // endpoint (see lib/api.ts authenticateAuthority for the credential mapping
+  // and auto-registration-on-first-use behavior).
+  const handleAuthenticateAuthority = async (badgeId: string, otp: string): Promise<boolean> => {
+    setAuthorityAuthError('');
+    const result = await authenticateAuthority(badgeId, otp);
+    if (!result) {
+      setAuthorityAuthError('Authentication failed.');
+      return false;
+    }
+
     setUserRole('authority');
     setActiveModule('ai_hub');
     handleLogAudit(
@@ -93,6 +193,11 @@ export default function App() {
       'MFA Verification',
       'Successful 2FA login to National Command Center'
     );
+
+    // Populate the dashboard with real backend incidents (in addition to the
+    // existing local demo data) now that we have an authenticated session.
+    refreshIncidentsFromBackend();
+
     return true;
   };
 
@@ -140,7 +245,7 @@ export default function App() {
   };
 
   // Dispatch Responder Unit
-  const handleDispatchUnit = (incidentId: string, unitId: string) => {
+  const handleDispatchUnit = async (incidentId: string, unitId: string) => {
     const targetUnit = units.find((u) => u.id === unitId);
     const targetIncident = incidents.find((i) => i.id === incidentId);
 
@@ -164,6 +269,16 @@ export default function App() {
       );
     }
 
+    // If this incident has a real backend counterpart, persist the status
+    // change via PATCH /api/v1/incidents/{incident_id}.
+    if (targetIncident.backendIncidentId) {
+      try {
+        await updateIncidentStatus(targetIncident.backendIncidentId, { status: 'RESPONDING' });
+      } catch (err) {
+        console.warn('Failed to persist dispatch status to backend:', err);
+      }
+    }
+
     handleLogAudit(
       'DISPATCH_UNIT',
       unitId,
@@ -173,7 +288,7 @@ export default function App() {
   };
 
   // Resolve Incident
-  const handleResolveIncident = (incidentId: string) => {
+  const handleResolveIncident = async (incidentId: string) => {
     const targetIncident = incidents.find((i) => i.id === incidentId);
 
     setIncidents((prev) =>
@@ -188,12 +303,43 @@ export default function App() {
       );
     }
 
+    if (targetIncident?.backendIncidentId) {
+      try {
+        await updateIncidentStatus(targetIncident.backendIncidentId, { status: 'RESOLVED' });
+      } catch (err) {
+        console.warn('Failed to persist resolution status to backend:', err);
+      }
+    }
+
     handleLogAudit(
       'TICKET_STATUS_CHANGE',
       incidentId,
       'Incident Resolution',
       `Marked SOS Incident ${incidentId} as Resolved. Tourist confirmed safe.`
     );
+  };
+
+  // Mark tourist safe from the Tourist Tracking module — resolves that
+  // tourist's most recent open backend incident (if any) via PATCH, mirroring
+  // handleResolveIncident above.
+  const handleMarkTouristSafe = async (touristId: string) => {
+    setTourists((prev) =>
+      prev.map((t) => (t.id === touristId ? { ...t, safetyStatus: 'Safe' } : t))
+    );
+
+    const openIncident = incidents.find(
+      (i) => i.touristId === touristId && i.status !== 'Resolved' && i.backendIncidentId
+    );
+    if (openIncident?.backendIncidentId) {
+      setIncidents((prev) =>
+        prev.map((i) => (i.id === openIncident.id ? { ...i, status: 'Resolved' } : i))
+      );
+      try {
+        await updateIncidentStatus(openIncident.backendIncidentId, { status: 'RESOLVED' });
+      } catch (err) {
+        console.warn('Failed to persist mark-safe resolution to backend:', err);
+      }
+    }
   };
 
   // Send Broadcast Alert
@@ -209,6 +355,23 @@ export default function App() {
     };
 
     setBroadcasts((prev) => [createdAlert, ...prev]);
+
+    // The backend's `alerts` table models a notification tied to one
+    // incident + one recipient/channel — there is no backend concept of a
+    // region-wide broadcast campaign (see DATABASE.md §5.7). As the closest
+    // faithful mapping without inventing new backend behavior, publishing a
+    // broadcast also logs a real SMS alert record against every currently
+    // active backend-linked incident. This is best-effort and non-blocking;
+    // the existing local broadcast history/UI is unaffected either way.
+    incidents
+      .filter((i) => i.status !== 'Resolved' && i.backendIncidentId)
+      .forEach((i) => {
+        createAlert({
+          incident_id: i.backendIncidentId as string,
+          channel: 'SMS',
+          recipient: newAlert.region
+        }).catch((err) => console.warn('Failed to log backend alert for broadcast:', err));
+      });
 
     handleLogAudit(
       'BROADCAST_SENT',
@@ -259,7 +422,10 @@ export default function App() {
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
         userRole={userRole}
-        onLogout={() => setUserRole('gateway')}
+        onLogout={() => {
+          logoutUser().finally(() => clearSession());
+          setUserRole('gateway');
+        }}
         activeModule={activeModule}
         onSelectModule={setActiveModule}
         globalSearchQuery={globalSearchQuery}
@@ -313,11 +479,7 @@ export default function App() {
                 onSendSmsToTourist={(tourist) => {
                   setActiveModule('broadcast');
                 }}
-                onMarkSafe={(touristId) => {
-                  setTourists((prev) =>
-                    prev.map((t) => (t.id === touristId ? { ...t, safetyStatus: 'Safe' } : t))
-                  );
-                }}
+                onMarkSafe={handleMarkTouristSafe}
                 prefilledTouristId={prefilledTouristId}
               />
             )}

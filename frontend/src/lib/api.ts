@@ -2,8 +2,17 @@ import { SOSRecord, getQueuedSOSRecords, updateSOSRecordStatus } from "./db";
 
 let isSyncing = false;
 
+// ---------------------------------------------------------------------------
+// Base URL & session storage
+//
+// Resolution order matches existing behavior (localStorage override first),
+// and additionally honors Vite's standard VITE_* env convention so a
+// deployment-specific URL can be set via frontend/.env without code changes.
+// ---------------------------------------------------------------------------
+
 export function getApiBaseUrl(): string {
-  return localStorage.getItem("sos_api_base_url") || "http://localhost:8000/api/v1";
+  const envUrl = (import.meta as any).env?.VITE_API_BASE_URL as string | undefined;
+  return localStorage.getItem("sos_api_base_url") || envUrl || "http://localhost:8000/api/v1";
 }
 
 export function getAuthToken(): string {
@@ -12,6 +21,370 @@ export function getAuthToken(): string {
 
 export function getTouristId(): string {
   return localStorage.getItem("sos_tourist_id") || "eee6684b-dee5-4471-bfd0-00b9a7ee9b66";
+}
+
+export function getUserType(): string {
+  return localStorage.getItem("sos_user_type") || "";
+}
+
+export function getAuthorityId(): string {
+  return localStorage.getItem("sos_authority_id") || "";
+}
+
+export function getUsername(): string {
+  return localStorage.getItem("sos_username") || "";
+}
+
+interface SessionInfo {
+  access_token?: string;
+  user_type?: string;
+  tourist_id?: string | null;
+  authority_id?: string | null;
+  username?: string;
+}
+
+/** Persists an authenticated session (token + identity) to localStorage. */
+export function storeSession(session: SessionInfo): void {
+  if (session.access_token) localStorage.setItem("sos_auth_token", session.access_token);
+  if (session.user_type) localStorage.setItem("sos_user_type", session.user_type);
+  if (session.tourist_id) localStorage.setItem("sos_tourist_id", session.tourist_id);
+  if (session.authority_id) localStorage.setItem("sos_authority_id", session.authority_id);
+  if (session.username) localStorage.setItem("sos_username", session.username);
+}
+
+/** Clears any stored session/auth data (used on logout). */
+export function clearSession(): void {
+  localStorage.removeItem("sos_auth_token");
+  localStorage.removeItem("sos_user_type");
+  localStorage.removeItem("sos_tourist_id");
+  localStorage.removeItem("sos_authority_id");
+  localStorage.removeItem("sos_username");
+}
+
+// ---------------------------------------------------------------------------
+// Generic authenticated request helper
+// ---------------------------------------------------------------------------
+
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function apiRequest<T = any>(
+  path: string,
+  options: { method?: string; body?: any; auth?: boolean } = {}
+): Promise<T> {
+  const { method = "GET", body, auth = true } = options;
+  const baseUrl = getApiBaseUrl();
+  const token = getAuthToken();
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (auth && token) headers["Authorization"] = `Bearer ${token}`;
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch (networkErr: any) {
+    throw new ApiError(0, `Network error contacting backend: ${networkErr.message || networkErr}`);
+  }
+
+  if (!response.ok) {
+    let detail = "";
+    try {
+      const errJson = await response.json();
+      detail = errJson.detail ? JSON.stringify(errJson.detail) : JSON.stringify(errJson);
+    } catch {
+      detail = await response.text().catch(() => "");
+    }
+    throw new ApiError(response.status, detail || `Request failed with status ${response.status}`);
+  }
+
+  if (response.status === 204) return undefined as unknown as T;
+  return (await response.json()) as T;
+}
+
+// ---------------------------------------------------------------------------
+// Authentication (backend/routers/auth.py)
+// ---------------------------------------------------------------------------
+
+export async function registerUser(
+  username: string,
+  password: string,
+  userType: "tourist" | "authority"
+): Promise<any> {
+  return apiRequest("/auth/register", {
+    method: "POST",
+    auth: false,
+    body: { username, password, user_type: userType },
+  });
+}
+
+export async function loginUser(username: string, password: string): Promise<any> {
+  return apiRequest("/auth/login", {
+    method: "POST",
+    auth: false,
+    body: { username, password },
+  });
+}
+
+export async function logoutUser(): Promise<void> {
+  try {
+    await apiRequest("/auth/logout", { method: "POST" });
+  } catch (err) {
+    console.warn("Logout request failed (clearing local session anyway):", err);
+  }
+}
+
+export async function getSession(): Promise<any> {
+  return apiRequest("/auth/session");
+}
+
+/**
+ * The existing Tourist Portal sign-up/sign-in UI never collects a password
+ * (only name/phone/email/OTP). The backend's register/login endpoints require
+ * username + password. To connect the two without adding a new field to the
+ * existing form, we derive stable, non-secret credentials from the tourist's
+ * phone number. This is a pragmatic integration bridge for this app, not a
+ * production-grade auth scheme.
+ */
+export function deriveTouristCredentials(phone: string): { username: string; password: string } {
+  const normalized = (phone || "").replace(/[^0-9]/g, "");
+  return {
+    username: `tourist-${normalized || "guest"}`,
+    password: `SurakshaSetu-${normalized || "guest"}-2026`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tourist profile (backend/routers/tourists.py)
+// ---------------------------------------------------------------------------
+
+export async function createTouristProfile(payload: {
+  full_name: string;
+  phone?: string;
+  email?: string;
+  emergency_contact?: string;
+  preferred_language?: string;
+}): Promise<any> {
+  return apiRequest("/tourists", { method: "POST", body: payload });
+}
+
+export async function getTouristProfile(touristId: string): Promise<any> {
+  return apiRequest(`/tourists/${touristId}`);
+}
+
+export async function updateTouristProfile(touristId: string, payload: Record<string, any>): Promise<any> {
+  return apiRequest(`/tourists/${touristId}`, { method: "PATCH", body: payload });
+}
+
+export async function getDigitalId(touristId: string): Promise<any> {
+  return apiRequest(`/tourists/${touristId}/digital-id`);
+}
+
+// ---------------------------------------------------------------------------
+// Incidents (backend/routers/incidents.py)
+// ---------------------------------------------------------------------------
+
+export async function listIncidents(statusFilter?: string): Promise<any[]> {
+  const qs = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : "";
+  return apiRequest(`/incidents${qs}`);
+}
+
+export async function getIncident(incidentId: string): Promise<any> {
+  return apiRequest(`/incidents/${incidentId}`);
+}
+
+export async function updateIncidentStatus(
+  incidentId: string,
+  payload: { status?: string; severity?: string; description?: string }
+): Promise<any> {
+  return apiRequest(`/incidents/${incidentId}`, { method: "PATCH", body: payload });
+}
+
+// ---------------------------------------------------------------------------
+// Locations (backend/routers/locations.py)
+// ---------------------------------------------------------------------------
+
+export async function listLocations(): Promise<any[]> {
+  return apiRequest("/locations");
+}
+
+export async function getLocation(locationId: string): Promise<any> {
+  return apiRequest(`/locations/${locationId}`);
+}
+
+// ---------------------------------------------------------------------------
+// Alerts (backend/routers/alerts.py)
+// ---------------------------------------------------------------------------
+
+export async function createAlert(payload: {
+  incident_id: string;
+  channel: "SMS" | "EMAIL" | "PUSH" | "APP";
+  recipient: string;
+}): Promise<any> {
+  return apiRequest("/alerts", { method: "POST", body: payload });
+}
+
+export async function listAlerts(incidentId?: string): Promise<any[]> {
+  const qs = incidentId ? `?incident_id=${encodeURIComponent(incidentId)}` : "";
+  return apiRequest(`/alerts${qs}`);
+}
+
+// ---------------------------------------------------------------------------
+// Authority (backend/routers/authority.py)
+// ---------------------------------------------------------------------------
+
+export async function authorityLoginRequest(username: string, password: string): Promise<any> {
+  return apiRequest("/authority/login", { method: "POST", auth: false, body: { username, password } });
+}
+
+export async function getAuthorityAlerts(): Promise<any[]> {
+  return apiRequest("/authority/alerts");
+}
+
+export async function getAuthorityIncidents(): Promise<any[]> {
+  return apiRequest("/authority/incidents");
+}
+
+export async function getAuthorityTourist(touristId: string): Promise<any> {
+  return apiRequest(`/authority/tourists/${touristId}`);
+}
+
+export async function getAuthorityIncidentLocation(incidentId: string): Promise<any> {
+  return apiRequest(`/authority/incidents/${incidentId}/location`);
+}
+
+/**
+ * Connects the Gateway's existing MFA form (Badge ID + Auth Code) to the real
+ * backend. The Auth Code field is already a masked "password" input in the
+ * UI, so Badge ID -> username and Auth Code -> password is a direct mapping,
+ * not an invented one.
+ *
+ * Since the backend starts with no seeded accounts (mock mode) and there is
+ * no separate "create authority account" UI, a login attempt for a
+ * not-yet-registered badge automatically registers it as an authority the
+ * first time, then logs in. This preserves the existing "demo credentials
+ * just work" UX while making the login a real, backend-verified session for
+ * every subsequent login.
+ */
+export async function authenticateAuthority(
+  badgeId: string,
+  otp: string
+): Promise<{ authority_id: string; username: string } | null> {
+  try {
+    const loginResp = await authorityLoginRequest(badgeId, otp);
+    storeSession({
+      access_token: loginResp.access_token,
+      user_type: loginResp.user_type,
+      authority_id: loginResp.authority_id,
+      username: loginResp.username,
+    });
+    return { authority_id: loginResp.authority_id, username: loginResp.username };
+  } catch (err: any) {
+    if (err instanceof ApiError && (err.status === 401 || err.status === 404)) {
+      // Not registered yet — register then retry login once.
+      try {
+        await registerUser(badgeId, otp, "authority");
+        const loginResp = await authorityLoginRequest(badgeId, otp);
+        storeSession({
+          access_token: loginResp.access_token,
+          user_type: loginResp.user_type,
+          authority_id: loginResp.authority_id,
+          username: loginResp.username,
+        });
+        return { authority_id: loginResp.authority_id, username: loginResp.username };
+      } catch (registerErr) {
+        console.error("Authority auto-registration failed:", registerErr);
+        return null;
+      }
+    }
+    console.error("Authority login failed:", err);
+    return null;
+  }
+}
+
+/**
+ * Connects the Tourist Portal's existing sign-up form to the real backend:
+ * registers an auth account (derived credentials, see deriveTouristCredentials),
+ * logs in to obtain a session token, creates the tourist profile with the
+ * actual form data, and returns the resulting profile + token so the caller
+ * can populate the existing UI without changing its shape.
+ */
+export async function registerAndLoginTourist(details: {
+  fullName: string;
+  phone: string;
+  email: string;
+  emergencyContact: string;
+}): Promise<{ token: string; tourist: any } | null> {
+  const { username, password } = deriveTouristCredentials(details.phone);
+  try {
+    await registerUser(username, password, "tourist");
+  } catch (err: any) {
+    // If the derived account already exists (e.g. re-registering the same
+    // phone), fall through to login instead of failing the whole flow.
+    if (!(err instanceof ApiError && err.status === 409)) {
+      console.error("Tourist registration failed:", err);
+      return null;
+    }
+  }
+
+  try {
+    const loginResp = await loginUser(username, password);
+    storeSession({
+      access_token: loginResp.access_token,
+      user_type: loginResp.user_type,
+      tourist_id: loginResp.tourist_id,
+      username: loginResp.username,
+    });
+
+    if (!loginResp.tourist_id) return null;
+
+    const updated = await updateTouristProfile(loginResp.tourist_id, {
+      full_name: details.fullName,
+      phone: details.phone,
+      email: details.email,
+      emergency_contact: details.emergencyContact,
+    });
+
+    return { token: loginResp.access_token, tourist: updated };
+  } catch (err) {
+    console.error("Tourist login/profile-update failed:", err);
+    return null;
+  }
+}
+
+/**
+ * Connects the Tourist Portal's existing sign-in form (Tourist ID + Phone) to
+ * the real backend by attempting a re-login with the same derived credentials
+ * used at sign-up time. There is no backend endpoint to look a tourist up by
+ * phone number alone, so this only succeeds for a phone that previously
+ * registered through this app in the current backend session; otherwise it
+ * returns null and the caller falls back to its existing local demo lookup.
+ */
+export async function loginTouristByPhone(phone: string): Promise<{ token: string; tourist: any } | null> {
+  const { username, password } = deriveTouristCredentials(phone);
+  try {
+    const loginResp = await loginUser(username, password);
+    storeSession({
+      access_token: loginResp.access_token,
+      user_type: loginResp.user_type,
+      tourist_id: loginResp.tourist_id,
+      username: loginResp.username,
+    });
+    if (!loginResp.tourist_id) return null;
+    const tourist = await getTouristProfile(loginResp.tourist_id);
+    return { token: loginResp.access_token, tourist };
+  } catch (err) {
+    console.warn("Backend sign-in by phone did not match a registered account; using local demo lookup.", err);
+    return null;
+  }
 }
 
 export async function submitSOSOnline(sosRecord: SOSRecord): Promise<any> {
