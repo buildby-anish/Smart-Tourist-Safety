@@ -1,7 +1,8 @@
 import hashlib
 import logging
 import secrets
-from datetime import datetime, timezone
+import random
+from datetime import datetime, timedelta, timezone
 import json
 import requests
 import jwt
@@ -25,6 +26,15 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # Temporary in-memory stores for authentication records and active sessions (fallback mode).
 _in_memory_auth_store: dict[UUID, dict] = {}
 _in_memory_session_store: dict[str, dict] = {}
+
+# --- DEV-ONLY OTP store/helpers (not wired into real verification yet) ---
+_otp_store: dict[str, dict] = {}
+
+def generate_otp() -> str:
+    return f"{random.randint(0, 999999):06d}"
+
+def hash_otp(otp: str, phone: str) -> str:
+    return hashlib.sha256(f"{otp}:{phone}".encode()).hexdigest()
 
 
 def _get_email_from_username(username: str) -> str:
@@ -172,6 +182,18 @@ def require_tourist(
             detail="Tourist access required",
         )
     return current_user
+
+
+@router.post("/send-otp")
+def send_otp(phone: str):
+    otp = generate_otp()
+    _otp_store[phone] = {
+        "otp_hash": hash_otp(otp, phone),
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
+        "attempts": 0,
+    }
+    logger.info(f"[DEV OTP] phone={phone} otp={otp}")
+    return {"message": "OTP sent"}
 
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
