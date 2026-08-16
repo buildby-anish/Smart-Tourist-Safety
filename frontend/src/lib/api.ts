@@ -370,35 +370,40 @@ export async function registerAndLoginTourist(details: {
   } catch (err: any) {
     // If the derived account already exists (e.g. re-registering the same
     // phone), fall through to login instead of failing the whole flow.
+    // Any other signup failure (weak password, Supabase misconfig, etc.) is
+    // a real error the caller needs to see, not a silent null that gets
+    // papered over with a generic "Registration failed" message.
     if (!(err instanceof ApiError && err.status === 409)) {
       console.error("Tourist registration failed:", err);
-      return null;
+      throw err;
     }
   }
 
-  try {
-    const loginResp = await loginUser(username, password);
-    storeSession({
-      access_token: loginResp.access_token,
-      user_type: loginResp.user_type,
-      tourist_id: loginResp.tourist_id,
-      username: loginResp.username,
-    });
+  // NOTE: this call can legitimately fail even right after a successful
+  // signup — most commonly because the Supabase project requires email
+  // confirmation and the email used here (tourist-<phone>@...) is synthetic
+  // and can never be confirmed by the user. The backend now returns a
+  // distinct 403 with a specific message for that case (see
+  // backend/routers/auth.py login()); let it propagate instead of
+  // swallowing it to null.
+  const loginResp = await loginUser(username, password);
+  storeSession({
+    access_token: loginResp.access_token,
+    user_type: loginResp.user_type,
+    tourist_id: loginResp.tourist_id,
+    username: loginResp.username,
+  });
 
-    if (!loginResp.tourist_id) return null;
+  if (!loginResp.tourist_id) return null;
 
-    const updated = await updateTouristProfile(loginResp.tourist_id, {
-      full_name: details.fullName,
-      phone: details.phone,
-      email: details.email,
-      emergency_contact: details.emergencyContact,
-    });
+  const updated = await updateTouristProfile(loginResp.tourist_id, {
+    full_name: details.fullName,
+    phone: details.phone,
+    email: details.email,
+    emergency_contact: details.emergencyContact,
+  });
 
-    return { token: loginResp.access_token, tourist: updated };
-  } catch (err) {
-    console.error("Tourist login/profile-update failed:", err);
-    return null;
-  }
+  return { token: loginResp.access_token, tourist: updated };
 }
 
 /**

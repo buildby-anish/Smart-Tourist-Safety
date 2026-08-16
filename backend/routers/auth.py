@@ -485,6 +485,32 @@ def login(payload: LoginRequest) -> LoginResponse:
     try:
         resp = requests.post(login_url, headers=headers, json=body, timeout=10)
         if resp.status_code != 200:
+            # Root cause of the "Registration failed" bug: every non-200
+            # Supabase response (wrong password, unconfirmed email, locked
+            # account, etc.) was previously collapsed into a generic
+            # "Invalid username or password" 401. registerAndLoginTourist()
+            # calls login() immediately after signup, using a synthetic
+            # per-phone email (tourist-<phone>@smarttouristsafety.com) that
+            # can never receive/click a real confirmation link. If the
+            # Supabase project has "Confirm email" enabled (the default),
+            # signup succeeds but this immediate login always fails with
+            # Supabase's "Email not confirmed" error — which was being
+            # silently relabeled as bad credentials, then swallowed again by
+            # the frontend into "Registration failed. Please check your
+            # details and try again." Surface the real reason instead.
+            try:
+                err_body = resp.json()
+            except Exception:
+                err_body = {}
+            err_code = (err_body.get("error_code") or err_body.get("error") or "").lower()
+            err_msg = err_body.get("msg") or err_body.get("error_description") or ""
+            logger.warning(f"Supabase login failed for {email_str}: status={resp.status_code} code={err_code} msg={err_msg}")
+
+            if "email_not_confirmed" in err_code or "not confirmed" in err_msg.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Account created but not yet confirmed. Email confirmation is required before you can sign in — please confirm your account and try again.",
+                )
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Invalid username or password",
