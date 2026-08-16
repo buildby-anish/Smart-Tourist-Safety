@@ -17,7 +17,11 @@ from schemas.auth import (
     LoginRequest,
     LoginResponse,
     RegisterRequest,
+    SendOtpRequest,
+    SendOtpResponse,
     SessionResponse,
+    VerifyOtpRequest,
+    VerifyOtpResponse,
 )
 
 logger = logging.getLogger("auth")
@@ -27,11 +31,17 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _in_memory_auth_store: dict[UUID, dict] = {}
 _in_memory_session_store: dict[str, dict] = {}
 
-# --- DEV-ONLY OTP store/helpers (not wired into real verification yet) ---
+# --- OTP store/helpers ---
+# In-memory only: DATABASE.md does not define an OTP table, and OTPs are
+# short-lived, non-critical data, so no schema change is needed here.
 _otp_store: dict[str, dict] = {}
+_OTP_TTL_MINUTES = 5
+_OTP_MAX_ATTEMPTS = 5
+
 
 def generate_otp() -> str:
     return f"{random.randint(0, 999999):06d}"
+
 
 def hash_otp(otp: str, phone: str) -> str:
     return hashlib.sha256(f"{otp}:{phone}".encode()).hexdigest()
@@ -184,16 +194,65 @@ def require_tourist(
     return current_user
 
 
-@router.post("/send-otp")
-def send_otp(phone: str):
+@router.post("/send-otp", response_model=SendOtpResponse)
+def send_otp(payload: SendOtpRequest) -> SendOtpResponse:
+    phone = payload.phone.strip()
+    if not phone:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Phone number is required",
+        )
+
     otp = generate_otp()
     _otp_store[phone] = {
         "otp_hash": hash_otp(otp, phone),
-        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=5),
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=_OTP_TTL_MINUTES),
         "attempts": 0,
     }
-    logger.info(f"[DEV OTP] phone={phone} otp={otp}")
-    return {"message": "OTP sent"}
+
+    if Config.OTP_DEBUG_LOG:
+        masked = phone[:-4].replace(phone[:-4], "*" * len(phone[:-4])) + phone[-4:] if len(phone) > 4 else phone
+        logger.info(f"[OTP DEBUG] OTP generated for {masked}: {otp}")
+
+    return SendOtpResponse(message="OTP sent")
+
+
+@router.post("/verify-otp", response_model=VerifyOtpResponse)
+def verify_otp(payload: VerifyOtpRequest) -> VerifyOtpResponse:
+    phone = payload.phone.strip()
+    otp = payload.otp.strip()
+
+    record = _otp_store.get(phone)
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No OTP was requested for this phone number. Please request a new OTP.",
+        )
+
+    if datetime.now(timezone.utc) > record["expires_at"]:
+        del _otp_store[phone]
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="OTP has expired. Please request a new OTP.",
+        )
+
+    if record["attempts"] >= _OTP_MAX_ATTEMPTS:
+        del _otp_store[phone]
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail="Too many incorrect attempts. Please request a new OTP.",
+        )
+
+    if not secrets.compare_digest(hash_otp(otp, phone), record["otp_hash"]):
+        record["attempts"] += 1
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect OTP. Please try again.",
+        )
+
+    # OTP is single-use: remove it once successfully verified.
+    del _otp_store[phone]
+    return VerifyOtpResponse(verified=True, message="OTP verified")
 
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)

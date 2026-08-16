@@ -4,6 +4,24 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict
 
 
+class SendOtpRequest(BaseModel):
+    phone: str
+
+
+class SendOtpResponse(BaseModel):
+    message: str
+
+
+class VerifyOtpRequest(BaseModel):
+    phone: str
+    otp: str
+
+
+class VerifyOtpResponse(BaseModel):
+    verified: bool
+    message: str
+
+
 class RegisterRequest(BaseModel):
     username: str
     password: str
