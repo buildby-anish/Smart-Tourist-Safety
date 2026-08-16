@@ -343,28 +343,73 @@ def register(payload: RegisterRequest) -> AuthResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Supabase is not configured on the backend.",
         )
-        
-    signup_url = f"{Config.SUPABASE_URL}/auth/v1/signup"
-    headers = {
-        "apikey": Config.SUPABASE_ANON_KEY,
-        "Content-Type": "application/json"
-    }
-    body = {
-        "email": email_str,
-        "password": payload.password
-    }
+
+    # App users are already verified out-of-band via phone OTP (see
+    # /auth/send-otp, /auth/verify-otp) before this endpoint is ever called.
+    # The email address used here is synthetic
+    # (tourist-<phone>@smarttouristsafety.com) — it isn't a real inbox, so
+    # Supabase's normal signup endpoint can never actually deliver/have its
+    # confirmation link clicked. That endpoint also queues a confirmation
+    # email on every call regardless, which both (a) permanently blocks
+    # login until a confirmation that can never happen, and (b) burns
+    # Supabase's project-wide email rate limit, eventually failing signup
+    # itself with "email rate limit exceeded".
+    #
+    # When a service-role key is configured, use the Admin API instead: it
+    # creates the account already confirmed and sends no email at all. This
+    # doesn't skip verification — it substitutes the (unreachable) email
+    # link for the OTP check the app already performed. Without a
+    # service-role key configured, fall back to the original public signup
+    # endpoint unchanged, so existing deployments keep working exactly as
+    # before until SUPABASE_SERVICE_ROLE_KEY is set.
+    use_admin_api = Config.has_service_role()
+    if use_admin_api:
+        signup_url = f"{Config.SUPABASE_URL}/auth/v1/admin/users"
+        headers = {
+            "apikey": Config.SUPABASE_SERVICE_ROLE_KEY,
+            "Authorization": f"Bearer {Config.SUPABASE_SERVICE_ROLE_KEY}",
+            "Content-Type": "application/json"
+        }
+        body = {
+            "email": email_str,
+            "password": payload.password,
+            "email_confirm": True,
+        }
+    else:
+        signup_url = f"{Config.SUPABASE_URL}/auth/v1/signup"
+        headers = {
+            "apikey": Config.SUPABASE_ANON_KEY,
+            "Content-Type": "application/json"
+        }
+        body = {
+            "email": email_str,
+            "password": payload.password
+        }
     
     try:
         resp = requests.post(signup_url, headers=headers, json=body, timeout=10)
-        if resp.status_code != 200:
-            err_detail = resp.json().get("msg", "Failed to sign up with Supabase Auth.")
+        if resp.status_code not in (200, 201):
+            try:
+                err_json = resp.json()
+            except Exception:
+                err_json = {}
+            err_detail = (
+                err_json.get("msg")
+                or err_json.get("message")
+                or err_json.get("error_description")
+                or "Failed to sign up with Supabase Auth."
+            )
+            logger.warning(f"Supabase {'admin ' if use_admin_api else ''}signup failed for {email_str}: status={resp.status_code} detail={err_detail}")
             raise HTTPException(
                 status_code=resp.status_code,
                 detail=err_detail
             )
-        
-        sb_user = resp.json().get("user", {})
-        auth_user_id = sb_user.get("id")
+
+        resp_json = resp.json()
+        # Admin API returns the user object directly; the public signup
+        # endpoint returns {"user": {...}, "session": ...}.
+        sb_user = resp_json.get("user") if "user" in resp_json else resp_json
+        auth_user_id = (sb_user or {}).get("id")
         if not auth_user_id:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

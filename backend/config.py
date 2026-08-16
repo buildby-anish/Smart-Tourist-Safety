@@ -8,6 +8,13 @@ class Config:
     DATABASE_URL = os.getenv("DATABASE_URL", "")
     SUPABASE_URL = os.getenv("SUPABASE_URL", "")
     SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", os.getenv("SUPABASE_PUBLISHABLE_KEY", ""))
+    # Server-only secret (never sent to the frontend). Used exclusively to
+    # create already-confirmed tourist/authority accounts via Supabase's
+    # Admin API, since app users are verified out-of-band via phone OTP
+    # against a synthetic, unreachable email address (see routers/auth.py
+    # register()). Falls back to "" (unset) so existing deployments keep
+    # working via the public signup endpoint until this is configured.
+    SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
     JWT_SECRET = os.getenv("JWT_SECRET", "")
     CORS_ALLOWED_ORIGINS = [
         o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
@@ -22,3 +29,7 @@ class Config:
     @classmethod
     def is_supabase_configured(cls) -> bool:
         return bool(cls.SUPABASE_URL and cls.SUPABASE_ANON_KEY)
+
+    @classmethod
+    def has_service_role(cls) -> bool:
+        return bool(cls.SUPABASE_URL and cls.SUPABASE_SERVICE_ROLE_KEY)
