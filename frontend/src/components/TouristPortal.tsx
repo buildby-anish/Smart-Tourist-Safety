@@ -49,7 +49,7 @@ import { ActualGoogleMap } from './ActualGoogleMap';
 import { CrowdHeatmap } from './CrowdHeatmap';
 import { getSOSLocation } from '../lib/location';
 import { queueSOSRecord } from '../lib/db';
-import { submitSOSOnline, syncQueuedSOS, registerAndLoginTourist, loginTouristByPhone, updateIncidentStatus, clearSession, logoutUser, getTouristId, ApiError, createItineraryEntry, deleteItineraryEntry } from '../lib/api';
+import { submitSOSOnline, syncQueuedSOS, registerAndLoginTourist, loginTouristByPhone, updateIncidentStatus, clearSession, logoutUser, getTouristId, ApiError, createItineraryEntry, deleteItineraryEntry, getApiBaseUrl, getAuthToken } from '../lib/api';
 
 
 interface TouristPortalProps {
@@ -357,16 +357,37 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
     setShowDigiLockerModal(false);
   };
 
+  // DEV-ONLY: triggers the backend's /auth/send-otp endpoint so a code is
+  // generated and logged server-side (visible in Railway logs). This does
+  // not send a real SMS and is not checked against what the user types in
+  // handleVerifyOtp() below — it exists purely so a real OTP value is
+  // available to read/bypass with during testing.
+  const triggerSendOtp = async (phoneNumber: string) => {
+    try {
+      await fetch(`${getApiBaseUrl()}/auth/send-otp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(getAuthToken() ? { Authorization: `Bearer ${getAuthToken()}` } : {})
+        },
+        body: JSON.stringify({ phone: phoneNumber })
+      });
+    } catch (err) {
+      console.warn('Failed to trigger send-otp:', err);
+    }
+  };
+
   // Submit Sign Up Form
-  const handleSignUpSubmit = (e: React.FormEvent) => {
+  const handleSignUpSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setOtpPendingAction('signup');
     setOtpError('');
+    await triggerSendOtp(phone);
     setShowOtpModal(true);
   };
 
   // Submit Sign In Form
-  const handleSignInSubmit = (e: React.FormEvent) => {
+  const handleSignInSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!signinTouristId.trim() || !signinPhone.trim()) {
       alert('Please provide both Tourist ID and Registered Phone Number.');
@@ -374,6 +395,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
     }
     setOtpPendingAction('signin');
     setOtpError('');
+    await triggerSendOtp(signinPhone);
     setShowOtpModal(true);
   };
 
