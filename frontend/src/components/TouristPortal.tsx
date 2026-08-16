@@ -313,7 +313,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
   const [routeDest, setRouteDest] = useState('Sissu / Lahaul Valley');
   const [selectedRouteIndex, setSelectedRouteIndex] = useState(0);
 
-  // SOS Countdown timer & Online Sync Event
+  // SOS Countdown timer
   useEffect(() => {
     let timer: any = null;
     if (countdown !== null && countdown > 0) {
@@ -326,7 +326,13 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
       setCountdown(null);
       setSirenPlaying(true);
     }
+    return () => {
+      if (timer) clearInterval(timer);
+    };
+  }, [countdown]);
 
+  // Online Sync Event
+  useEffect(() => {
     const handleOnline = () => {
       console.log('Network connected. Triggering auto-sync...');
       syncQueuedSOS();
@@ -335,12 +341,10 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
     if (navigator.onLine) {
       syncQueuedSOS();
     }
-
     return () => {
-      clearInterval(timer);
       window.removeEventListener('online', handleOnline);
     };
-  }, [countdown, currentAddress, onTriggerSos, authenticatedUser, lat, lng, activeGeoFenceZone.name]);
+  }, []);
 
   // DigiLocker Connect Simulation
   const handleConnectDigiLocker = () => {
@@ -1219,12 +1223,18 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
                     <div className="flex flex-col items-center">
                       <button
                         onClick={handleStartSosConfirmation}
-                        className="relative group w-44 h-44 sm:w-48 sm:h-48 rounded-full bg-gradient-to-br from-[#D32F2F] via-red-600 to-red-700 border-4 border-red-300 text-white font-black shadow-2xl shadow-red-500/40 hover:scale-105 active:scale-95 transition-all flex flex-col items-center justify-center gap-1 cursor-pointer"
+                        className="relative group w-44 h-44 sm:w-48 sm:h-48 rounded-full bg-gradient-to-br from-[#D32F2F] via-red-600 to-[#9E1B1B] border-4 border-red-200/90 text-white font-black shadow-[0_0_40px_rgba(211,47,47,0.4)] animate-pulse-glow hover:scale-105 active:scale-95 transition-all duration-300 flex flex-col items-center justify-center gap-1 cursor-pointer"
                       >
-                        <div className="absolute inset-0 rounded-full border-4 border-red-500/30 animate-ping pointer-events-none"></div>
-                        <ShieldAlert className="w-12 h-12 text-white group-hover:scale-110 transition-transform" />
-                        <span className="text-lg sm:text-xl font-black tracking-widest uppercase">EMERGENCY SOS</span>
-                        <span className="text-[9px] text-red-100 font-bold uppercase tracking-wider">TAP TO BROADCAST</span>
+                        <div className="absolute inset-0 rounded-full border-4 border-red-500/30 animate-ping [animation-duration:2.5s] pointer-events-none"></div>
+                        <div className="absolute inset-2 rounded-full border border-red-400/20 animate-pulse pointer-events-none"></div>
+                        
+                        <div className="relative z-10 flex flex-col items-center justify-center">
+                          <ShieldAlert className="w-12 h-12 text-white group-hover:scale-110 transition-transform duration-300 drop-shadow-[0_2px_6px_rgba(0,0,0,0.3)]" />
+                          <span className="text-lg sm:text-xl font-black tracking-widest uppercase drop-shadow-[0_2px_4px_rgba(0,0,0,0.4)]">EMERGENCY SOS</span>
+                          <span className="text-[9px] text-red-200 font-bold uppercase tracking-wider">TAP TO BROADCAST</span>
+                        </div>
+                        
+                        <div className="absolute inset-0 rounded-full bg-white/5 opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
                       </button>
 
                       <p className="mt-3 text-[11px] text-slate-500 font-medium max-w-xs text-center">
@@ -1372,7 +1382,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
                   <button
                     onClick={() => setActiveTab('itinerary')}
                     className={`flex-1 py-2 px-3 rounded-lg text-xs font-black transition flex items-center justify-center gap-1.5 ${
-                      activeTab === 'itinerary'
+                      activeTab === 'itinerary' || activeTab === 'overview'
                         ? 'bg-[#0B2447] text-white shadow-xs'
                         : 'text-slate-600 hover:bg-slate-200'
                     }`}
@@ -1391,6 +1401,18 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
                   >
                     <Map className="w-3.5 h-3.5 text-red-500" />
                     <span>Safety Heatmap</span>
+                  </button>
+
+                  <button
+                    onClick={() => setActiveTab('route_finder')}
+                    className={`flex-1 py-2 px-3 rounded-lg text-xs font-black transition flex items-center justify-center gap-1.5 ${
+                      activeTab === 'route_finder'
+                        ? 'bg-[#0B2447] text-white shadow-xs'
+                        : 'text-slate-600 hover:bg-slate-200'
+                    }`}
+                  >
+                    <Navigation className="w-3.5 h-3.5 text-blue-500" />
+                    <span>Route Finder</span>
                   </button>
                 </div>
 
@@ -2115,7 +2137,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
       {/* MODAL 1: DIGILOCKER E-KYC CONNECT MODAL */}
       {showDigiLockerModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white border-2 border-[#138808] rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative text-left">
+          <div className="bg-white border-2 border-[#138808] rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative text-left animate-scale-in">
             <button
               onClick={() => setShowDigiLockerModal(false)}
               className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 text-slate-500"
@@ -2194,7 +2216,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
       {/* MODAL 2: OTP MODAL */}
       {showOtpModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white border-2 border-[#0B2447] rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl relative text-left">
+          <div className="bg-white border-2 border-[#0B2447] rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl relative text-left animate-scale-in">
             <button
               onClick={() => setShowOtpModal(false)}
               className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 text-slate-500"
@@ -2250,7 +2272,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
       {/* MODAL 3: DIGITAL PASS MODAL */}
       {showDigitalPassModal && authenticatedUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in overflow-y-auto">
-          <div className="bg-white border-2 border-[#138808] rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative text-left my-8">
+          <div className="bg-white border-2 border-[#138808] rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative text-left my-8 animate-scale-in">
             <button
               onClick={() => setShowDigitalPassModal(false)}
               className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 text-slate-500"
@@ -2340,7 +2362,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
       {/* MODAL 4: MANDATORY CONSENT MODAL */}
       {showConsentModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/70 backdrop-blur-md animate-fade-in">
-          <div className="bg-white border-4 border-[#138808] rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative text-left my-6">
+          <div className="bg-white border-4 border-[#138808] rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative text-left my-6 animate-scale-in">
             <div className="w-14 h-14 rounded-2xl bg-emerald-50 border-2 border-[#138808] flex items-center justify-center text-[#138808] mb-5 shadow-md">
               <Navigation className="w-8 h-8 text-[#138808] animate-pulse" />
             </div>
@@ -2382,7 +2404,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
       {/* MODAL 5: TOURIST PROFILE MODAL */}
       {showProfileModal && authenticatedUser && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in overflow-y-auto">
-          <div className="bg-white border-2 border-[#0B2447] rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative text-left my-8 space-y-5">
+          <div className="bg-white border-2 border-[#0B2447] rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative text-left my-8 space-y-5 animate-scale-in">
             <button
               onClick={() => setShowProfileModal(false)}
               className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 text-slate-500 font-bold transition"

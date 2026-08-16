@@ -31,7 +31,7 @@ interface ModuleTouristTrackingProps {
   language: Language;
   tourists: TouristProfile[];
   onLogAudit: (
-    actionType: 'TOURIST_LOOKUP' | 'DISPATCH_UNIT' | 'BROADCAST_SENT' | 'TICKET_STATUS_CHANGE',
+    actionType: 'TOURIST_LOOKUP' | 'DISPATCH_UNIT' | 'BROADCAST_SENT' | 'TICKET_STATUS_CHANGE' | 'AUTHORITY_LOGIN',
     targetId: string,
     reason: string,
     details: string

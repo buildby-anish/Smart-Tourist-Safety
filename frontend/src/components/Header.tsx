@@ -131,7 +131,7 @@ export const Header: React.FC<HeaderProps> = ({
                   <button
                     key={item.id}
                     onClick={() => onSelectModule(item.id)}
-                    className={`flex items-center space-x-2.5 px-3.5 py-2 rounded-xl text-left transition-all flex-shrink-0 cursor-pointer ${
+                    className={`flex items-center space-x-2.5 px-3.5 py-2 rounded-xl text-left transition-all duration-200 flex-shrink-0 cursor-pointer hover:scale-[1.03] active:scale-[0.97] ${
                       isActive
                         ? 'bg-[#153462] border border-[#234F8C] shadow-md ring-1 ring-[#FF9933]/40'
                         : 'bg-transparent hover:bg-white/5 text-slate-300 hover:text-white border border-transparent'
@@ -268,7 +268,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {/* Theme Toggle */}
                 <button
                   onClick={onToggleDarkMode}
-                  className="p-1.5 rounded-lg bg-slate-200/80 border border-slate-300 text-slate-700 hover:bg-slate-300 transition-colors"
+                  className="p-1.5 rounded-lg bg-slate-200/80 border border-slate-300 text-slate-700 hover:bg-slate-300 transition-all duration-200 hover:scale-105 active:scale-95"
                   title="Toggle High-Contrast Theme"
                 >
                   {darkMode ? <Sun className="w-3.5 h-3.5 text-amber-500" /> : <Moon className="w-3.5 h-3.5 text-slate-700" />}
@@ -277,7 +277,7 @@ export const Header: React.FC<HeaderProps> = ({
                 {/* Logout / Switch Gateway */}
                 <button
                   onClick={onLogout}
-                  className="p-1.5 rounded-lg bg-red-100 hover:bg-red-200 border border-red-300 text-red-800 transition-colors"
+                  className="p-1.5 rounded-lg bg-red-100 hover:bg-red-200 border border-red-300 text-red-800 transition-all duration-200 hover:scale-105 active:scale-95"
                   title={t.logoutBtn}
                 >
                   <LogOut className="w-3.5 h-3.5" />

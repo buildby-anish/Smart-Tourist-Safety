@@ -82,7 +82,7 @@ export const Gateway: React.FC<GatewayProps> = ({
           {/* TOURIST CARD */}
           <div
             onClick={() => onSelectRole('tourist')}
-            className="group relative bg-white rounded-2xl p-6 sm:p-8 border-2 border-slate-200 hover:border-[#138808] transition-all duration-300 shadow-sm hover:shadow-xl cursor-pointer flex flex-col justify-between overflow-hidden"
+            className="group relative bg-white rounded-2xl p-6 sm:p-8 border-2 border-slate-200 hover:border-[#138808] hover:scale-[1.02] transition-all duration-300 shadow-sm hover:shadow-xl cursor-pointer flex flex-col justify-between overflow-hidden"
           >
             <div className="absolute top-0 right-0 w-32 h-32 bg-[#138808]/10 rounded-full blur-2xl group-hover:bg-[#138808]/20 transition-all"></div>
             
@@ -128,7 +128,7 @@ export const Gateway: React.FC<GatewayProps> = ({
           {/* AUTHORITY CARD */}
           <div
             onClick={() => setShowMfaModal(true)}
-            className="group relative bg-white rounded-2xl p-6 sm:p-8 border-2 border-slate-200 hover:border-[#0B2447] transition-all duration-300 shadow-sm hover:shadow-xl cursor-pointer flex flex-col justify-between overflow-hidden"
+            className="group relative bg-white rounded-2xl p-6 sm:p-8 border-2 border-slate-200 hover:border-[#0B2447] hover:scale-[1.02] transition-all duration-300 shadow-sm hover:shadow-xl cursor-pointer flex flex-col justify-between overflow-hidden"
           >
             <div className="absolute top-0 right-0 w-32 h-32 bg-[#0B2447]/10 rounded-full blur-2xl group-hover:bg-[#0B2447]/20 transition-all"></div>
             
@@ -191,7 +191,7 @@ export const Gateway: React.FC<GatewayProps> = ({
       {/* MFA VERIFICATION MODAL */}
       {showMfaModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white border-2 border-[#FF9933] rounded-2xl max-w-md w-full p-6 sm:p-8 shadow-2xl relative text-left">
+          <div className="bg-white border-2 border-[#FF9933] rounded-2xl max-w-md w-full p-6 sm:p-8 shadow-2xl relative text-left animate-scale-in">
             
             <div className="flex items-center space-x-3 mb-6">
               <div className="w-10 h-10 rounded-lg bg-amber-100 border border-[#FF9933] flex items-center justify-center text-[#0B2447]">
