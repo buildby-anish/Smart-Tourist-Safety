@@ -29,8 +29,8 @@ export const Gateway: React.FC<GatewayProps> = ({
 }) => {
   const t = i18n[language];
   const [showMfaModal, setShowMfaModal] = useState(false);
-  const [badgeId, setBadgeId] = useState('IPS-7742');
-  const [otp, setOtp] = useState('789012');
+  const [badgeId, setBadgeId] = useState('');
+  const [otp, setOtp] = useState('');
   const [mfaError, setMfaError] = useState('');
   const [mfaSubmitting, setMfaSubmitting] = useState(false);
 

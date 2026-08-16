@@ -70,10 +70,17 @@ def get_authority_incidents(
     # 2. Database Mode
     try:
         with get_authenticated_cursor(current_user.auth_user_id) as cur:
+            # New SOS-triggered incidents are created with authority_id = NULL
+            # (unassigned/unclaimed). RLS on this table only allows an
+            # authority to read incidents assigned to them, which would hide
+            # every unassigned incident from every authority dashboard.
+            # Explicitly widen the query to also include unassigned
+            # incidents so dispatchers can see and claim new incidents.
             cur.execute("""
                 SELECT incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id
-                FROM public.incidents;
-            """)
+                FROM public.incidents
+                WHERE authority_id IS NULL OR authority_id = %s;
+            """, (current_user.authority_id,))
             rows = cur.fetchall()
             return [
                 IncidentResponse(

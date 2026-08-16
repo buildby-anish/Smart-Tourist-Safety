@@ -206,3 +206,96 @@ def test_authority_endpoints(auth_headers_tourist, auth_headers_authority):
     tourist_resp = client.get(f"/api/v1/authority/tourists/{tourist_id}", headers=a_headers)
     assert tourist_resp.status_code == 200
     assert tourist_resp.json()["tourist_id"] == tourist_id
+
+
+def test_itinerary_flows(auth_headers_tourist):
+    headers = {"Authorization": auth_headers_tourist["Authorization"]}
+
+    create_payload = {
+        "destination_name": "Rohtang Pass Viewpoint",
+        "latitude": 32.3728,
+        "longitude": 77.2491,
+    }
+    create_resp = client.post("/api/v1/itinerary", json=create_payload, headers=headers)
+    assert create_resp.status_code == 201
+    itinerary_id = create_resp.json()["itinerary_id"]
+    assert create_resp.json()["tourist_id"] == auth_headers_tourist["tourist_id"]
+
+    list_resp = client.get("/api/v1/itinerary", headers=headers)
+    assert list_resp.status_code == 200
+    assert any(e["itinerary_id"] == itinerary_id for e in list_resp.json())
+
+    delete_resp = client.delete(f"/api/v1/itinerary/{itinerary_id}", headers=headers)
+    assert delete_resp.status_code == 204
+
+    list_resp_after = client.get("/api/v1/itinerary", headers=headers)
+    assert list_resp_after.status_code == 200
+    assert not any(e["itinerary_id"] == itinerary_id for e in list_resp_after.json())
+
+
+def test_incident_response_logging(auth_headers_tourist, auth_headers_authority):
+    t_headers = {"Authorization": auth_headers_tourist["Authorization"]}
+    a_headers = {"Authorization": auth_headers_authority["Authorization"]}
+    tourist_id = auth_headers_tourist["tourist_id"]
+
+    inc_payload = {
+        "tourist_id": tourist_id,
+        "incident_type": "MEDICAL",
+        "severity": "HIGH",
+        "status": "OPEN",
+        "description": "Tourist requires medical assistance",
+    }
+    inc_resp = client.post("/api/v1/incidents", json=inc_payload, headers=t_headers)
+    assert inc_resp.status_code == 201
+    incident_id = inc_resp.json()["incident_id"]
+
+    # A tourist may not log a dispatch response (authority-only action).
+    forbidden_resp = client.post(
+        f"/api/v1/incidents/{incident_id}/responses",
+        json={"responder_unit": "PCR-12", "action_taken": "Dispatched"},
+        headers=t_headers,
+    )
+    assert forbidden_resp.status_code == 403
+
+    response_resp = client.post(
+        f"/api/v1/incidents/{incident_id}/responses",
+        json={"responder_unit": "PCR-12", "action_taken": "Unit dispatched to scene"},
+        headers=a_headers,
+    )
+    assert response_resp.status_code == 201
+    assert response_resp.json()["incident_id"] == incident_id
+    assert response_resp.json()["authority_id"] == auth_headers_authority["authority_id"]
+
+    list_resp = client.get(f"/api/v1/incidents/{incident_id}/responses", headers=a_headers)
+    assert list_resp.status_code == 200
+    assert len(list_resp.json()) >= 1
+
+
+def test_audit_logs(auth_headers_tourist, auth_headers_authority):
+    a_headers = {"Authorization": auth_headers_authority["Authorization"]}
+    t_headers = {"Authorization": auth_headers_tourist["Authorization"]}
+
+    # Tourists may not write compliance audit logs.
+    forbidden_resp = client.post(
+        "/api/v1/audit-logs",
+        json={"action_type": "TOURIST_LOOKUP", "target_id": "TR-1"},
+        headers=t_headers,
+    )
+    assert forbidden_resp.status_code == 403
+
+    create_resp = client.post(
+        "/api/v1/audit-logs",
+        json={
+            "action_type": "TOURIST_LOOKUP",
+            "target_id": "TR-1",
+            "reason": "Routine check",
+            "details": "Looked up tourist profile during patrol",
+        },
+        headers=a_headers,
+    )
+    assert create_resp.status_code == 201
+    assert create_resp.json()["authority_id"] == auth_headers_authority["authority_id"]
+
+    list_resp = client.get("/api/v1/audit-logs", headers=a_headers)
+    assert list_resp.status_code == 200
+    assert any(l["target_id"] == "TR-1" for l in list_resp.json())

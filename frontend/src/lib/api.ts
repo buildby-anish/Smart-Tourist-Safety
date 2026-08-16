@@ -20,7 +20,7 @@ export function getAuthToken(): string {
 }
 
 export function getTouristId(): string {
-  return localStorage.getItem("sos_tourist_id") || "eee6684b-dee5-4471-bfd0-00b9a7ee9b66";
+  return localStorage.getItem("sos_tourist_id") || "";
 }
 
 export function getUserType(): string {
@@ -203,9 +203,52 @@ export async function getIncident(incidentId: string): Promise<any> {
 
 export async function updateIncidentStatus(
   incidentId: string,
-  payload: { status?: string; severity?: string; description?: string }
+  payload: { status?: string; severity?: string; description?: string; authority_id?: string }
 ): Promise<any> {
   return apiRequest(`/incidents/${incidentId}`, { method: "PATCH", body: payload });
+}
+
+export async function createIncidentResponse(
+  incidentId: string,
+  payload: { responder_unit?: string; action_taken?: string; resolved_at?: string; authority_id?: string }
+): Promise<any> {
+  return apiRequest(`/incidents/${incidentId}/responses`, { method: "POST", body: payload });
+}
+
+export async function listIncidentResponses(incidentId: string): Promise<any[]> {
+  return apiRequest(`/incidents/${incidentId}/responses`);
+}
+
+export async function createItineraryEntry(payload: {
+  location_id?: string;
+  destination_name?: string;
+  latitude?: number;
+  longitude?: number;
+  planned_arrival?: string;
+  planned_departure?: string;
+}): Promise<any> {
+  return apiRequest(`/itinerary`, { method: "POST", body: payload });
+}
+
+export async function listItineraryEntries(): Promise<any[]> {
+  return apiRequest(`/itinerary`);
+}
+
+export async function deleteItineraryEntry(itineraryId: string): Promise<void> {
+  await apiRequest(`/itinerary/${itineraryId}`, { method: "DELETE" });
+}
+
+export async function createAuditLog(payload: {
+  action_type: string;
+  target_id: string;
+  reason?: string;
+  details?: string;
+}): Promise<any> {
+  return apiRequest(`/audit-logs`, { method: "POST", body: payload });
+}
+
+export async function listAuditLogs(): Promise<any[]> {
+  return apiRequest(`/audit-logs`);
 }
 
 // ---------------------------------------------------------------------------
@@ -267,12 +310,9 @@ export async function getAuthorityIncidentLocation(incidentId: string): Promise<
  * UI, so Badge ID -> username and Auth Code -> password is a direct mapping,
  * not an invented one.
  *
- * Since the backend starts with no seeded accounts (mock mode) and there is
- * no separate "create authority account" UI, a login attempt for a
- * not-yet-registered badge automatically registers it as an authority the
- * first time, then logs in. This preserves the existing "demo credentials
- * just work" UX while making the login a real, backend-verified session for
- * every subsequent login.
+ * If the badge is not registered, or the credentials are otherwise invalid,
+ * login simply fails — there is no auto-registration fallback. Authority
+ * accounts must be provisioned separately.
  */
 export async function authenticateAuthority(
   badgeId: string,
@@ -288,23 +328,6 @@ export async function authenticateAuthority(
     });
     return { authority_id: loginResp.authority_id, username: loginResp.username };
   } catch (err: any) {
-    if (err instanceof ApiError && (err.status === 401 || err.status === 404)) {
-      // Not registered yet — register then retry login once.
-      try {
-        await registerUser(badgeId, otp, "authority");
-        const loginResp = await authorityLoginRequest(badgeId, otp);
-        storeSession({
-          access_token: loginResp.access_token,
-          user_type: loginResp.user_type,
-          authority_id: loginResp.authority_id,
-          username: loginResp.username,
-        });
-        return { authority_id: loginResp.authority_id, username: loginResp.username };
-      } catch (registerErr) {
-        console.error("Authority auto-registration failed:", registerErr);
-        return null;
-      }
-    }
     console.error("Authority login failed:", err);
     return null;
   }
@@ -413,7 +436,7 @@ export async function submitSOSOnline(sosRecord: SOSRecord): Promise<any> {
 
   if (!response.ok) {
     const errText = await response.text();
-    throw new Error(`Server returned status ${response.status}: ${errText}`);
+    throw new ApiError(response.status, errText || `Server returned status ${response.status}`);
   }
 
   return await response.json();

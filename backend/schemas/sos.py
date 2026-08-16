@@ -19,7 +19,7 @@ class SOSResponse(BaseModel):
 
     sos_id: UUID
     tourist_id: UUID
-    incident_id: UUID
+    incident_id: UUID | None = None
     location_id: UUID | None = None
     incident_type: str = "SOS"
     severity: str | None = None

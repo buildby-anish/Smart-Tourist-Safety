@@ -20,6 +20,7 @@ class IncidentUpdate(BaseModel):
     status: str | None = None
     severity: str | None = None
     description: str | None = None
+    authority_id: UUID | None = None
 
 
 class IncidentResponse(BaseModel):

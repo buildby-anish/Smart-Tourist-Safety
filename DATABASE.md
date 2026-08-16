@@ -1278,4 +1278,41 @@ sb_secret_...   # SERVER ONLY
 
 ---
 
+# 31. Addendum: audit_logs (Post-MVP Schema Change)
+
+Added by: production-readiness correction, Task 7.3 (compliance audit trail persistence).
+
+Migration: `database/migrations/001_add_audit_logs.sql`
+
+## 31.1 audit_logs
+
+Stores authority search/interception compliance log entries (previously an in-memory-only array in the frontend).
+
+| Column | Type | Constraints |
+|---|---|---|
+| `audit_id` | UUID | PK, default UUID |
+| `authority_id` | UUID | NOT NULL, FK -> authorities, CASCADE |
+| `action_type` | VARCHAR(50) | NOT NULL |
+| `target_id` | VARCHAR(255) | NOT NULL |
+| `reason` | TEXT | Optional |
+| `details` | TEXT | Optional |
+| `ip_address` | VARCHAR(64) | Optional |
+| `created_at` | TIMESTAMPTZ | NOT NULL, default NOW |
+
+Action types mirror the frontend's existing `AuditLog.actionType` union:
+
+```text
+TOURIST_LOOKUP
+DISPATCH_UNIT
+BROADCAST_SENT
+TICKET_STATUS_CHANGE
+AUTHORITY_LOGIN
+```
+
+RLS: authorities may insert their own entries; any authenticated authority may read the full log (shared compliance-review visibility). See the migration file for exact policies.
+
+Backend router: `backend/routers/audit_logs.py` — `POST /api/v1/audit-logs`, `GET /api/v1/audit-logs`.
+
+---
+
 ## End of Database Contract

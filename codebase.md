@@ -2,11 +2,11 @@
 
 This document serves as the canonical reference for the **Smart-Tourist-Safety** codebase, detailing the file structure, overall architecture, database relationships, API routing, configurations, and the exact current source code of all active files.
 
+Regenerated at the end of the production-readiness correction pass (see `SESSION_REPORT.md` for the full change log). Secrets are redacted as `<ENV_VALUE>`; none were found hardcoded in this codebase — all credentials are loaded via `os.getenv`/`Config` on the backend and `import.meta.env` / `localStorage` session tokens on the frontend.
+
 ---
 
 ## 1. Complete File Tree
-
-Below is the repository's directory structure, highlighting all relevant folders, source code, and configuration files.
 
 ```text
 Smart-Tourist-Safety/
@@ -14,69 +14,50 @@ Smart-Tourist-Safety/
 ├── DATABASE.md
 ├── codebase.md
 ├── databasetobackend.md
+├── frontendconnectbackend.md
 ├── README.md
+├── database/
+│   └── migrations/
+│       └── 001_add_audit_logs.sql   [NEW]
 ├── docs/
 │   └── .gitkeep
 ├── backend/
 │   ├── config.py
 │   ├── db.py
-│   ├── main.py
-│   ├── PROJECT_MEMORY.md
+│   ├── main.py                      [MODIFIED]
 │   ├── requirements.txt
-│   ├── app/ (Legacy Scaffolding)
-│   │   ├── api/
-│   │   │   └── routes/
-│   │   │       └── .gitkeep
-│   │   ├── config/
-│   │   │   └── .gitkeep
-│   │   ├── database/
-│   │   │   └── .gitkeep
-│   │   ├── models/
-│   │   │   └── .gitkeep
-│   │   ├── schemas/
-│   │   │   └── .gitkeep
-│   │   ├── services/
-│   │   │   └── .gitkeep
-│   │   └── utils/
-│   │       └── .gitkeep
 │   ├── routers/
 │   │   ├── alerts.py
+│   │   ├── audit_logs.py            [NEW]
 │   │   ├── auth.py
-│   │   ├── authority.py
-│   │   ├── incidents.py
+│   │   ├── authority.py             [MODIFIED]
+│   │   ├── incidents.py             [MODIFIED]
+│   │   ├── itinerary.py             [NEW]
 │   │   ├── locations.py
 │   │   ├── sos.py
 │   │   └── tourists.py
 │   ├── schemas/
 │   │   ├── alert.py
+│   │   ├── audit_log.py             [NEW]
 │   │   ├── auth.py
-│   │   ├── incident.py
+│   │   ├── incident.py              [MODIFIED]
+│   │   ├── itinerary.py             [NEW]
 │   │   ├── location.py
-│   │   ├── sos.py
+│   │   ├── response.py              [NEW]
+│   │   ├── sos.py                   [MODIFIED]
 │   │   └── tourist.py
 │   └── tests/
-│       ├── .gitkeep
-│       └── test_api.py
+│       └── test_api.py              [MODIFIED - 3 new tests]
 └── frontend/
-    ├── .gitkeep
-    ├── index.html
-    ├── metadata.json
-    ├── package.json
-    ├── README.md
-    ├── RUN_INSTRUCTIONS.md
-    ├── SOS_IMPLEMENTATION.md
-    ├── tsconfig.json
-    ├── vite.config.ts
-    ├── public/
     └── src/
-        ├── App.tsx
-        ├── index.css
+        ├── App.tsx                  [MODIFIED]
         ├── main.tsx
-        ├── types.ts
+        ├── types.ts                 [MODIFIED]
+        ├── index.css
         ├── components/
         │   ├── ActualGoogleMap.tsx
         │   ├── CrowdHeatmap.tsx
-        │   ├── Gateway.tsx
+        │   ├── Gateway.tsx           [MODIFIED]
         │   ├── Header.tsx
         │   ├── InterceptionModal.tsx
         │   ├── ModuleAIHub.tsx
@@ -85,245 +66,22 @@ Smart-Tourist-Safety/
         │   ├── ModuleSOSMap.tsx
         │   ├── ModuleTouristTracking.tsx
         │   ├── Sidebar.tsx
-        │   └── TouristPortal.tsx
+        │   └── TouristPortal.tsx     [MODIFIED]
         ├── data/
-        │   ├── i18n.ts
+        │   ├── i18n.ts               [MODIFIED]
         │   └── mockData.ts
         └── lib/
-            ├── api.ts
+            ├── api.ts                [MODIFIED]
             ├── db.ts
             └── location.ts
 ```
 
-*Note: The legacy folder `backend/app/` contains empty directory placeholders (`.gitkeep`). The active backend codebase lies directly under `backend/` with code organized in `routers/`, `schemas/`, and `tests/`.*
-
 ---
 
-## 2. Project Architecture
-
-The **Smart Tourist Safety** application is structured as a decoupled client-server architecture. The project consists of a high-performance FastAPI backend connected to Supabase/PostgreSQL database storage, and a modern, offline-first React/TypeScript frontend client built with Vite and styled with Tailwind CSS.
-
-```mermaid
-graph TD
-    subgraph Client [Frontend React/TypeScript Client]
-        App[App.tsx] --> G[Gateway.tsx]
-        App --> TP[TouristPortal.tsx]
-        
-        TP --> CH[CrowdHeatmap.tsx]
-        TP --> AGM[ActualGoogleMap.tsx]
-        
-        G --> H[Header.tsx]
-        G --> S[Sidebar.tsx]
-        
-        TP --> DB_LIB[lib/db.ts]
-        TP --> LOC_LIB[lib/location.ts]
-        TP --> API_LIB[lib/api.ts]
-        
-        DB_LIB --> IDB[(IndexedDB)]
-    end
-    subgraph Backend [FastAPI Backend]
-        M[main.py] --> R[routers/*]
-        R --> S_SCHEMAS[schemas/*]
-        R --> DB[db.py]
-        R --> C[config.py]
-    end
-    subgraph Database [Supabase & PostgreSQL]
-        DB --> PG[(PostgreSQL public schema)]
-        C --> SA[Supabase Auth API]
-    end
-    
-    API_LIB -->|HTTP POST /api/v1/sos| M
-    G -->|HTTP POST /api/v1/auth/login| M
-```
-
-### Overall Execution Modes
-1. **Mock Fallback Mode (Local Development)**: 
-   If `DATABASE_URL` is unset or fails to connect, the backend automatically transitions to a fully offline fallback mode. Operational data (profiles, active sessions, incidents, locations, SOS requests, and alerts) is maintained in thread-safe, in-memory Python dictionaries.
-2. **Production Database Mode (Supabase / PostgreSQL)**:
-   If `DATABASE_URL` is set, connection pooling is initialized. Authentication credentials, tokens, and sessions are delegated to Supabase Auth API, while application transactional tables are queried directly in PostgreSQL using connection-pooled cursors.
-
-### Row Level Security (RLS) Integration
-To enforce row-level safety rules defined in the PostgreSQL database, database queries requiring authentication utilize a context manager that obtains an authenticated cursor. Inside the SQL transaction:
-- The session configuration `request.jwt.claims` is set to contain `{"sub": auth_user_id, "role": "authenticated"}`.
-- The PostgreSQL transaction role is set to `authenticated` using `SET LOCAL ROLE authenticated;`.
-
----
-
-## 3. Database Schema
-
-The database uses a PostgreSQL instance managed under a Supabase workspace. Row Level Security is enabled on all transactional tables.
-
-### Tables & Columns
-- **`tourists`**: Tourist profile information.
-  - `tourist_id` (UUID, Primary Key)
-  - `auth_user_id` (UUID, UNIQUE, Foreign Key to Supabase Auth `auth.users.id` with `ON DELETE CASCADE`)
-  - `digital_id` (VARCHAR, UNIQUE)
-  - `full_name` (VARCHAR)
-  - `kyc_document_type` (VARCHAR, e.g., Passport, Aadhaar, Driving License, Voter ID, Other)
-  - `kyc_verified` (BOOLEAN)
-  - `phone` (VARCHAR)
-  - `email` (VARCHAR)
-  - `emergency_contact` (VARCHAR)
-  - `preferred_language` (VARCHAR)
-  - `created_at` (TIMESTAMPTZ)
-- **`authorities`**: Emergency or civil authority information.
-  - `authority_id` (UUID, Primary Key)
-  - `auth_user_id` (UUID, UNIQUE, Foreign Key to `auth.users.id` with `ON DELETE CASCADE`)
-  - `agency_name` (VARCHAR)
-  - `jurisdiction` (VARCHAR)
-  - `contact_phone` (VARCHAR)
-  - `contact_email` (VARCHAR)
-- **`authentication`**: Session and mapping metadata for users.
-  - `auth_id` (UUID, Primary Key)
-  - `auth_user_id` (UUID, UNIQUE, Foreign Key to `auth.users.id` with `ON DELETE CASCADE`)
-  - `tourist_id` (UUID, Foreign Key to `tourists.tourist_id`, optional)
-  - `authority_id` (UUID, Foreign Key to `authorities.authority_id`, optional)
-  - `username` (VARCHAR, UNIQUE)
-  - `mfa_enabled` (BOOLEAN)
-  - `last_login_at` (TIMESTAMPTZ)
-  - `created_at` (TIMESTAMPTZ)
-- **`locations`**: Geo-location coordinates and hazard indexes.
-  - `location_id` (UUID, Primary Key)
-  - `name` (VARCHAR)
-  - `latitude` (DECIMAL(10, 7), -90 to 90)
-  - `longitude` (DECIMAL(10, 7), -180 to 180)
-  - `risk_level` (VARCHAR, e.g., LOW, MEDIUM, HIGH, CRITICAL)
-  - `recorded_at` (TIMESTAMPTZ)
-- **`incidents`**: Tourist safety incidents.
-  - `incident_id` (UUID, Primary Key)
-  - `tourist_id` (UUID, Foreign Key to `tourists.tourist_id`)
-  - `location_id` (UUID, Foreign Key to `locations.location_id`)
-  - `incident_type` (VARCHAR, e.g., Accident, Medical, Theft, Missing Person, Harassment, Assault, Natural Disaster, Other)
-  - `severity` (VARCHAR, e.g., LOW, MEDIUM, HIGH, CRITICAL)
-  - `status` (VARCHAR, e.g., OPEN, ACKNOWLEDGED, RESOLVED)
-  - `description` (TEXT)
-  - `created_at` (TIMESTAMPTZ)
-  - `authority_id` (UUID, Foreign Key to `authorities.authority_id`, optional)
-- **`sos_requests`**: Emergency SOS triggers.
-  - `sos_id` (UUID, Primary Key)
-  - `tourist_id` (UUID, Foreign Key to `tourists.tourist_id`)
-  - `incident_id` (UUID, Foreign Key to `incidents.incident_id`, optional)
-  - `location_id` (UUID, Foreign Key to `locations.location_id`)
-  - `authority_id` (UUID, Foreign Key to `authorities.authority_id`, optional)
-  - `triggered_at` (TIMESTAMPTZ, default NOW)
-  - `trigger_source` (VARCHAR, e.g., APP, WEARABLE, MANUAL, AI, SYSTEM)
-  - `sos_status` (VARCHAR, e.g., ACTIVE, ACKNOWLEDGED, RESPONDING, RESOLVED, CANCELLED)
-- **`alerts`**: Broad-alert notifications linked to incidents.
-  - `alert_id` (UUID, Primary Key)
-  - `incident_id` (UUID, Foreign Key to `incidents.incident_id`)
-  - `authority_id` (UUID, Foreign Key to `authorities.authority_id`, optional)
-  - `channel` (VARCHAR, e.g., SMS, PUSH, EMAIL, APP)
-  - `recipient` (VARCHAR)
-  - `sent_at` (TIMESTAMPTZ)
-
-*Note: `DATABASE.md` also documents two tables with no corresponding backend implementation yet: `itinerary_entries` (a tourist's planned destinations) and `responses` (actions taken by authorities on an incident). No routers, schemas, or endpoints exist for these. See the Known Gaps section below.*
-
----
-
-## 4. API & Backend Documentation
-
-All endpoints are hosted under the prefix `/api/v1`.
-
-### Authentication Endpoints (`/auth`)
-- **`POST /auth/register`**: Registers a new user (tourist or authority). Checks Supabase config; inserts linked profiles (`tourists` or `authorities`) and authentication metadata.
-- **`POST /auth/login`**: Authenticates credentials, returning an access token (JWT for Supabase Auth, UUID hex for Mock mode).
-- **`POST /auth/logout`**: Stateless logout for Supabase Auth, session removal for Mock mode.
-- **`GET /auth/session`**: Validates the access token in headers and returns active session parameters.
-
-### Tourist Profile Endpoints (`/tourists`)
-- **`POST /tourists`**: Creates a tourist profile.
-- **`GET /tourists/{tourist_id}`**: Retrieves a specific tourist profile. Enforces RLS permissions.
-- **`PATCH /tourists/{tourist_id}`**: Updates profile parameters (e.g., name, language, emergency contacts).
-- **`GET /tourists/{tourist_id}/digital-id`**: Fetches the tourist's verified digital safety card.
-
-### Location Tracker Endpoints (`/locations`)
-- **`GET /locations`**: Lists geographical locations and risk levels.
-- **`GET /locations/{location_id}`**: Retrieves information for a specific location.
-
-### Incident Report Endpoints (`/incidents`)
-- **`POST /incidents`**: Files a new incident. Automatically registers a location placeholder if not pre-existing.
-- **`GET /incidents`**: Lists incidents. Enforces RLS (tourists only see their own incidents; authorities see all).
-- **`GET /incidents/{incident_id}`**: Retrieves a specific incident.
-- **`PATCH /incidents/{incident_id}`**: Updates incident properties (e.g., status, severity, description).
-
-### Emergency SOS Endpoints (`/sos`)
-- **`POST /sos`**: Activates an emergency SOS request. Creates a location, links an incident of type `'SOS'`, and registers an active SOS request atomically.
-
-### Broadcast Alert Endpoints (`/alerts`)
-- **`POST /alerts`**: Dispatches alert messages.
-- **`GET /alerts`**: Retrieves broadcast alert histories.
-
-### Authority Management Endpoints (`/authority`)
-- **`POST /authority/login`**: Authenticates authority accounts.
-- **`GET /authority/alerts`**: Lists alerts (accessible only to authorities).
-- **`GET /authority/incidents`**: Lists incidents (accessible only to authorities).
-- **`GET /authority/tourists/{tourist_id}`**: Retrieves tourist details (accessible only to authorities).
-- **`GET /authority/incidents/{incident_id}/location`**: Fetches location metadata assigned to an incident (accessible only to authorities).
-
----
-
-## 5. File-by-File Documentation
-
-### 5.1 Root Configuration
-- **`backend/config.py`**: Loads environment settings (Supabase credentials, JWT secrets, database links) from `.env` or system environment variables.
-- **`backend/db.py`**: Manages connection pooling using `ThreadedConnectionPool`. Houses RLS authenticated transaction wrappers.
-- **`backend/main.py`**: The main application entry point initializing the FastAPI routes.
-- **`backend/requirements.txt`**: Declares package versions and development dependencies.
-
-### 5.2 Schemas (`backend/schemas/`)
-- **`auth.py`**: Pydantic models for register/login requests, authentication responses, and session payloads.
-- **`tourist.py`**: Tourist profile validation models.
-- **`location.py`**: Location coordinates, names, and risk indicators.
-- **`incident.py`**: Incident updates and responses.
-- **`sos.py`**: SOS emergency input parameters and response shapes.
-- **`alert.py`**: Broad-channel alerts.
-
-### 5.3 Routers (`backend/routers/`)
-- **`auth.py`**: Handles OAuth/Supabase identity mappings and token extractions.
-- **`tourists.py`**: Manages RLS-filtered queries to tourist profiles.
-- **`locations.py`**: Manages geo-location registers.
-- **`incidents.py`**: File and track incident logs.
-- **`sos.py`**: High-priority SOS alarm logic.
-- **`alerts.py`**: Alert broadcasting functions.
-- **`authority.py`**: Administrative authority dashboards and role checks.
-
-### 5.4 Frontend Root Configuration
-- **`frontend/package.json`**: Configures client package metadata, runtime script entry points, and dependencies including React, Vite, Lucide icons, IndexedDB utilities, Google Maps react providers, and Tailwind CSS.
-- **`frontend/tsconfig.json`**: Standard compiler options directing TypeScript resolution, path aliases, target features, and JSX configurations.
-- **`frontend/vite.config.ts`**: Configures Vite dev and production bundling pipelines, registers React and Tailwind integrations, resolves path aliases, and binds environmental variables like Google Maps API keys.
-- **`frontend/index.html`**: The index landing page mounting the core React application element.
-
-### 5.5 Frontend Core & State Libraries (`frontend/src/` & `frontend/src/lib/`)
-- **`frontend/src/main.tsx`**: Bootstraps the application, mounting the root App component to the DOM.
-- **`frontend/src/index.css`**: Defines Tailwind/Vite CSS layers, utility styles, and typography mappings.
-- **`frontend/src/types.ts`**: Shared TypeScript contracts defining shapes for `TouristProfile`, `SOSIncident`, `PatrollingUnit`, `AnomalyCluster`, `BroadcastAlert`, `GeoFenceZone`, and operational states.
-- **`frontend/src/lib/api.ts`**: Manages online HTTP dispatch handlers to post SOS records (`/api/v1/sos`) and background synchronization tasks for offline queues.
-- **`frontend/src/lib/db.ts`**: Handles client-side persistent storage using browser IndexedDB (`smart_tourist_safety_sos`), establishing caching tables for location history and offline SOS alarms.
-- **`frontend/src/lib/location.ts`**: Acquires user geolocation details via standard browser APIs (`navigator.geolocation`), falling back to IndexedDB local caches in case of network outages.
-
-### 5.6 Data Modules (`frontend/src/data/`)
-- **`frontend/src/data/i18n.ts`**: Localized dictionary string maps supporting bilingual switching between English and Hindi.
-- **`frontend/src/data/mockData.ts`**: Offline mock profiles, active incidents, hospital beds, and system logs.
-
-### 5.7 Frontend UI Components (`frontend/src/components/`)
-- **`frontend/src/components/ActualGoogleMap.tsx`**: Renders full vector maps via the official Google Maps library if a platform key is configured, or implements a robust fallback iframe view with interactive geofence alerts.
-- **`frontend/src/components/CrowdHeatmap.tsx`**: Renders crowd density lists, capacity levels, and peaks, recommending alternative safe spots with one-click route adjustments.
-- **`frontend/src/components/Gateway.tsx`**: Handles role verification and locks authority portals behind secure multi-factor authentication (MFA).
-- **`frontend/src/components/Header.tsx`**: Responsive header bar showing navigation tabs, officer details, language selectors (English/Hindi), theme toggles, and live SOS alert badges.
-- **`frontend/src/components/InterceptionModal.tsx`**: Mandatory legal compliance form demanding officer verification before displaying a tourist's detailed PII data.
-- **`frontend/src/components/ModuleAIHub.tsx`**: AI predictive anomaly detector showing threat indices, active risk clusters, and model logging feeds.
-- **`frontend/src/components/ModuleAnalyticsAudit.tsx`**: System performance charts, inflow metrics, and printable CSV history logs.
-- **`frontend/src/components/ModuleBroadcast.tsx`**: Command tool sending localized alerts to target circles, estimating live recipients.
-- **`frontend/src/components/ModuleSOSMap.tsx`**: GIS incident command map displaying emergency markers, patrolling units, hospital beds, and a Kanban ticketing board.
-- **`frontend/src/components/ModuleTouristTracking.tsx`**: Search tool loading tourist data, check-ins, history, and current locations under audit protocol.
-- **`frontend/src/components/Sidebar.tsx`**: Desktop left navigation sidebar with system status gauges.
-- **`frontend/src/components/TouristPortal.tsx`**: Comprehensive mobile-first public tourist experience containing e-KYC onboarding, digital safety passes, offline-first SOS beacon countdowns, safety hazard advisors, and a chatbot companion.
-
----
-
-## 6. Complete Source Code
+## 2. Source Files
 
 ### `backend/config.py`
+
 ```python
 import os
 from dotenv import load_dotenv
@@ -346,6 +104,7 @@ class Config:
 ```
 
 ### `backend/db.py`
+
 ```python
 import json
 import logging
@@ -430,18 +189,31 @@ def get_authenticated_cursor(auth_user_id, commit: bool = False):
 ```
 
 ### `backend/main.py`
+
 ```python
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import Config
-from routers import alerts, auth, authority, incidents, locations, sos, tourists
+from routers import alerts, audit_logs, auth, authority, incidents, itinerary, locations, sos, tourists
 
 app = FastAPI(title="Smart Tourist Safety API")
 
+# Starlette's CORSMiddleware raises a ValueError at startup if
+# allow_credentials=True is combined with a wildcard ("*") origin, and an
+# empty allow_origins list is equally unusable for a credentialed API. If
+# CORS_ALLOWED_ORIGINS is unset/empty or contains "*", fall back to explicit
+# localhost defaults so local development keeps working out-of-the-box
+# without crashing the server on boot.
+_configured_origins = Config.CORS_ALLOWED_ORIGINS
+if not _configured_origins or "*" in _configured_origins:
+    _cors_origins = ["http://localhost:3000", "http://localhost:5173"]
+else:
+    _cors_origins = _configured_origins
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=Config.CORS_ALLOWED_ORIGINS,
+    allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -454,22 +226,243 @@ app.include_router(sos.router, prefix="/api/v1")
 app.include_router(alerts.router, prefix="/api/v1")
 app.include_router(authority.router, prefix="/api/v1")
 app.include_router(locations.router, prefix="/api/v1")
+app.include_router(itinerary.router, prefix="/api/v1")
+app.include_router(audit_logs.router, prefix="/api/v1")
 ```
 
-### `backend/requirements.txt`
-```text
-fastapi
-uvicorn[standard]
-psycopg2-binary
-python-dotenv
-pyjwt
-requests
-cryptography
-pytest
-httpx
+### `backend/routers/alerts.py`
+
+```python
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from db import is_db_active, get_db_cursor, get_authenticated_cursor
+from routers.auth import get_current_user
+from schemas.auth import SessionResponse
+from schemas.alert import AlertCreate, AlertResponse
+
+router = APIRouter(prefix="/alerts", tags=["alerts"])
+
+# Temporary in-memory storage for local API development only (fallback).
+_in_memory_alert_store: dict[UUID, AlertResponse] = {}
+
+
+@router.post("", response_model=AlertResponse, status_code=status.HTTP_201_CREATED)
+def create_alert(
+    payload: AlertCreate,
+    current_user: SessionResponse = Depends(get_current_user)
+) -> AlertResponse:
+    # 1. Fallback Mode
+    if not is_db_active():
+        from routers.incidents import _get_incident_or_404
+        _get_incident_or_404(payload.incident_id)
+
+        alert = AlertResponse(
+            alert_id=uuid4(),
+            incident_id=payload.incident_id,
+            channel=payload.channel,
+            recipient=payload.recipient,
+            sent_at=payload.sent_at or datetime.now(timezone.utc),
+        )
+        _in_memory_alert_store[alert.alert_id] = alert
+        return alert
+
+    # 2. Database Mode
+    now = datetime.now(timezone.utc)
+    alert_id = uuid4()
+    sent_at = payload.sent_at or now
+    
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
+            # Verify incident exists
+            cur.execute("SELECT incident_id FROM public.incidents WHERE incident_id = %s;", (payload.incident_id,))
+            if not cur.fetchone():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Incident not found",
+                )
+                
+            cur.execute("""
+                INSERT INTO public.alerts (alert_id, incident_id, channel, recipient, sent_at)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING alert_id, incident_id, channel, recipient, sent_at;
+            """, (alert_id, payload.incident_id, payload.channel, payload.recipient, sent_at))
+            
+            row = cur.fetchone()
+            return AlertResponse(
+                alert_id=row[0],
+                incident_id=row[1],
+                channel=row[2],
+                recipient=row[3],
+                sent_at=row[4]
+            )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create alert: {str(e)}"
+        )
+
+
+@router.get("", response_model=list[AlertResponse])
+def list_alerts(
+    incident_id: UUID | None = None,
+    current_user: SessionResponse = Depends(get_current_user)
+) -> list[AlertResponse]:
+    # 1. Fallback Mode
+    if not is_db_active():
+        alerts = list(_in_memory_alert_store.values())
+        if incident_id is not None:
+            alerts = [a for a in alerts if a.incident_id == incident_id]
+        return alerts
+
+    # 2. Database Mode
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id) as cur:
+            if incident_id is not None:
+                cur.execute("""
+                    SELECT alert_id, incident_id, channel, recipient, sent_at
+                    FROM public.alerts
+                    WHERE incident_id = %s;
+                """, (incident_id,))
+            else:
+                cur.execute("""
+                    SELECT alert_id, incident_id, channel, recipient, sent_at
+                    FROM public.alerts;
+                """)
+                
+            rows = cur.fetchall()
+            return [
+                AlertResponse(
+                    alert_id=row[0],
+                    incident_id=row[1],
+                    channel=row[2],
+                    recipient=row[3],
+                    sent_at=row[4]
+                )
+                for row in rows
+            ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve alerts: {str(e)}"
+        )
+```
+
+### `backend/routers/audit_logs.py`
+
+```python
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+
+from db import is_db_active, get_authenticated_cursor
+from routers.auth import require_authority
+from schemas.auth import SessionResponse
+from schemas.audit_log import AuditLogCreate, AuditLogRecord
+
+router = APIRouter(prefix="/audit-logs", tags=["audit-logs"])
+
+# Temporary in-memory storage for local API development only (fallback).
+_in_memory_audit_log_store: dict[UUID, AuditLogRecord] = {}
+
+
+@router.post("", response_model=AuditLogRecord, status_code=status.HTTP_201_CREATED)
+def create_audit_log(
+    payload: AuditLogCreate,
+    request: Request,
+    current_user: SessionResponse = Depends(require_authority)
+) -> AuditLogRecord:
+    now = datetime.now(timezone.utc)
+    audit_id = uuid4()
+    ip_address = payload.ip_address or (request.client.host if request.client else None)
+
+    # 1. Fallback Mode
+    if not is_db_active():
+        record = AuditLogRecord(
+            audit_id=audit_id,
+            authority_id=current_user.authority_id,
+            action_type=payload.action_type,
+            target_id=payload.target_id,
+            reason=payload.reason,
+            details=payload.details,
+            ip_address=ip_address,
+            created_at=now,
+        )
+        _in_memory_audit_log_store[audit_id] = record
+        return record
+
+    # 2. Database Mode
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
+            cur.execute("""
+                INSERT INTO public.audit_logs (audit_id, authority_id, action_type, target_id, reason, details, ip_address, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING audit_id, authority_id, action_type, target_id, reason, details, ip_address, created_at;
+            """, (
+                audit_id, current_user.authority_id, payload.action_type, payload.target_id,
+                payload.reason, payload.details, ip_address, now
+            ))
+            row = cur.fetchone()
+            return AuditLogRecord(
+                audit_id=row[0],
+                authority_id=row[1],
+                action_type=row[2],
+                target_id=row[3],
+                reason=row[4],
+                details=row[5],
+                ip_address=row[6],
+                created_at=row[7],
+            )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to persist audit log: {str(e)}"
+        )
+
+
+@router.get("", response_model=list[AuditLogRecord])
+def list_audit_logs(
+    current_user: SessionResponse = Depends(require_authority)
+) -> list[AuditLogRecord]:
+    # 1. Fallback Mode
+    if not is_db_active():
+        return sorted(_in_memory_audit_log_store.values(), key=lambda r: r.created_at, reverse=True)
+
+    # 2. Database Mode
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id) as cur:
+            cur.execute("""
+                SELECT audit_id, authority_id, action_type, target_id, reason, details, ip_address, created_at
+                FROM public.audit_logs
+                ORDER BY created_at DESC;
+            """)
+            rows = cur.fetchall()
+            return [
+                AuditLogRecord(
+                    audit_id=row[0],
+                    authority_id=row[1],
+                    action_type=row[2],
+                    target_id=row[3],
+                    reason=row[4],
+                    details=row[5],
+                    ip_address=row[6],
+                    created_at=row[7],
+                )
+                for row in rows
+            ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve audit logs: {str(e)}"
+        )
 ```
 
 ### `backend/routers/auth.py`
+
 ```python
 import hashlib
 import logging
@@ -964,7 +957,1066 @@ def get_session(current_user: SessionResponse = Depends(get_current_user)) -> Se
     return current_user
 ```
 
+### `backend/routers/authority.py`
+
+```python
+from uuid import UUID
+from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from db import is_db_active, get_db_cursor, get_authenticated_cursor
+from routers.auth import login as auth_login, require_authority
+from schemas.auth import LoginRequest, LoginResponse, SessionResponse
+from schemas.alert import AlertResponse
+from schemas.incident import IncidentResponse
+from schemas.location import LocationResponse
+from schemas.tourist import TouristResponse
+
+router = APIRouter(prefix="/authority", tags=["authority"])
+
+
+@router.post("/login", response_model=LoginResponse)
+def authority_login(payload: LoginRequest) -> LoginResponse:
+    login_resp = auth_login(payload)
+    if login_resp.user_type != "authority":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Account is not an authority account",
+        )
+    return login_resp
+
+
+@router.get("/alerts", response_model=list[AlertResponse])
+def get_authority_alerts(
+    current_user: SessionResponse = Depends(require_authority)
+) -> list[AlertResponse]:
+    # 1. Fallback Mode
+    if not is_db_active():
+        from routers.alerts import _in_memory_alert_store
+        return list(_in_memory_alert_store.values())
+
+    # 2. Database Mode
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id) as cur:
+            cur.execute("""
+                SELECT alert_id, incident_id, channel, recipient, sent_at
+                FROM public.alerts;
+            """)
+            rows = cur.fetchall()
+            return [
+                AlertResponse(
+                    alert_id=row[0],
+                    incident_id=row[1],
+                    channel=row[2],
+                    recipient=row[3],
+                    sent_at=row[4]
+                )
+                for row in rows
+            ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve authority alerts: {str(e)}"
+        )
+
+
+@router.get("/incidents", response_model=list[IncidentResponse])
+def get_authority_incidents(
+    current_user: SessionResponse = Depends(require_authority)
+) -> list[IncidentResponse]:
+    # 1. Fallback Mode
+    if not is_db_active():
+        from routers.incidents import _in_memory_incident_store
+        return list(_in_memory_incident_store.values())
+
+    # 2. Database Mode
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id) as cur:
+            # New SOS-triggered incidents are created with authority_id = NULL
+            # (unassigned/unclaimed). RLS on this table only allows an
+            # authority to read incidents assigned to them, which would hide
+            # every unassigned incident from every authority dashboard.
+            # Explicitly widen the query to also include unassigned
+            # incidents so dispatchers can see and claim new incidents.
+            cur.execute("""
+                SELECT incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id
+                FROM public.incidents
+                WHERE authority_id IS NULL OR authority_id = %s;
+            """, (current_user.authority_id,))
+            rows = cur.fetchall()
+            return [
+                IncidentResponse(
+                    incident_id=row[0],
+                    tourist_id=row[1],
+                    location_id=row[2],
+                    incident_type=row[3],
+                    severity=row[4],
+                    status=row[5],
+                    description=row[6],
+                    created_at=row[7],
+                    authority_id=row[8]
+                )
+                for row in rows
+            ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve authority incidents: {str(e)}"
+        )
+
+
+@router.get("/tourists/{tourist_id}", response_model=TouristResponse)
+def get_authority_tourist_details(
+    tourist_id: UUID,
+    current_user: SessionResponse = Depends(require_authority)
+) -> TouristResponse:
+    # 1. Fallback Mode
+    if not is_db_active():
+        from routers.tourists import _get_tourist_or_404
+        return _get_tourist_or_404(tourist_id)
+
+    # 2. Database Mode
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id) as cur:
+            cur.execute("""
+                SELECT tourist_id, digital_id, full_name, kyc_document_type, kyc_verified, phone, email, emergency_contact, preferred_language, created_at
+                FROM public.tourists
+                WHERE tourist_id = %s;
+            """, (tourist_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Tourist profile not found",
+                )
+            return TouristResponse(
+                tourist_id=row[0],
+                digital_id=row[1],
+                full_name=row[2],
+                kyc_document_type=row[3],
+                kyc_verified=row[4],
+                phone=row[5],
+                email=row[6],
+                emergency_contact=row[7],
+                preferred_language=row[8],
+                created_at=row[9]
+            )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve tourist profile: {str(e)}"
+        )
+
+
+@router.get("/incidents/{incident_id}/location", response_model=LocationResponse)
+def get_authority_incident_location(
+    incident_id: UUID,
+    current_user: SessionResponse = Depends(require_authority)
+) -> LocationResponse:
+    # 1. Fallback Mode
+    if not is_db_active():
+        from routers.incidents import _get_incident_or_404
+        from routers.locations import _in_memory_location_store
+        
+        incident = _get_incident_or_404(incident_id)
+        if incident.location_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Incident has no location assigned",
+            )
+        location = _in_memory_location_store.get(incident.location_id)
+        if location is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Location not found",
+            )
+        return location
+
+    # 2. Database Mode
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id) as cur:
+            cur.execute("SELECT location_id FROM public.incidents WHERE incident_id = %s;", (incident_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Incident not found",
+                )
+            loc_id = row[0]
+            if not loc_id:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Incident has no location assigned",
+                )
+                
+            cur.execute("""
+                SELECT location_id, name, latitude, longitude, risk_level, recorded_at
+                FROM public.locations
+                WHERE location_id = %s;
+            """, (loc_id,))
+            loc_row = cur.fetchone()
+            if not loc_row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Location not found",
+                )
+            return LocationResponse(
+                location_id=loc_row[0],
+                name=loc_row[1],
+                latitude=float(loc_row[2]) if loc_row[2] is not None else None,
+                longitude=float(loc_row[3]) if loc_row[3] is not None else None,
+                risk_level=loc_row[4],
+                recorded_at=loc_row[5]
+            )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve incident location: {str(e)}"
+        )
+```
+
+### `backend/routers/incidents.py`
+
+```python
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+
+from db import is_db_active, get_db_cursor, get_authenticated_cursor
+from routers.auth import get_current_user, require_authority
+from schemas.auth import SessionResponse
+from schemas.incident import IncidentCreate, IncidentResponse, IncidentUpdate
+from schemas.location import LocationResponse
+from schemas.response import ResponseCreate, ResponseRecord
+
+router = APIRouter(prefix="/incidents", tags=["incidents"])
+
+# Temporary in-memory storage for local API development only (fallback).
+_in_memory_incident_store: dict[UUID, IncidentResponse] = {}
+_in_memory_response_store: dict[UUID, ResponseRecord] = {}
+
+
+def _get_incident_or_404(incident_id: UUID, current_user: SessionResponse | None = None) -> IncidentResponse:
+    # 1. Fallback Mode
+    if not is_db_active():
+        incident = _in_memory_incident_store.get(incident_id)
+        if incident is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Incident not found",
+            )
+        return incident
+
+    # 2. Database Mode
+    try:
+        if current_user:
+            cursor_ctx = get_authenticated_cursor(current_user.auth_user_id)
+        else:
+            cursor_ctx = get_db_cursor()
+            
+        with cursor_ctx as cur:
+            cur.execute("""
+                SELECT incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id
+                FROM public.incidents
+                WHERE incident_id = %s;
+            """, (incident_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Incident not found",
+                )
+            return IncidentResponse(
+                incident_id=row[0],
+                tourist_id=row[1],
+                location_id=row[2],
+                incident_type=row[3],
+                severity=row[4],
+                status=row[5],
+                description=row[6],
+                created_at=row[7],
+                authority_id=row[8]
+            )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database query failed: {str(e)}"
+        )
+
+
+@router.post("", response_model=IncidentResponse, status_code=status.HTTP_201_CREATED)
+def create_incident(
+    payload: IncidentCreate,
+    current_user: SessionResponse = Depends(get_current_user)
+) -> IncidentResponse:
+    # 1. Fallback Mode
+    if not is_db_active():
+        from routers.tourists import _get_tourist_or_404
+        from routers.locations import _in_memory_location_store
+        
+        _get_tourist_or_404(payload.tourist_id)
+
+        now = datetime.now(timezone.utc)
+        if payload.location_id is not None and payload.location_id not in _in_memory_location_store:
+            _in_memory_location_store[payload.location_id] = LocationResponse(
+                location_id=payload.location_id,
+                recorded_at=now,
+            )
+
+        incident = IncidentResponse(
+            incident_id=uuid4(),
+            tourist_id=payload.tourist_id,
+            location_id=payload.location_id,
+            incident_type=payload.incident_type or "OTHER",
+            severity=payload.severity or "MEDIUM",
+            status=payload.status or "OPEN",
+            description=payload.description,
+            created_at=now,
+            authority_id=payload.authority_id,
+        )
+        _in_memory_incident_store[incident.incident_id] = incident
+        return incident
+
+    # 2. Database Mode
+    now = datetime.now(timezone.utc)
+    incident_id = uuid4()
+    
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
+            # Verify tourist profile exists
+            cur.execute("SELECT tourist_id FROM public.tourists WHERE tourist_id = %s;", (payload.tourist_id,))
+            if not cur.fetchone():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Tourist profile not found",
+                )
+                
+            # Verify location exists, or resolve/create one — incidents.location_id is NOT NULL
+            loc_id = payload.location_id
+            if loc_id:
+                cur.execute("SELECT location_id FROM public.locations WHERE location_id = %s;", (loc_id,))
+                if not cur.fetchone():
+                    # Generate automatic location entry
+                    cur.execute("""
+                        INSERT INTO public.locations (location_id, name, latitude, longitude, risk_level, recorded_at)
+                        VALUES (%s, %s, %s, %s, %s, %s);
+                    """, (loc_id, "Geocoded Tourist Incident Location", 0.0, 0.0, "LOW", now))
+            else:
+                # No location_id provided — create one from supplied coordinates (or a default placeholder)
+                loc_id = uuid4()
+                cur.execute("""
+                    INSERT INTO public.locations (location_id, name, latitude, longitude, risk_level, recorded_at)
+                    VALUES (%s, %s, %s, %s, %s, %s);
+                """, (
+                    loc_id, "Geocoded Tourist Incident Location",
+                    payload.latitude if payload.latitude is not None else 0.0,
+                    payload.longitude if payload.longitude is not None else 0.0,
+                    "LOW", now
+                ))
+            
+            cur.execute("""
+                INSERT INTO public.incidents (incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id;
+            """, (
+                incident_id, payload.tourist_id, loc_id, payload.incident_type or "OTHER",
+                payload.severity or "MEDIUM", payload.status or "OPEN", payload.description, now, payload.authority_id
+            ))
+            row = cur.fetchone()
+            return IncidentResponse(
+                incident_id=row[0],
+                tourist_id=row[1],
+                location_id=row[2],
+                incident_type=row[3],
+                severity=row[4],
+                status=row[5],
+                description=row[6],
+                created_at=row[7],
+                authority_id=row[8]
+            )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create incident: {str(e)}"
+        )
+
+
+@router.get("", response_model=list[IncidentResponse])
+def list_incidents(
+    status_filter: str | None = Query(default=None, alias="status"),
+    current_user: SessionResponse = Depends(get_current_user)
+) -> list[IncidentResponse]:
+    # 1. Fallback Mode
+    if not is_db_active():
+        incidents = list(_in_memory_incident_store.values())
+        if status_filter is not None:
+            incidents = [i for i in incidents if i.status.lower() == status_filter.lower()]
+        return incidents
+
+    # 2. Database Mode
+    try:
+        # Run using user authenticated cursor so RLS policies automatically filter incidents
+        with get_authenticated_cursor(current_user.auth_user_id) as cur:
+            # New SOS-triggered incidents are created with authority_id = NULL
+            # (unassigned/unclaimed). RLS only allows an authority to read
+            # incidents assigned to them, which would hide every unassigned
+            # incident from every authority dashboard. For authority users,
+            # explicitly widen the query to also include unassigned
+            # incidents. Tourist users are left on the original RLS-only
+            # query, which already scopes correctly to their own incidents.
+            is_authority = current_user.user_type == "authority"
+
+            if status_filter and is_authority:
+                cur.execute("""
+                    SELECT incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id
+                    FROM public.incidents
+                    WHERE status = %s AND (authority_id IS NULL OR authority_id = %s);
+                """, (status_filter, current_user.authority_id))
+            elif status_filter:
+                cur.execute("""
+                    SELECT incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id
+                    FROM public.incidents
+                    WHERE status = %s;
+                """, (status_filter,))
+            elif is_authority:
+                cur.execute("""
+                    SELECT incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id
+                    FROM public.incidents
+                    WHERE authority_id IS NULL OR authority_id = %s;
+                """, (current_user.authority_id,))
+            else:
+                cur.execute("""
+                    SELECT incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id
+                    FROM public.incidents;
+                """)
+                
+            rows = cur.fetchall()
+            return [
+                IncidentResponse(
+                    incident_id=row[0],
+                    tourist_id=row[1],
+                    location_id=row[2],
+                    incident_type=row[3],
+                    severity=row[4],
+                    status=row[5],
+                    description=row[6],
+                    created_at=row[7],
+                    authority_id=row[8]
+                )
+                for row in rows
+            ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve incidents: {str(e)}"
+        )
+
+
+@router.get("/{incident_id}", response_model=IncidentResponse)
+def get_incident(
+    incident_id: UUID,
+    current_user: SessionResponse = Depends(get_current_user)
+) -> IncidentResponse:
+    return _get_incident_or_404(incident_id, current_user)
+
+
+@router.patch("/{incident_id}", response_model=IncidentResponse)
+def update_incident(
+    incident_id: UUID,
+    payload: IncidentUpdate,
+    current_user: SessionResponse = Depends(get_current_user)
+) -> IncidentResponse:
+    # 1. Fallback Mode
+    if not is_db_active():
+        incident = _get_incident_or_404(incident_id)
+        update_data = payload.model_dump(exclude_unset=True)
+        updated = incident.model_copy(update=update_data)
+        _in_memory_incident_store[incident_id] = updated
+        return updated
+
+    # 2. Database Mode
+    _get_incident_or_404(incident_id, current_user) # Verify existence/RLS permissions first
+    
+    update_data = payload.model_dump(exclude_unset=True)
+    if not update_data:
+        return _get_incident_or_404(incident_id, current_user)
+
+    # When an authority dispatches to an incident (status -> RESPONDING),
+    # link that authority to the incident record if it isn't already
+    # assigned. This resolves incidents created with authority_id = NULL
+    # into claimed, assigned incidents at the moment of dispatch.
+    if (
+        update_data.get("status") == "RESPONDING"
+        and current_user.user_type == "authority"
+        and "authority_id" not in update_data
+    ):
+        update_data["authority_id"] = current_user.authority_id
+
+    set_clauses = []
+    params = []
+    for k, v in update_data.items():
+        set_clauses.append(f"{k} = %s")
+        params.append(v)
+        
+    params.append(incident_id)
+    query = f"UPDATE public.incidents SET {', '.join(set_clauses)} WHERE incident_id = %s RETURNING incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id;"
+    
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
+            cur.execute(query, tuple(params))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Incident not found or unauthorized to update",
+                )
+            return IncidentResponse(
+                incident_id=row[0],
+                tourist_id=row[1],
+                location_id=row[2],
+                incident_type=row[3],
+                severity=row[4],
+                status=row[5],
+                description=row[6],
+                created_at=row[7],
+                authority_id=row[8]
+            )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update incident: {str(e)}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Responses (public.responses) — dispatch action logging
+# ---------------------------------------------------------------------------
+
+@router.post("/{incident_id}/responses", response_model=ResponseRecord, status_code=status.HTTP_201_CREATED)
+def create_incident_response(
+    incident_id: UUID,
+    payload: ResponseCreate,
+    current_user: SessionResponse = Depends(require_authority)
+) -> ResponseRecord:
+    authority_id = payload.authority_id or current_user.authority_id
+
+    # 1. Fallback Mode
+    if not is_db_active():
+        incident = _in_memory_incident_store.get(incident_id)
+        if incident is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Incident not found",
+            )
+        record = ResponseRecord(
+            response_id=uuid4(),
+            incident_id=incident_id,
+            responder_unit=payload.responder_unit,
+            action_taken=payload.action_taken,
+            resolved_at=payload.resolved_at,
+            authority_id=authority_id,
+        )
+        _in_memory_response_store[record.response_id] = record
+        return record
+
+    # 2. Database Mode
+    response_id = uuid4()
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
+            cur.execute("SELECT incident_id FROM public.incidents WHERE incident_id = %s;", (incident_id,))
+            if not cur.fetchone():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Incident not found",
+                )
+
+            cur.execute("""
+                INSERT INTO public.responses (response_id, incident_id, responder_unit, action_taken, resolved_at, authority_id)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING response_id, incident_id, responder_unit, action_taken, resolved_at, authority_id;
+            """, (response_id, incident_id, payload.responder_unit, payload.action_taken, payload.resolved_at, authority_id))
+
+            row = cur.fetchone()
+            return ResponseRecord(
+                response_id=row[0],
+                incident_id=row[1],
+                responder_unit=row[2],
+                action_taken=row[3],
+                resolved_at=row[4],
+                authority_id=row[5],
+            )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create response log: {str(e)}"
+        )
+
+
+@router.get("/{incident_id}/responses", response_model=list[ResponseRecord])
+def list_incident_responses(
+    incident_id: UUID,
+    current_user: SessionResponse = Depends(get_current_user)
+) -> list[ResponseRecord]:
+    # 1. Fallback Mode
+    if not is_db_active():
+        return [r for r in _in_memory_response_store.values() if r.incident_id == incident_id]
+
+    # 2. Database Mode
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id) as cur:
+            cur.execute("""
+                SELECT response_id, incident_id, responder_unit, action_taken, resolved_at, authority_id
+                FROM public.responses
+                WHERE incident_id = %s;
+            """, (incident_id,))
+            rows = cur.fetchall()
+            return [
+                ResponseRecord(
+                    response_id=row[0],
+                    incident_id=row[1],
+                    responder_unit=row[2],
+                    action_taken=row[3],
+                    resolved_at=row[4],
+                    authority_id=row[5],
+                )
+                for row in rows
+            ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve response logs: {str(e)}"
+        )
+```
+
+### `backend/routers/itinerary.py`
+
+```python
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from db import is_db_active, get_authenticated_cursor
+from routers.auth import require_tourist
+from schemas.auth import SessionResponse
+from schemas.itinerary import ItineraryEntryCreate, ItineraryEntryResponse
+
+router = APIRouter(prefix="/itinerary", tags=["itinerary"])
+
+# Temporary in-memory storage for local API development only (fallback).
+_in_memory_itinerary_store: dict[UUID, ItineraryEntryResponse] = {}
+
+
+@router.post("", response_model=ItineraryEntryResponse, status_code=status.HTTP_201_CREATED)
+def create_itinerary_entry(
+    payload: ItineraryEntryCreate,
+    current_user: SessionResponse = Depends(require_tourist)
+) -> ItineraryEntryResponse:
+    tourist_id = current_user.tourist_id
+
+    # 1. Fallback Mode
+    if not is_db_active():
+        location_id = payload.location_id or uuid4()
+        entry = ItineraryEntryResponse(
+            itinerary_id=uuid4(),
+            tourist_id=tourist_id,
+            location_id=location_id,
+            location_name=payload.destination_name,
+            planned_arrival=payload.planned_arrival,
+            planned_departure=payload.planned_departure,
+        )
+        _in_memory_itinerary_store[entry.itinerary_id] = entry
+        return entry
+
+    # 2. Database Mode
+    now = datetime.now(timezone.utc)
+    itinerary_id = uuid4()
+
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
+            loc_id = payload.location_id
+            loc_name = payload.destination_name
+
+            if loc_id:
+                cur.execute("SELECT location_id, name FROM public.locations WHERE location_id = %s;", (loc_id,))
+                row = cur.fetchone()
+                if not row:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail="Location not found",
+                    )
+                loc_name = row[1]
+            else:
+                # No location_id supplied — resolve/create one from the
+                # destination name and optional coordinates, matching the
+                # existing location-resolution pattern used by incidents/SOS.
+                loc_id = uuid4()
+                cur.execute("""
+                    INSERT INTO public.locations (location_id, name, latitude, longitude, risk_level, recorded_at)
+                    VALUES (%s, %s, %s, %s, %s, %s);
+                """, (
+                    loc_id, payload.destination_name or "Itinerary Destination",
+                    payload.latitude if payload.latitude is not None else 0.0,
+                    payload.longitude if payload.longitude is not None else 0.0,
+                    "LOW", now
+                ))
+
+            cur.execute("""
+                INSERT INTO public.itinerary_entries (itinerary_id, tourist_id, location_id, planned_arrival, planned_departure)
+                VALUES (%s, %s, %s, %s, %s)
+                RETURNING itinerary_id, tourist_id, location_id, planned_arrival, planned_departure;
+            """, (itinerary_id, tourist_id, loc_id, payload.planned_arrival, payload.planned_departure))
+
+            row = cur.fetchone()
+            return ItineraryEntryResponse(
+                itinerary_id=row[0],
+                tourist_id=row[1],
+                location_id=row[2],
+                location_name=loc_name,
+                planned_arrival=row[3],
+                planned_departure=row[4],
+            )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to create itinerary entry: {str(e)}"
+        )
+
+
+@router.get("", response_model=list[ItineraryEntryResponse])
+def list_itinerary_entries(
+    current_user: SessionResponse = Depends(require_tourist)
+) -> list[ItineraryEntryResponse]:
+    tourist_id = current_user.tourist_id
+
+    # 1. Fallback Mode
+    if not is_db_active():
+        return [e for e in _in_memory_itinerary_store.values() if e.tourist_id == tourist_id]
+
+    # 2. Database Mode
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id) as cur:
+            cur.execute("""
+                SELECT ie.itinerary_id, ie.tourist_id, ie.location_id, l.name, ie.planned_arrival, ie.planned_departure
+                FROM public.itinerary_entries ie
+                LEFT JOIN public.locations l ON l.location_id = ie.location_id
+                WHERE ie.tourist_id = %s;
+            """, (tourist_id,))
+            rows = cur.fetchall()
+            return [
+                ItineraryEntryResponse(
+                    itinerary_id=row[0],
+                    tourist_id=row[1],
+                    location_id=row[2],
+                    location_name=row[3],
+                    planned_arrival=row[4],
+                    planned_departure=row[5],
+                )
+                for row in rows
+            ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve itinerary entries: {str(e)}"
+        )
+
+
+@router.delete("/{itinerary_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_itinerary_entry(
+    itinerary_id: UUID,
+    current_user: SessionResponse = Depends(require_tourist)
+) -> None:
+    # 1. Fallback Mode
+    if not is_db_active():
+        entry = _in_memory_itinerary_store.get(itinerary_id)
+        if entry is None or entry.tourist_id != current_user.tourist_id:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Itinerary entry not found",
+            )
+        del _in_memory_itinerary_store[itinerary_id]
+        return None
+
+    # 2. Database Mode
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
+            cur.execute("""
+                DELETE FROM public.itinerary_entries
+                WHERE itinerary_id = %s AND tourist_id = %s
+                RETURNING itinerary_id;
+            """, (itinerary_id, current_user.tourist_id))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Itinerary entry not found or unauthorized to delete",
+                )
+            return None
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete itinerary entry: {str(e)}"
+        )
+```
+
+### `backend/routers/locations.py`
+
+```python
+from uuid import UUID
+from datetime import datetime, timezone
+from fastapi import APIRouter, HTTPException, status, Depends
+
+from db import is_db_active, get_authenticated_cursor
+from routers.auth import get_current_user
+from schemas.auth import SessionResponse
+from schemas.location import LocationResponse
+
+router = APIRouter(prefix="/locations", tags=["locations"])
+
+# Temporary in-memory location storage for local API development only (fallback).
+_in_memory_location_store: dict[UUID, LocationResponse] = {}
+
+
+def _get_location_or_404(location_id: UUID, current_user: SessionResponse) -> LocationResponse:
+    # 1. Fallback Mode
+    if not is_db_active():
+        location = _in_memory_location_store.get(location_id)
+        if location is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Location not found",
+            )
+        return location
+
+    # 2. Database Mode
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id) as cur:
+            cur.execute("""
+                SELECT location_id, name, latitude, longitude, risk_level, recorded_at
+                FROM public.locations
+                WHERE location_id = %s;
+            """, (location_id,))
+            row = cur.fetchone()
+            if not row:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Location not found",
+                )
+            return LocationResponse(
+                location_id=row[0],
+                name=row[1],
+                latitude=float(row[2]) if row[2] is not None else None,
+                longitude=float(row[3]) if row[3] is not None else None,
+                risk_level=row[4],
+                recorded_at=row[5]
+            )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database query failed: {str(e)}"
+        )
+
+
+@router.get("", response_model=list[LocationResponse])
+def list_locations(current_user: SessionResponse = Depends(get_current_user)) -> list[LocationResponse]:
+    # 1. Fallback Mode
+    if not is_db_active():
+        return list(_in_memory_location_store.values())
+
+    # 2. Database Mode
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id) as cur:
+            cur.execute("""
+                SELECT location_id, name, latitude, longitude, risk_level, recorded_at
+                FROM public.locations
+                ORDER BY recorded_at DESC;
+            """)
+            rows = cur.fetchall()
+            return [
+                LocationResponse(
+                    location_id=row[0],
+                    name=row[1],
+                    latitude=float(row[2]) if row[2] is not None else None,
+                    longitude=float(row[3]) if row[3] is not None else None,
+                    risk_level=row[4],
+                    recorded_at=row[5]
+                )
+                for row in rows
+            ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve locations: {str(e)}"
+        )
+
+
+@router.get("/{location_id}", response_model=LocationResponse)
+def get_location(
+    location_id: UUID,
+    current_user: SessionResponse = Depends(get_current_user)
+) -> LocationResponse:
+    return _get_location_or_404(location_id, current_user)
+```
+
+### `backend/routers/sos.py`
+
+```python
+from datetime import datetime, timezone
+from uuid import UUID, uuid4
+
+from fastapi import APIRouter, Depends, HTTPException, status
+
+from db import is_db_active, get_db_cursor, get_authenticated_cursor
+from routers.auth import get_current_user
+from schemas.auth import SessionResponse
+from schemas.incident import IncidentResponse
+from schemas.location import LocationResponse
+from schemas.sos import SOSCreate, SOSResponse
+
+router = APIRouter(prefix="/sos", tags=["sos"])
+
+# Temporary in-memory storage for local API development only (fallback).
+_in_memory_sos_store: dict[UUID, SOSResponse] = {}
+
+
+@router.post("", response_model=SOSResponse, status_code=status.HTTP_201_CREATED)
+def create_sos(
+    payload: SOSCreate,
+    current_user: SessionResponse = Depends(get_current_user)
+) -> SOSResponse:
+    # 1. Fallback Mode
+    if not is_db_active():
+        from routers.tourists import _get_tourist_or_404
+        from routers.incidents import _in_memory_incident_store
+        from routers.locations import _in_memory_location_store
+        
+        _get_tourist_or_404(payload.tourist_id)
+
+        now = datetime.now(timezone.utc)
+        location_id = uuid4()
+        location = LocationResponse(
+            location_id=location_id,
+            name=f"SOS Alarm - {payload.tourist_id}",
+            latitude=payload.latitude,
+            longitude=payload.longitude,
+            risk_level="HIGH",
+            recorded_at=now,
+        )
+        _in_memory_location_store[location_id] = location
+
+        incident_id = uuid4()
+        incident = IncidentResponse(
+            incident_id=incident_id,
+            tourist_id=payload.tourist_id,
+            location_id=location_id,
+            incident_type="SOS",
+            severity="HIGH",
+            status="OPEN",
+            description="SOS Alarm Triggered",
+            created_at=now,
+            authority_id=None,
+        )
+        _in_memory_incident_store[incident_id] = incident
+
+        sos = SOSResponse(
+            sos_id=uuid4(),
+            tourist_id=payload.tourist_id,
+            incident_id=incident_id,
+            location_id=location_id,
+            incident_type="SOS",
+            severity="HIGH",
+            status="OPEN",
+            description="SOS Alarm Triggered",
+            triggered_at=now,
+            created_at=now,
+            trigger_source=payload.trigger_source or "APP",
+            sos_status="ACTIVE"
+        )
+        _in_memory_sos_store[sos.sos_id] = sos
+        return sos
+
+    # 2. Database Mode
+    now = datetime.now(timezone.utc)
+    location_id = uuid4()
+    incident_id = uuid4()
+    sos_id = uuid4()
+    
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
+            # Verify tourist profile exists
+            cur.execute("SELECT tourist_id FROM public.tourists WHERE tourist_id = %s;", (payload.tourist_id,))
+            if not cur.fetchone():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Tourist profile not found",
+                )
+                
+            # Create a location record for this SOS coordinate
+            cur.execute("""
+                INSERT INTO public.locations (location_id, name, latitude, longitude, risk_level, recorded_at)
+                VALUES (%s, %s, %s, %s, %s, %s)
+                RETURNING location_id;
+            """, (location_id, f"SOS Alarm - {payload.tourist_id}", payload.latitude, payload.longitude, "HIGH", now))
+            
+            # Create an incident record linking to the location
+            cur.execute("""
+                INSERT INTO public.incidents (incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING incident_id;
+            """, (incident_id, payload.tourist_id, location_id, "SOS", "HIGH", "OPEN", "SOS Alarm Triggered", now))
+            
+            # Create the SOS request record
+            cur.execute("""
+                INSERT INTO public.sos_requests (sos_id, tourist_id, incident_id, location_id, trigger_source, sos_status, triggered_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                RETURNING sos_id, tourist_id, incident_id, location_id, trigger_source, sos_status, triggered_at;
+            """, (sos_id, payload.tourist_id, incident_id, location_id, payload.trigger_source or "APP", "ACTIVE", now))
+            
+            row = cur.fetchone()
+            return SOSResponse(
+                sos_id=row[0],
+                tourist_id=row[1],
+                incident_id=row[2],
+                location_id=row[3],
+                incident_type="SOS",
+                severity="HIGH",
+                status="OPEN",
+                description="SOS Alarm Triggered",
+                triggered_at=row[6],
+                created_at=row[6],
+                trigger_source=row[4],
+                sos_status=row[5]
+            )
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to activate SOS alarm: {str(e)}"
+        )
+```
+
 ### `backend/routers/tourists.py`
+
 ```python
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
@@ -1173,863 +2225,64 @@ def update_tourist(
         )
 ```
 
-### `backend/routers/locations.py`
+### `backend/schemas/alert.py`
+
 ```python
+from datetime import datetime
 from uuid import UUID
-from datetime import datetime, timezone
-from fastapi import APIRouter, HTTPException, status, Depends
 
-from db import is_db_active, get_authenticated_cursor
-from routers.auth import get_current_user
-from schemas.auth import SessionResponse
-from schemas.location import LocationResponse
-
-router = APIRouter(prefix="/locations", tags=["locations"])
-
-# Temporary in-memory location storage for local API development only (fallback).
-_in_memory_location_store: dict[UUID, LocationResponse] = {}
+from pydantic import BaseModel, ConfigDict
 
 
-def _get_location_or_404(location_id: UUID, current_user: SessionResponse) -> LocationResponse:
-    # 1. Fallback Mode
-    if not is_db_active():
-        location = _in_memory_location_store.get(location_id)
-        if location is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Location not found",
-            )
-        return location
-
-    # 2. Database Mode
-    try:
-        with get_authenticated_cursor(current_user.auth_user_id) as cur:
-            cur.execute("""
-                SELECT location_id, name, latitude, longitude, risk_level, recorded_at
-                FROM public.locations
-                WHERE location_id = %s;
-            """, (location_id,))
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Location not found",
-                )
-            return LocationResponse(
-                location_id=row[0],
-                name=row[1],
-                latitude=float(row[2]) if row[2] is not None else None,
-                longitude=float(row[3]) if row[3] is not None else None,
-                risk_level=row[4],
-                recorded_at=row[5]
-            )
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database query failed: {str(e)}"
-        )
+class AlertCreate(BaseModel):
+    incident_id: UUID
+    channel: str
+    recipient: str
+    sent_at: datetime | None = None
 
 
-@router.get("", response_model=list[LocationResponse])
-def list_locations(current_user: SessionResponse = Depends(get_current_user)) -> list[LocationResponse]:
-    # 1. Fallback Mode
-    if not is_db_active():
-        return list(_in_memory_location_store.values())
+class AlertResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
-    # 2. Database Mode
-    try:
-        with get_authenticated_cursor(current_user.auth_user_id) as cur:
-            cur.execute("""
-                SELECT location_id, name, latitude, longitude, risk_level, recorded_at
-                FROM public.locations
-                ORDER BY recorded_at DESC;
-            """)
-            rows = cur.fetchall()
-            return [
-                LocationResponse(
-                    location_id=row[0],
-                    name=row[1],
-                    latitude=float(row[2]) if row[2] is not None else None,
-                    longitude=float(row[3]) if row[3] is not None else None,
-                    risk_level=row[4],
-                    recorded_at=row[5]
-                )
-                for row in rows
-            ]
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve locations: {str(e)}"
-        )
-
-
-@router.get("/{location_id}", response_model=LocationResponse)
-def get_location(
-    location_id: UUID,
-    current_user: SessionResponse = Depends(get_current_user)
-) -> LocationResponse:
-    return _get_location_or_404(location_id, current_user)
+    alert_id: UUID
+    incident_id: UUID
+    channel: str
+    recipient: str
+    sent_at: datetime
 ```
 
-### `backend/routers/incidents.py`
+### `backend/schemas/audit_log.py`
+
 ```python
-from datetime import datetime, timezone
-from uuid import UUID, uuid4
-
-from fastapi import APIRouter, Depends, HTTPException, Query, status
-
-from db import is_db_active, get_db_cursor, get_authenticated_cursor
-from routers.auth import get_current_user
-from schemas.auth import SessionResponse
-from schemas.incident import IncidentCreate, IncidentResponse, IncidentUpdate
-from schemas.location import LocationResponse
-
-router = APIRouter(prefix="/incidents", tags=["incidents"])
-
-# Temporary in-memory storage for local API development only (fallback).
-_in_memory_incident_store: dict[UUID, IncidentResponse] = {}
-
-
-def _get_incident_or_404(incident_id: UUID, current_user: SessionResponse | None = None) -> IncidentResponse:
-    # 1. Fallback Mode
-    if not is_db_active():
-        incident = _in_memory_incident_store.get(incident_id)
-        if incident is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Incident not found",
-            )
-        return incident
-
-    # 2. Database Mode
-    try:
-        if current_user:
-            cursor_ctx = get_authenticated_cursor(current_user.auth_user_id)
-        else:
-            cursor_ctx = get_db_cursor()
-            
-        with cursor_ctx as cur:
-            cur.execute("""
-                SELECT incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id
-                FROM public.incidents
-                WHERE incident_id = %s;
-            """, (incident_id,))
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Incident not found",
-                )
-            return IncidentResponse(
-                incident_id=row[0],
-                tourist_id=row[1],
-                location_id=row[2],
-                incident_type=row[3],
-                severity=row[4],
-                status=row[5],
-                description=row[6],
-                created_at=row[7],
-                authority_id=row[8]
-            )
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Database query failed: {str(e)}"
-        )
-
-
-@router.post("", response_model=IncidentResponse, status_code=status.HTTP_201_CREATED)
-def create_incident(
-    payload: IncidentCreate,
-    current_user: SessionResponse = Depends(get_current_user)
-) -> IncidentResponse:
-    # 1. Fallback Mode
-    if not is_db_active():
-        from routers.tourists import _get_tourist_or_404
-        from routers.locations import _in_memory_location_store
-        
-        _get_tourist_or_404(payload.tourist_id)
-
-        now = datetime.now(timezone.utc)
-        if payload.location_id is not None and payload.location_id not in _in_memory_location_store:
-            _in_memory_location_store[payload.location_id] = LocationResponse(
-                location_id=payload.location_id,
-                recorded_at=now,
-            )
-
-        incident = IncidentResponse(
-            incident_id=uuid4(),
-            tourist_id=payload.tourist_id,
-            location_id=payload.location_id,
-            incident_type=payload.incident_type or "OTHER",
-            severity=payload.severity or "MEDIUM",
-            status=payload.status or "OPEN",
-            description=payload.description,
-            created_at=now,
-            authority_id=payload.authority_id,
-        )
-        _in_memory_incident_store[incident.incident_id] = incident
-        return incident
-
-    # 2. Database Mode
-    now = datetime.now(timezone.utc)
-    incident_id = uuid4()
-    
-    try:
-        with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
-            # Verify tourist profile exists
-            cur.execute("SELECT tourist_id FROM public.tourists WHERE tourist_id = %s;", (payload.tourist_id,))
-            if not cur.fetchone():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Tourist profile not found",
-                )
-                
-            # Verify location exists, or resolve/create one — incidents.location_id is NOT NULL
-            loc_id = payload.location_id
-            if loc_id:
-                cur.execute("SELECT location_id FROM public.locations WHERE location_id = %s;", (loc_id,))
-                if not cur.fetchone():
-                    # Generate automatic location entry
-                    cur.execute("""
-                        INSERT INTO public.locations (location_id, name, latitude, longitude, risk_level, recorded_at)
-                        VALUES (%s, %s, %s, %s, %s, %s);
-                    """, (loc_id, "Geocoded Tourist Incident Location", 0.0, 0.0, "LOW", now))
-            else:
-                # No location_id provided — create one from supplied coordinates (or a default placeholder)
-                loc_id = uuid4()
-                cur.execute("""
-                    INSERT INTO public.locations (location_id, name, latitude, longitude, risk_level, recorded_at)
-                    VALUES (%s, %s, %s, %s, %s, %s);
-                """, (
-                    loc_id, "Geocoded Tourist Incident Location",
-                    payload.latitude if payload.latitude is not None else 0.0,
-                    payload.longitude if payload.longitude is not None else 0.0,
-                    "LOW", now
-                ))
-            
-            cur.execute("""
-                INSERT INTO public.incidents (incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id;
-            """, (
-                incident_id, payload.tourist_id, loc_id, payload.incident_type or "OTHER",
-                payload.severity or "MEDIUM", payload.status or "OPEN", payload.description, now, payload.authority_id
-            ))
-            row = cur.fetchone()
-            return IncidentResponse(
-                incident_id=row[0],
-                tourist_id=row[1],
-                location_id=row[2],
-                incident_type=row[3],
-                severity=row[4],
-                status=row[5],
-                description=row[6],
-                created_at=row[7],
-                authority_id=row[8]
-            )
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create incident: {str(e)}"
-        )
-
-
-@router.get("", response_model=list[IncidentResponse])
-def list_incidents(
-    status_filter: str | None = Query(default=None, alias="status"),
-    current_user: SessionResponse = Depends(get_current_user)
-) -> list[IncidentResponse]:
-    # 1. Fallback Mode
-    if not is_db_active():
-        incidents = list(_in_memory_incident_store.values())
-        if status_filter is not None:
-            incidents = [i for i in incidents if i.status.lower() == status_filter.lower()]
-        return incidents
-
-    # 2. Database Mode
-    try:
-        # Run using user authenticated cursor so RLS policies automatically filter incidents
-        with get_authenticated_cursor(current_user.auth_user_id) as cur:
-            if status_filter:
-                cur.execute("""
-                    SELECT incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id
-                    FROM public.incidents
-                    WHERE status = %s;
-                """, (status_filter,))
-            else:
-                cur.execute("""
-                    SELECT incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id
-                    FROM public.incidents;
-                """)
-                
-            rows = cur.fetchall()
-            return [
-                IncidentResponse(
-                    incident_id=row[0],
-                    tourist_id=row[1],
-                    location_id=row[2],
-                    incident_type=row[3],
-                    severity=row[4],
-                    status=row[5],
-                    description=row[6],
-                    created_at=row[7],
-                    authority_id=row[8]
-                )
-                for row in rows
-            ]
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve incidents: {str(e)}"
-        )
-
-
-@router.get("/{incident_id}", response_model=IncidentResponse)
-def get_incident(
-    incident_id: UUID,
-    current_user: SessionResponse = Depends(get_current_user)
-) -> IncidentResponse:
-    return _get_incident_or_404(incident_id, current_user)
-
-
-@router.patch("/{incident_id}", response_model=IncidentResponse)
-def update_incident(
-    incident_id: UUID,
-    payload: IncidentUpdate,
-    current_user: SessionResponse = Depends(get_current_user)
-) -> IncidentResponse:
-    # 1. Fallback Mode
-    if not is_db_active():
-        incident = _get_incident_or_404(incident_id)
-        update_data = payload.model_dump(exclude_unset=True)
-        updated = incident.model_copy(update=update_data)
-        _in_memory_incident_store[incident_id] = updated
-        return updated
-
-    # 2. Database Mode
-    _get_incident_or_404(incident_id, current_user) # Verify existence/RLS permissions first
-    
-    update_data = payload.model_dump(exclude_unset=True)
-    if not update_data:
-        return _get_incident_or_404(incident_id, current_user)
-        
-    set_clauses = []
-    params = []
-    for k, v in update_data.items():
-        set_clauses.append(f"{k} = %s")
-        params.append(v)
-        
-    params.append(incident_id)
-    query = f"UPDATE public.incidents SET {', '.join(set_clauses)} WHERE incident_id = %s RETURNING incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id;"
-    
-    try:
-        with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
-            cur.execute(query, tuple(params))
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Incident not found or unauthorized to update",
-                )
-            return IncidentResponse(
-                incident_id=row[0],
-                tourist_id=row[1],
-                location_id=row[2],
-                incident_type=row[3],
-                severity=row[4],
-                status=row[5],
-                description=row[6],
-                created_at=row[7],
-                authority_id=row[8]
-            )
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update incident: {str(e)}"
-        )
-```
-
-### `backend/routers/sos.py`
-```python
-from datetime import datetime, timezone
-from uuid import UUID, uuid4
-
-from fastapi import APIRouter, Depends, HTTPException, status
-
-from db import is_db_active, get_db_cursor, get_authenticated_cursor
-from routers.auth import get_current_user
-from schemas.auth import SessionResponse
-from schemas.incident import IncidentResponse
-from schemas.location import LocationResponse
-from schemas.sos import SOSCreate, SOSResponse
-
-router = APIRouter(prefix="/sos", tags=["sos"])
-
-# Temporary in-memory storage for local API development only (fallback).
-_in_memory_sos_store: dict[UUID, SOSResponse] = {}
-
-
-@router.post("", response_model=SOSResponse, status_code=status.HTTP_201_CREATED)
-def create_sos(
-    payload: SOSCreate,
-    current_user: SessionResponse = Depends(get_current_user)
-) -> SOSResponse:
-    # 1. Fallback Mode
-    if not is_db_active():
-        from routers.tourists import _get_tourist_or_404
-        from routers.incidents import _in_memory_incident_store
-        from routers.locations import _in_memory_location_store
-        
-        _get_tourist_or_404(payload.tourist_id)
-
-        now = datetime.now(timezone.utc)
-        location_id = uuid4()
-        location = LocationResponse(
-            location_id=location_id,
-            name=f"SOS Alarm - {payload.tourist_id}",
-            latitude=payload.latitude,
-            longitude=payload.longitude,
-            risk_level="HIGH",
-            recorded_at=now,
-        )
-        _in_memory_location_store[location_id] = location
-
-        incident_id = uuid4()
-        incident = IncidentResponse(
-            incident_id=incident_id,
-            tourist_id=payload.tourist_id,
-            location_id=location_id,
-            incident_type="SOS",
-            severity="HIGH",
-            status="OPEN",
-            description="SOS Alarm Triggered",
-            created_at=now,
-            authority_id=None,
-        )
-        _in_memory_incident_store[incident_id] = incident
-
-        sos = SOSResponse(
-            sos_id=uuid4(),
-            tourist_id=payload.tourist_id,
-            incident_id=incident_id,
-            location_id=location_id,
-            incident_type="SOS",
-            severity="HIGH",
-            status="OPEN",
-            description="SOS Alarm Triggered",
-            triggered_at=now,
-            created_at=now,
-            trigger_source=payload.trigger_source or "APP",
-            sos_status="ACTIVE"
-        )
-        _in_memory_sos_store[sos.sos_id] = sos
-        return sos
-
-    # 2. Database Mode
-    now = datetime.now(timezone.utc)
-    location_id = uuid4()
-    incident_id = uuid4()
-    sos_id = uuid4()
-    
-    try:
-        with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
-            # Verify tourist profile exists
-            cur.execute("SELECT tourist_id FROM public.tourists WHERE tourist_id = %s;", (payload.tourist_id,))
-            if not cur.fetchone():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Tourist profile not found",
-                )
-                
-            # Create a location record for this SOS coordinate
-            cur.execute("""
-                INSERT INTO public.locations (location_id, name, latitude, longitude, risk_level, recorded_at)
-                VALUES (%s, %s, %s, %s, %s, %s)
-                RETURNING location_id;
-            """, (location_id, f"SOS Alarm - {payload.tourist_id}", payload.latitude, payload.longitude, "HIGH", now))
-            
-            # Create an incident record linking to the location
-            cur.execute("""
-                INSERT INTO public.incidents (incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING incident_id;
-            """, (incident_id, payload.tourist_id, location_id, "SOS", "HIGH", "OPEN", "SOS Alarm Triggered", now))
-            
-            # Create the SOS request record
-            cur.execute("""
-                INSERT INTO public.sos_requests (sos_id, tourist_id, incident_id, location_id, trigger_source, sos_status, triggered_at)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-                RETURNING sos_id, tourist_id, incident_id, location_id, trigger_source, sos_status, triggered_at;
-            """, (sos_id, payload.tourist_id, incident_id, location_id, payload.trigger_source or "APP", "ACTIVE", now))
-            
-            row = cur.fetchone()
-            return SOSResponse(
-                sos_id=row[0],
-                tourist_id=row[1],
-                incident_id=row[2],
-                location_id=row[3],
-                incident_type="SOS",
-                severity="HIGH",
-                status="OPEN",
-                description="SOS Alarm Triggered",
-                triggered_at=row[6],
-                created_at=row[6],
-                trigger_source=row[4],
-                sos_status=row[5]
-            )
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to activate SOS alarm: {str(e)}"
-        )
-```
-
-### `backend/routers/alerts.py`
-```python
-from datetime import datetime, timezone
-from uuid import UUID, uuid4
-from fastapi import APIRouter, Depends, HTTPException, status
-
-from db import is_db_active, get_db_cursor, get_authenticated_cursor
-from routers.auth import get_current_user
-from schemas.auth import SessionResponse
-from schemas.alert import AlertCreate, AlertResponse
-
-router = APIRouter(prefix="/alerts", tags=["alerts"])
-
-# Temporary in-memory storage for local API development only (fallback).
-_in_memory_alert_store: dict[UUID, AlertResponse] = {}
-
-
-@router.post("", response_model=AlertResponse, status_code=status.HTTP_201_CREATED)
-def create_alert(
-    payload: AlertCreate,
-    current_user: SessionResponse = Depends(get_current_user)
-) -> AlertResponse:
-    # 1. Fallback Mode
-    if not is_db_active():
-        from routers.incidents import _get_incident_or_404
-        _get_incident_or_404(payload.incident_id)
-
-        alert = AlertResponse(
-            alert_id=uuid4(),
-            incident_id=payload.incident_id,
-            channel=payload.channel,
-            recipient=payload.recipient,
-            sent_at=payload.sent_at or datetime.now(timezone.utc),
-        )
-        _in_memory_alert_store[alert.alert_id] = alert
-        return alert
-
-    # 2. Database Mode
-    now = datetime.now(timezone.utc)
-    alert_id = uuid4()
-    sent_at = payload.sent_at or now
-    
-    try:
-        with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
-            # Verify incident exists
-            cur.execute("SELECT incident_id FROM public.incidents WHERE incident_id = %s;", (payload.incident_id,))
-            if not cur.fetchone():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Incident not found",
-                )
-                
-            cur.execute("""
-                INSERT INTO public.alerts (alert_id, incident_id, channel, recipient, sent_at)
-                VALUES (%s, %s, %s, %s, %s)
-                RETURNING alert_id, incident_id, channel, recipient, sent_at;
-            """, (alert_id, payload.incident_id, payload.channel, payload.recipient, sent_at))
-            
-            row = cur.fetchone()
-            return AlertResponse(
-                alert_id=row[0],
-                incident_id=row[1],
-                channel=row[2],
-                recipient=row[3],
-                sent_at=row[4]
-            )
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to create alert: {str(e)}"
-        )
-
-
-@router.get("", response_model=list[AlertResponse])
-def list_alerts(
-    incident_id: UUID | None = None,
-    current_user: SessionResponse = Depends(get_current_user)
-) -> list[AlertResponse]:
-    # 1. Fallback Mode
-    if not is_db_active():
-        alerts = list(_in_memory_alert_store.values())
-        if incident_id is not None:
-            alerts = [a for a in alerts if a.incident_id == incident_id]
-        return alerts
-
-    # 2. Database Mode
-    try:
-        with get_authenticated_cursor(current_user.auth_user_id) as cur:
-            if incident_id is not None:
-                cur.execute("""
-                    SELECT alert_id, incident_id, channel, recipient, sent_at
-                    FROM public.alerts
-                    WHERE incident_id = %s;
-                """, (incident_id,))
-            else:
-                cur.execute("""
-                    SELECT alert_id, incident_id, channel, recipient, sent_at
-                    FROM public.alerts;
-                """)
-                
-            rows = cur.fetchall()
-            return [
-                AlertResponse(
-                    alert_id=row[0],
-                    incident_id=row[1],
-                    channel=row[2],
-                    recipient=row[3],
-                    sent_at=row[4]
-                )
-                for row in rows
-            ]
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve alerts: {str(e)}"
-        )
-```
-
-### `backend/routers/authority.py`
-```python
+from datetime import datetime
 from uuid import UUID
-from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, status
 
-from db import is_db_active, get_db_cursor, get_authenticated_cursor
-from routers.auth import login as auth_login, require_authority
-from schemas.auth import LoginRequest, LoginResponse, SessionResponse
-from schemas.alert import AlertResponse
-from schemas.incident import IncidentResponse
-from schemas.location import LocationResponse
-from schemas.tourist import TouristResponse
-
-router = APIRouter(prefix="/authority", tags=["authority"])
+from pydantic import BaseModel, ConfigDict
 
 
-@router.post("/login", response_model=LoginResponse)
-def authority_login(payload: LoginRequest) -> LoginResponse:
-    login_resp = auth_login(payload)
-    if login_resp.user_type != "authority":
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Account is not an authority account",
-        )
-    return login_resp
+class AuditLogCreate(BaseModel):
+    action_type: str
+    target_id: str
+    reason: str | None = None
+    details: str | None = None
+    ip_address: str | None = None
 
 
-@router.get("/alerts", response_model=list[AlertResponse])
-def get_authority_alerts(
-    current_user: SessionResponse = Depends(require_authority)
-) -> list[AlertResponse]:
-    # 1. Fallback Mode
-    if not is_db_active():
-        from routers.alerts import _in_memory_alert_store
-        return list(_in_memory_alert_store.values())
+class AuditLogRecord(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
 
-    # 2. Database Mode
-    try:
-        with get_authenticated_cursor(current_user.auth_user_id) as cur:
-            cur.execute("""
-                SELECT alert_id, incident_id, channel, recipient, sent_at
-                FROM public.alerts;
-            """)
-            rows = cur.fetchall()
-            return [
-                AlertResponse(
-                    alert_id=row[0],
-                    incident_id=row[1],
-                    channel=row[2],
-                    recipient=row[3],
-                    sent_at=row[4]
-                )
-                for row in rows
-            ]
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve authority alerts: {str(e)}"
-        )
-
-
-@router.get("/incidents", response_model=list[IncidentResponse])
-def get_authority_incidents(
-    current_user: SessionResponse = Depends(require_authority)
-) -> list[IncidentResponse]:
-    # 1. Fallback Mode
-    if not is_db_active():
-        from routers.incidents import _in_memory_incident_store
-        return list(_in_memory_incident_store.values())
-
-    # 2. Database Mode
-    try:
-        with get_authenticated_cursor(current_user.auth_user_id) as cur:
-            cur.execute("""
-                SELECT incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id
-                FROM public.incidents;
-            """)
-            rows = cur.fetchall()
-            return [
-                IncidentResponse(
-                    incident_id=row[0],
-                    tourist_id=row[1],
-                    location_id=row[2],
-                    incident_type=row[3],
-                    severity=row[4],
-                    status=row[5],
-                    description=row[6],
-                    created_at=row[7],
-                    authority_id=row[8]
-                )
-                for row in rows
-            ]
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve authority incidents: {str(e)}"
-        )
-
-
-@router.get("/tourists/{tourist_id}", response_model=TouristResponse)
-def get_authority_tourist_details(
-    tourist_id: UUID,
-    current_user: SessionResponse = Depends(require_authority)
-) -> TouristResponse:
-    # 1. Fallback Mode
-    if not is_db_active():
-        from routers.tourists import _get_tourist_or_404
-        return _get_tourist_or_404(tourist_id)
-
-    # 2. Database Mode
-    try:
-        with get_authenticated_cursor(current_user.auth_user_id) as cur:
-            cur.execute("""
-                SELECT tourist_id, digital_id, full_name, kyc_document_type, kyc_verified, phone, email, emergency_contact, preferred_language, created_at
-                FROM public.tourists
-                WHERE tourist_id = %s;
-            """, (tourist_id,))
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Tourist profile not found",
-                )
-            return TouristResponse(
-                tourist_id=row[0],
-                digital_id=row[1],
-                full_name=row[2],
-                kyc_document_type=row[3],
-                kyc_verified=row[4],
-                phone=row[5],
-                email=row[6],
-                emergency_contact=row[7],
-                preferred_language=row[8],
-                created_at=row[9]
-            )
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve tourist profile: {str(e)}"
-        )
-
-
-@router.get("/incidents/{incident_id}/location", response_model=LocationResponse)
-def get_authority_incident_location(
-    incident_id: UUID,
-    current_user: SessionResponse = Depends(require_authority)
-) -> LocationResponse:
-    # 1. Fallback Mode
-    if not is_db_active():
-        from routers.incidents import _get_incident_or_404
-        from routers.locations import _in_memory_location_store
-        
-        incident = _get_incident_or_404(incident_id)
-        if incident.location_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Incident has no location assigned",
-            )
-        location = _in_memory_location_store.get(incident.location_id)
-        if location is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Location not found",
-            )
-        return location
-
-    # 2. Database Mode
-    try:
-        with get_authenticated_cursor(current_user.auth_user_id) as cur:
-            cur.execute("SELECT location_id FROM public.incidents WHERE incident_id = %s;", (incident_id,))
-            row = cur.fetchone()
-            if not row:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Incident not found",
-                )
-            loc_id = row[0]
-            if not loc_id:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Incident has no location assigned",
-                )
-                
-            cur.execute("""
-                SELECT location_id, name, latitude, longitude, risk_level, recorded_at
-                FROM public.locations
-                WHERE location_id = %s;
-            """, (loc_id,))
-            loc_row = cur.fetchone()
-            if not loc_row:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Location not found",
-                )
-            return LocationResponse(
-                location_id=loc_row[0],
-                name=loc_row[1],
-                latitude=float(loc_row[2]) if loc_row[2] is not None else None,
-                longitude=float(loc_row[3]) if loc_row[3] is not None else None,
-                risk_level=loc_row[4],
-                recorded_at=loc_row[5]
-            )
-    except HTTPException as he:
-        raise he
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to retrieve incident location: {str(e)}"
-        )
+    audit_id: UUID
+    authority_id: UUID
+    action_type: str
+    target_id: str
+    reason: str | None = None
+    details: str | None = None
+    ip_address: str | None = None
+    created_at: datetime
 ```
 
 ### `backend/schemas/auth.py`
+
 ```python
 from datetime import datetime
 from uuid import UUID
@@ -2089,7 +2342,176 @@ class SessionResponse(BaseModel):
     last_login_at: datetime | None = None
 ```
 
+### `backend/schemas/incident.py`
+
+```python
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict
+
+
+class IncidentCreate(BaseModel):
+    tourist_id: UUID
+    location_id: UUID | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    incident_type: str | None = "OTHER"
+    severity: str | None = "MEDIUM"
+    status: str = "OPEN"
+    description: str | None = None
+    authority_id: UUID | None = None
+
+
+class IncidentUpdate(BaseModel):
+    status: str | None = None
+    severity: str | None = None
+    description: str | None = None
+    authority_id: UUID | None = None
+
+
+class IncidentResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    incident_id: UUID
+    tourist_id: UUID
+    location_id: UUID | None = None
+    incident_type: str | None = None
+    severity: str | None = None
+    status: str
+    description: str | None = None
+    created_at: datetime
+    authority_id: UUID | None = None
+```
+
+### `backend/schemas/itinerary.py`
+
+```python
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict
+
+
+class ItineraryEntryCreate(BaseModel):
+    location_id: UUID | None = None
+    # Optional convenience fields — when location_id is not supplied, a
+    # location record is resolved/created from a plain destination name
+    # (and optional coordinates), mirroring how incidents/sos resolve
+    # locations elsewhere in the backend.
+    destination_name: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    planned_arrival: datetime | None = None
+    planned_departure: datetime | None = None
+
+
+class ItineraryEntryResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    itinerary_id: UUID
+    tourist_id: UUID
+    location_id: UUID
+    location_name: str | None = None
+    planned_arrival: datetime | None = None
+    planned_departure: datetime | None = None
+```
+
+### `backend/schemas/location.py`
+
+```python
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict
+
+
+class LocationCreate(BaseModel):
+    name: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    risk_level: str | None = None
+    recorded_at: datetime | None = None
+
+
+class LocationResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    location_id: UUID
+    name: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    risk_level: str | None = None
+    recorded_at: datetime | None = None
+```
+
+### `backend/schemas/response.py`
+
+```python
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict
+
+
+class ResponseCreate(BaseModel):
+    responder_unit: str | None = None
+    action_taken: str | None = None
+    resolved_at: datetime | None = None
+    # Optional explicit override — defaults to the authenticated authority's
+    # own authority_id when omitted.
+    authority_id: UUID | None = None
+
+
+class ResponseRecord(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    response_id: UUID
+    incident_id: UUID
+    responder_unit: str | None = None
+    action_taken: str | None = None
+    resolved_at: datetime | None = None
+    authority_id: UUID
+```
+
+### `backend/schemas/sos.py`
+
+```python
+from datetime import datetime
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict
+
+
+class SOSCreate(BaseModel):
+    tourist_id: UUID
+    location_id: UUID | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+    description: str | None = None
+    severity: str | None = "HIGH"
+    trigger_source: str | None = "APP"
+
+
+class SOSResponse(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    sos_id: UUID
+    tourist_id: UUID
+    incident_id: UUID | None = None
+    location_id: UUID | None = None
+    incident_type: str = "SOS"
+    severity: str | None = None
+    status: str = "OPEN"
+    description: str | None = None
+    triggered_at: datetime
+    created_at: datetime
+    trigger_source: str | None = "APP"
+    sos_status: str = "ACTIVE"
+```
+
 ### `backend/schemas/tourist.py`
+
 ```python
 from datetime import datetime
 from uuid import UUID
@@ -2144,134 +2566,8 @@ class DigitalIdResponse(BaseModel):
     kyc_verified: bool | None = None
 ```
 
-### `backend/schemas/location.py`
-```python
-from datetime import datetime
-from uuid import UUID
-
-from pydantic import BaseModel, ConfigDict
-
-
-class LocationCreate(BaseModel):
-    name: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    risk_level: str | None = None
-    recorded_at: datetime | None = None
-
-
-class LocationResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    location_id: UUID
-    name: str | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    risk_level: str | None = None
-    recorded_at: datetime | None = None
-```
-
-### `backend/schemas/incident.py`
-```python
-from datetime import datetime
-from uuid import UUID
-
-from pydantic import BaseModel, ConfigDict
-
-
-class IncidentCreate(BaseModel):
-    tourist_id: UUID
-    location_id: UUID | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    incident_type: str | None = "OTHER"
-    severity: str | None = "MEDIUM"
-    status: str = "OPEN"
-    description: str | None = None
-    authority_id: UUID | None = None
-
-
-class IncidentUpdate(BaseModel):
-    status: str | None = None
-    severity: str | None = None
-    description: str | None = None
-
-
-class IncidentResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    incident_id: UUID
-    tourist_id: UUID
-    location_id: UUID | None = None
-    incident_type: str | None = None
-    severity: str | None = None
-    status: str
-    description: str | None = None
-    created_at: datetime
-    authority_id: UUID | None = None
-```
-
-### `backend/schemas/sos.py`
-```python
-from datetime import datetime
-from uuid import UUID
-
-from pydantic import BaseModel, ConfigDict
-
-
-class SOSCreate(BaseModel):
-    tourist_id: UUID
-    location_id: UUID | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    description: str | None = None
-    severity: str | None = "HIGH"
-    trigger_source: str | None = "APP"
-
-
-class SOSResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    sos_id: UUID
-    tourist_id: UUID
-    incident_id: UUID
-    location_id: UUID | None = None
-    incident_type: str = "SOS"
-    severity: str | None = None
-    status: str = "OPEN"
-    description: str | None = None
-    triggered_at: datetime
-    created_at: datetime
-    trigger_source: str | None = "APP"
-    sos_status: str = "ACTIVE"
-```
-
-### `backend/schemas/alert.py`
-```python
-from datetime import datetime
-from uuid import UUID
-
-from pydantic import BaseModel, ConfigDict
-
-
-class AlertCreate(BaseModel):
-    incident_id: UUID
-    channel: str
-    recipient: str
-    sent_at: datetime | None = None
-
-
-class AlertResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    alert_id: UUID
-    incident_id: UUID
-    channel: str
-    recipient: str
-    sent_at: datetime
-```
-
 ### `backend/tests/test_api.py`
+
 ```python
 import os
 import sys
@@ -2481,138 +2777,155 @@ def test_authority_endpoints(auth_headers_tourist, auth_headers_authority):
     tourist_resp = client.get(f"/api/v1/authority/tourists/{tourist_id}", headers=a_headers)
     assert tourist_resp.status_code == 200
     assert tourist_resp.json()["tourist_id"] == tourist_id
-```
-### `frontend/package.json`
-```json
-{
-  "name": "react-example",
-  "private": true,
-  "version": "0.0.0",
-  "type": "module",
-  "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build",
-    "preview": "vite preview",
-    "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
-  },
-  "dependencies": {
-    "@google/genai": "^2.4.0",
-    "@tailwindcss/vite": "^4.1.14",
-    "@vis.gl/react-google-maps": "^1.9.0",
-    "@vitejs/plugin-react": "^5.0.4",
-    "dotenv": "^17.2.3",
-    "express": "^4.21.2",
-    "lucide-react": "^0.546.0",
-    "motion": "^12.23.24",
-    "react": "^19.0.1",
-    "react-dom": "^19.0.1",
-    "vite": "^6.2.3"
-  },
-  "devDependencies": {
-    "@types/node": "^22.14.0",
-    "autoprefixer": "^10.4.21",
-    "esbuild": "^0.25.0",
-    "tailwindcss": "^4.1.14",
-    "tsx": "^4.21.0",
-    "typescript": "~5.8.2",
-    "vite": "^6.2.3",
-    "@types/express": "^4.17.21"
-  }
-}
-```
 
-### `frontend/tsconfig.json`
-```json
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "experimentalDecorators": true,
-    "useDefineForClassFields": false,
-    "module": "ESNext",
-    "lib": [
-      "ES2022",
-      "DOM",
-      "DOM.Iterable"
-    ],
-    "skipLibCheck": true,
-    "moduleResolution": "bundler",
-    "isolatedModules": true,
-    "moduleDetection": "force",
-    "allowJs": true,
-    "jsx": "react-jsx",
-    "paths": {
-      "@/*": [
-        "./*"
-      ]
-    },
-    "allowImportingTsExtensions": true,
-    "noEmit": true
-  }
-}
-```
 
-### `frontend/vite.config.ts`
-```typescript
-import tailwindcss from '@tailwindcss/vite';
-import react from '@vitejs/plugin-react';
-import path from 'path';
-import {defineConfig} from 'vite';
+def test_itinerary_flows(auth_headers_tourist):
+    headers = {"Authorization": auth_headers_tourist["Authorization"]}
 
-export default defineConfig(() => {
-  return {
-    plugins: [react(), tailwindcss()],
-    define: {
-      'process.env.GOOGLE_MAPS_PLATFORM_KEY': JSON.stringify(process.env.GOOGLE_MAPS_PLATFORM_KEY || ''),
-    },
-    resolve: {
-      alias: {
-        '@': path.resolve(__dirname, '.'),
-      },
-    },
-    server: {
-      // HMR is disabled in AI Studio via DISABLE_HMR env var.
-      // Do not modifyâfile watching is disabled to prevent flickering during agent edits.
-      hmr: process.env.DISABLE_HMR !== 'true',
-      // Disable file watching when DISABLE_HMR is true to save CPU during agent edits.
-      watch: process.env.DISABLE_HMR === 'true' ? null : {},
-    },
-  };
-});
+    create_payload = {
+        "destination_name": "Rohtang Pass Viewpoint",
+        "latitude": 32.3728,
+        "longitude": 77.2491,
+    }
+    create_resp = client.post("/api/v1/itinerary", json=create_payload, headers=headers)
+    assert create_resp.status_code == 201
+    itinerary_id = create_resp.json()["itinerary_id"]
+    assert create_resp.json()["tourist_id"] == auth_headers_tourist["tourist_id"]
+
+    list_resp = client.get("/api/v1/itinerary", headers=headers)
+    assert list_resp.status_code == 200
+    assert any(e["itinerary_id"] == itinerary_id for e in list_resp.json())
+
+    delete_resp = client.delete(f"/api/v1/itinerary/{itinerary_id}", headers=headers)
+    assert delete_resp.status_code == 204
+
+    list_resp_after = client.get("/api/v1/itinerary", headers=headers)
+    assert list_resp_after.status_code == 200
+    assert not any(e["itinerary_id"] == itinerary_id for e in list_resp_after.json())
+
+
+def test_incident_response_logging(auth_headers_tourist, auth_headers_authority):
+    t_headers = {"Authorization": auth_headers_tourist["Authorization"]}
+    a_headers = {"Authorization": auth_headers_authority["Authorization"]}
+    tourist_id = auth_headers_tourist["tourist_id"]
+
+    inc_payload = {
+        "tourist_id": tourist_id,
+        "incident_type": "MEDICAL",
+        "severity": "HIGH",
+        "status": "OPEN",
+        "description": "Tourist requires medical assistance",
+    }
+    inc_resp = client.post("/api/v1/incidents", json=inc_payload, headers=t_headers)
+    assert inc_resp.status_code == 201
+    incident_id = inc_resp.json()["incident_id"]
+
+    # A tourist may not log a dispatch response (authority-only action).
+    forbidden_resp = client.post(
+        f"/api/v1/incidents/{incident_id}/responses",
+        json={"responder_unit": "PCR-12", "action_taken": "Dispatched"},
+        headers=t_headers,
+    )
+    assert forbidden_resp.status_code == 403
+
+    response_resp = client.post(
+        f"/api/v1/incidents/{incident_id}/responses",
+        json={"responder_unit": "PCR-12", "action_taken": "Unit dispatched to scene"},
+        headers=a_headers,
+    )
+    assert response_resp.status_code == 201
+    assert response_resp.json()["incident_id"] == incident_id
+    assert response_resp.json()["authority_id"] == auth_headers_authority["authority_id"]
+
+    list_resp = client.get(f"/api/v1/incidents/{incident_id}/responses", headers=a_headers)
+    assert list_resp.status_code == 200
+    assert len(list_resp.json()) >= 1
+
+
+def test_audit_logs(auth_headers_tourist, auth_headers_authority):
+    a_headers = {"Authorization": auth_headers_authority["Authorization"]}
+    t_headers = {"Authorization": auth_headers_tourist["Authorization"]}
+
+    # Tourists may not write compliance audit logs.
+    forbidden_resp = client.post(
+        "/api/v1/audit-logs",
+        json={"action_type": "TOURIST_LOOKUP", "target_id": "TR-1"},
+        headers=t_headers,
+    )
+    assert forbidden_resp.status_code == 403
+
+    create_resp = client.post(
+        "/api/v1/audit-logs",
+        json={
+            "action_type": "TOURIST_LOOKUP",
+            "target_id": "TR-1",
+            "reason": "Routine check",
+            "details": "Looked up tourist profile during patrol",
+        },
+        headers=a_headers,
+    )
+    assert create_resp.status_code == 201
+    assert create_resp.json()["authority_id"] == auth_headers_authority["authority_id"]
+
+    list_resp = client.get("/api/v1/audit-logs", headers=a_headers)
+    assert list_resp.status_code == 200
+    assert any(l["target_id"] == "TR-1" for l in list_resp.json())
 ```
 
-### `frontend/index.html`
-```html
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Suraksha Setu - National Tourist Safety Command Centre</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
-</html>
+### `database/migrations/001_add_audit_logs.sql`
 
-```
+```sql
+-- Migration: Add public.audit_logs table
+--
+-- Why: Task 7.3 of the production-readiness correction requires persisting
+-- authority search/interception compliance logs to the database instead of
+-- an in-memory array in the frontend (App.tsx). This table is new — it is
+-- not part of the original 9-table schema documented in DATABASE.md — so
+-- per DATABASE.md section 26 (Schema Change Policy) this migration and the
+-- corresponding DATABASE.md addendum accompany the code change.
+--
+-- Run this against the Supabase project before deploying the audit-logs
+-- backend router.
 
-### `frontend/src/main.tsx`
-```typescript
-import {StrictMode} from 'react';
-import {createRoot} from 'react-dom/client';
-import App from './App.tsx';
-import './index.css';
-
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+CREATE TABLE IF NOT EXISTS public.audit_logs (
+    audit_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    authority_id UUID NOT NULL REFERENCES public.authorities(authority_id) ON DELETE CASCADE,
+    action_type  VARCHAR(50) NOT NULL,
+    target_id    VARCHAR(255) NOT NULL,
+    reason       TEXT,
+    details      TEXT,
+    ip_address   VARCHAR(64),
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+CREATE INDEX IF NOT EXISTS idx_audit_logs_authority_id ON public.audit_logs(authority_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON public.audit_logs(created_at);
+
+ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
+
+-- Authorities may insert their own audit log entries.
+CREATE POLICY audit_logs_insert_own ON public.audit_logs
+    FOR INSERT
+    WITH CHECK (
+        authority_id IN (
+            SELECT authority_id FROM public.authorities WHERE auth_user_id = auth.uid()
+        )
+    );
+
+-- Any authenticated authority may read the compliance log (read-only
+-- oversight/audit trail is intentionally visible across the authority pool,
+-- matching a shared compliance-review use case).
+CREATE POLICY audit_logs_select_authority ON public.audit_logs
+    FOR SELECT
+    USING (
+        EXISTS (
+            SELECT 1 FROM public.authorities WHERE auth_user_id = auth.uid()
+        )
+    );
 ```
 
 ### `frontend/src/App.tsx`
+
 ```tsx
 import React, { useState, useEffect } from 'react';
 import {
@@ -2646,6 +2959,21 @@ import { ModuleTouristTracking } from './components/ModuleTouristTracking';
 import { ModuleSOSMap } from './components/ModuleSOSMap';
 import { ModuleBroadcast } from './components/ModuleBroadcast';
 import { ModuleAnalyticsAudit } from './components/ModuleAnalyticsAudit';
+import {
+  authenticateAuthority,
+  getAuthorityIncidents,
+  getAuthorityTourist,
+  getAuthorityIncidentLocation,
+  updateIncidentStatus,
+  createIncidentResponse,
+  createAlert,
+  clearSession,
+  logoutUser,
+  getAuthorityId,
+  getUsername,
+  createAuditLog,
+  listAuditLogs
+} from './lib/api';
 
 export default function App() {
   const [language, setLanguage] = useState<Language>('en');
@@ -2665,6 +2993,7 @@ export default function App() {
 
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [prefilledTouristId, setPrefilledTouristId] = useState('');
+  const [authorityAuthError, setAuthorityAuthError] = useState('');
 
   // Register service worker for offline PWA compliance
   useEffect(() => {
@@ -2677,30 +3006,172 @@ export default function App() {
     }
   }, []);
 
-  // Audit Logging helper
+  // Audit Logging helper — persists to public.audit_logs on the backend
+  // (see lib/api.ts createAuditLog) while also updating local state
+  // immediately so the UI doesn't wait on the network round-trip. Uses the
+  // actual signed-in authority's identity instead of a hardcoded officer.
   const handleLogAudit = (
     actionType: 'TOURIST_LOOKUP' | 'DISPATCH_UNIT' | 'BROADCAST_SENT' | 'TICKET_STATUS_CHANGE' | 'AUTHORITY_LOGIN',
     targetId: string,
     reason: string,
     details: string
   ) => {
+    const officerBadge = getUsername() || 'Unknown Officer';
+    const localId = `AUD-${Math.floor(1000 + Math.random() * 9000)}`;
     const newLog: AuditLog = {
-      id: `AUD-${Math.floor(1000 + Math.random() * 9000)}`,
+      id: localId,
       timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-      officerName: 'Rajesh Kumar, IPS',
-      officerBadge: 'IPS-7742',
+      officerName: officerBadge,
+      officerBadge,
       actionType,
       targetId,
       reason,
       details,
-      ipAddress: '10.142.0.88 (NIC Secure Gateway)'
+      ipAddress: 'Client-reported (see server audit log for source IP)'
     };
     setAuditLogs((prev) => [newLog, ...prev]);
+
+    createAuditLog({
+      action_type: actionType,
+      target_id: targetId,
+      reason,
+      details
+    })
+      .then((saved) => {
+        if (saved?.audit_id) {
+          setAuditLogs((prev) =>
+            prev.map((l) => (l.id === localId ? { ...l, backendAuditId: saved.audit_id } : l))
+          );
+        }
+      })
+      .catch((err) => {
+        console.warn('Failed to persist audit log to backend:', err);
+      });
   };
 
-  // Authority MFA Authenticate
-  const handleAuthenticateAuthority = (badgeId: string, otp: string) => {
-    // Accepts demo credentials or badge input
+  // Pull persisted audit log entries from the backend and merge them with
+  // any local-only entries not yet confirmed as saved.
+  const refreshAuditLogsFromBackend = async () => {
+    try {
+      const backendLogs = await listAuditLogs();
+      const mapped: AuditLog[] = backendLogs.map((log: any) => ({
+        id: `BE-${log.audit_id}`,
+        backendAuditId: log.audit_id,
+        timestamp: log.created_at
+          ? new Date(log.created_at).toISOString().replace('T', ' ').substring(0, 19)
+          : new Date().toISOString().replace('T', ' ').substring(0, 19),
+        officerName: getUsername() || 'Officer',
+        officerBadge: getUsername() || 'Officer',
+        actionType: log.action_type,
+        targetId: log.target_id,
+        reason: log.reason,
+        details: log.details || '',
+        ipAddress: log.ip_address || 'Server-recorded'
+      }));
+
+      setAuditLogs((prev) => {
+        const backendIds = new Set(mapped.map((m) => m.backendAuditId));
+        const localOnly = prev.filter((p) => !p.backendAuditId || !backendIds.has(p.backendAuditId));
+        return [...mapped, ...localOnly];
+      });
+    } catch (err) {
+      console.warn('Failed to refresh audit logs from backend:', err);
+    }
+  };
+
+  // Map a backend incident status onto the existing local SOSStatus enum.
+  const mapBackendStatus = (status: string): SOSIncident['status'] => {
+    const s = (status || '').toUpperCase();
+    if (s === 'RESOLVED' || s === 'CLOSED') return 'Resolved';
+    if (s === 'RESPONDING') return 'Units Dispatched';
+    return 'New';
+  };
+
+  const mapBackendSeverity = (severity: string | null | undefined): SOSIncident['severity'] => {
+    const s = (severity || '').toUpperCase();
+    if (s === 'CRITICAL' || s === 'HIGH') return 'Critical';
+    if (s === 'MEDIUM') return 'Warning';
+    return 'Advisory';
+  };
+
+  // Pull real incidents (created via the Tourist Portal's SOS/incident flows)
+  // from the backend and merge them into the existing local incidents state,
+  // resolving tourist and location details on a best-effort basis so the
+  // existing Kanban/Map UI can render them without any structural changes.
+  const refreshIncidentsFromBackend = async () => {
+    try {
+      const backendIncidents = await getAuthorityIncidents();
+      const mapped: SOSIncident[] = await Promise.all(
+        backendIncidents.map(async (inc: any) => {
+          let touristName = 'Registered Tourist';
+          let touristPhone = '';
+          const localTourist = tourists.find((t) => t.tourist_id === inc.tourist_id);
+          if (localTourist) {
+            touristName = localTourist.full_name || localTourist.name;
+            touristPhone = localTourist.phone;
+          } else {
+            try {
+              const backendTourist = await getAuthorityTourist(inc.tourist_id);
+              touristName = backendTourist.full_name || touristName;
+              touristPhone = backendTourist.phone || '';
+            } catch (e) {
+              // Tourist lookup failed (e.g. RLS/not found) — keep placeholder.
+            }
+          }
+
+          let lat = 32.2432;
+          let lng = 77.1892;
+          let address = inc.description || `${inc.incident_type || 'Incident'} report`;
+          try {
+            const loc = await getAuthorityIncidentLocation(inc.incident_id);
+            if (loc.latitude != null) lat = loc.latitude;
+            if (loc.longitude != null) lng = loc.longitude;
+            if (loc.name) address = loc.name;
+          } catch (e) {
+            // Location lookup failed — keep defaults.
+          }
+
+          const result: SOSIncident = {
+            id: `BE-${inc.incident_id}`,
+            backendIncidentId: inc.incident_id,
+            touristId: localTourist?.id || inc.tourist_id,
+            touristName,
+            touristPhone,
+            location: { lat, lng, address },
+            timestamp: inc.created_at
+              ? new Date(inc.created_at).toISOString().replace('T', ' ').substring(0, 19)
+              : new Date().toISOString().replace('T', ' ').substring(0, 19),
+            status: mapBackendStatus(inc.status),
+            severity: mapBackendSeverity(inc.severity),
+            hazardType: inc.incident_type || 'OTHER',
+            notes: inc.description || 'Incident synced from backend.'
+          };
+          return result;
+        })
+      );
+
+      setIncidents((prev) => {
+        const backendIds = new Set(mapped.map((m) => m.backendIncidentId));
+        const localOnly = prev.filter((p) => !p.backendIncidentId || !backendIds.has(p.backendIncidentId));
+        return [...mapped, ...localOnly];
+      });
+    } catch (err) {
+      console.warn('Failed to refresh incidents from backend:', err);
+    }
+  };
+
+  // Authority MFA Authenticate — backed by the real /authority/login
+  // endpoint (see lib/api.ts authenticateAuthority for the credential
+  // mapping). Login fails outright for a badge that isn't registered —
+  // there is no auto-registration fallback.
+  const handleAuthenticateAuthority = async (badgeId: string, otp: string): Promise<boolean> => {
+    setAuthorityAuthError('');
+    const result = await authenticateAuthority(badgeId, otp);
+    if (!result) {
+      setAuthorityAuthError('Authentication failed.');
+      return false;
+    }
+
     setUserRole('authority');
     setActiveModule('ai_hub');
     handleLogAudit(
@@ -2709,6 +3180,12 @@ export default function App() {
       'MFA Verification',
       'Successful 2FA login to National Command Center'
     );
+
+    // Populate the dashboard with real backend incidents (in addition to the
+    // existing local demo data) now that we have an authenticated session.
+    refreshIncidentsFromBackend();
+    refreshAuditLogsFromBackend();
+
     return true;
   };
 
@@ -2720,12 +3197,13 @@ export default function App() {
   };
 
   // Trigger SOS from Tourist Portal
-  const handleTouristTriggerSos = (touristName: string, locationStr: string) => {
+  const handleTouristTriggerSos = (touristName: string, locationStr: string, touristId?: string, touristPhone?: string) => {
+    const resolvedTouristId = touristId || 'UNKNOWN';
     const newIncident: SOSIncident = {
       id: `SOS-${Math.floor(9000 + Math.random() * 999)}`,
-      touristId: 'TR-88219',
+      touristId: resolvedTouristId,
       touristName,
-      touristPhone: '+34 612 884 902',
+      touristPhone: touristPhone || '',
       location: {
         lat: 32.2432,
         lng: 77.1892,
@@ -2743,7 +3221,7 @@ export default function App() {
     // Update tourist safety status
     setTourists((prev) =>
       prev.map((t) =>
-        t.id === 'TR-88219' ? { ...t, safetyStatus: 'SOS Active' } : t
+        t.id === resolvedTouristId ? { ...t, safetyStatus: 'SOS Active' } : t
       )
     );
 
@@ -2756,7 +3234,7 @@ export default function App() {
   };
 
   // Dispatch Responder Unit
-  const handleDispatchUnit = (incidentId: string, unitId: string) => {
+  const handleDispatchUnit = async (incidentId: string, unitId: string) => {
     const targetUnit = units.find((u) => u.id === unitId);
     const targetIncident = incidents.find((i) => i.id === incidentId);
 
@@ -2780,6 +3258,32 @@ export default function App() {
       );
     }
 
+    // If this incident has a real backend counterpart, persist the status
+    // change via PATCH /api/v1/incidents/{incident_id}, including the
+    // dispatching authority's own authority_id so the backend can link the
+    // incident to this authority at the moment of dispatch. Also log the
+    // dispatch action itself to public.responses.
+    if (targetIncident.backendIncidentId) {
+      const authorityId = getAuthorityId();
+      try {
+        await updateIncidentStatus(targetIncident.backendIncidentId, {
+          status: 'RESPONDING',
+          ...(authorityId ? { authority_id: authorityId } : {})
+        });
+      } catch (err) {
+        console.warn('Failed to persist dispatch status to backend:', err);
+      }
+      try {
+        await createIncidentResponse(targetIncident.backendIncidentId, {
+          responder_unit: targetUnit?.unitName || unitId,
+          action_taken: `Unit ${targetUnit?.unitName || unitId} dispatched to incident.`,
+          ...(authorityId ? { authority_id: authorityId } : {})
+        });
+      } catch (err) {
+        console.warn('Failed to log dispatch response to backend:', err);
+      }
+    }
+
     handleLogAudit(
       'DISPATCH_UNIT',
       unitId,
@@ -2789,7 +3293,7 @@ export default function App() {
   };
 
   // Resolve Incident
-  const handleResolveIncident = (incidentId: string) => {
+  const handleResolveIncident = async (incidentId: string) => {
     const targetIncident = incidents.find((i) => i.id === incidentId);
 
     setIncidents((prev) =>
@@ -2804,12 +3308,43 @@ export default function App() {
       );
     }
 
+    if (targetIncident?.backendIncidentId) {
+      try {
+        await updateIncidentStatus(targetIncident.backendIncidentId, { status: 'RESOLVED' });
+      } catch (err) {
+        console.warn('Failed to persist resolution status to backend:', err);
+      }
+    }
+
     handleLogAudit(
       'TICKET_STATUS_CHANGE',
       incidentId,
       'Incident Resolution',
       `Marked SOS Incident ${incidentId} as Resolved. Tourist confirmed safe.`
     );
+  };
+
+  // Mark tourist safe from the Tourist Tracking module — resolves that
+  // tourist's most recent open backend incident (if any) via PATCH, mirroring
+  // handleResolveIncident above.
+  const handleMarkTouristSafe = async (touristId: string) => {
+    setTourists((prev) =>
+      prev.map((t) => (t.id === touristId ? { ...t, safetyStatus: 'Safe' } : t))
+    );
+
+    const openIncident = incidents.find(
+      (i) => i.touristId === touristId && i.status !== 'Resolved' && i.backendIncidentId
+    );
+    if (openIncident?.backendIncidentId) {
+      setIncidents((prev) =>
+        prev.map((i) => (i.id === openIncident.id ? { ...i, status: 'Resolved' } : i))
+      );
+      try {
+        await updateIncidentStatus(openIncident.backendIncidentId, { status: 'RESOLVED' });
+      } catch (err) {
+        console.warn('Failed to persist mark-safe resolution to backend:', err);
+      }
+    }
   };
 
   // Send Broadcast Alert
@@ -2825,6 +3360,23 @@ export default function App() {
     };
 
     setBroadcasts((prev) => [createdAlert, ...prev]);
+
+    // The backend's `alerts` table models a notification tied to one
+    // incident + one recipient/channel — there is no backend concept of a
+    // region-wide broadcast campaign (see DATABASE.md §5.7). As the closest
+    // faithful mapping without inventing new backend behavior, publishing a
+    // broadcast also logs a real SMS alert record against every currently
+    // active backend-linked incident. This is best-effort and non-blocking;
+    // the existing local broadcast history/UI is unaffected either way.
+    incidents
+      .filter((i) => i.status !== 'Resolved' && i.backendIncidentId)
+      .forEach((i) => {
+        createAlert({
+          incident_id: i.backendIncidentId as string,
+          channel: 'SMS',
+          recipient: newAlert.region
+        }).catch((err) => console.warn('Failed to log backend alert for broadcast:', err));
+      });
 
     handleLogAudit(
       'BROADCAST_SENT',
@@ -2875,7 +3427,10 @@ export default function App() {
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
         userRole={userRole}
-        onLogout={() => setUserRole('gateway')}
+        onLogout={() => {
+          logoutUser().finally(() => clearSession());
+          setUserRole('gateway');
+        }}
         activeModule={activeModule}
         onSelectModule={setActiveModule}
         globalSearchQuery={globalSearchQuery}
@@ -2929,11 +3484,7 @@ export default function App() {
                 onSendSmsToTourist={(tourist) => {
                   setActiveModule('broadcast');
                 }}
-                onMarkSafe={(touristId) => {
-                  setTourists((prev) =>
-                    prev.map((t) => (t.id === touristId ? { ...t, safetyStatus: 'Safe' } : t))
-                  );
-                }}
+                onMarkSafe={handleMarkTouristSafe}
                 prefilledTouristId={prefilledTouristId}
               />
             )}
@@ -2974,1503 +3525,8 @@ export default function App() {
 }
 ```
 
-### `frontend/src/index.css`
-```css
-@import "tailwindcss";
-```
-
-### `frontend/src/types.ts`
-```typescript
-export type Language = 'en' | 'hi';
-
-export type UserRole = 'gateway' | 'tourist' | 'authority';
-
-export type ActiveModule = 'ai_hub' | 'tourist_tracking' | 'sos_map' | 'broadcast' | 'analytics_audit';
-
-export type InterceptionReason =
-  | 'Active SOS Response'
-  | 'Filed Missing Person Report'
-  | 'Designated Check-in Routine'
-  | 'Judicial / Legal Warrant';
-
-export type SOSStatus = 'New' | 'Units Dispatched' | 'Resolved';
-
-export type AlertSeverity = 'Critical' | 'Warning' | 'Advisory';
-
-export type AnomalyType =
-  | 'Unusual Grouping'
-  | 'Off-Route Signal Loss'
-  | 'Rapid Density Spike'
-  | 'Late-Night Isolated Signal'
-  | 'Hazard Zone Entry';
-
-export interface LocationPoint {
-  lat: number;
-  lng: number;
-  address: string;
-}
-
-export interface PastSOSRecord {
-  id: string;
-  date: string;
-  location: string;
-  reason: string;
-  status: 'Resolved' | 'False Alarm';
-}
-
-export interface TouristProfile {
-  id: string; // e.g. TR-88219 or TR-2026-8942
-  name: string;
-  nationality: string;
-  passportHash: string;
-  photoUrl: string;
-  phone: string;
-  emergencyContact: string;
-  emergencyRelation: string;
-  hotel: string;
-  currentLocation: LocationPoint;
-  batteryLevel: number;
-  safetyStatus: 'Safe' | 'Watch' | 'SOS Active';
-  lastSeenTime: string;
-  digitalBandId: string;
-  pastSOSHistory: PastSOSRecord[];
-  email?: string;
-  digiLockerVerified?: boolean;
-  aadhaarHash?: string;
-  locationConsent?: 'granted' | 'declined';
-
-  // Schema fields as per DB spec
-  tourist_id?: string;
-  digital_id?: string;
-  full_name?: string;
-  kyc_document_type?: string;
-  kyc_verified?: boolean;
-  emergency_contact?: string;
-  preferred_language?: string;
-  created_at?: string;
-}
-
-export interface SOSIncident {
-  id: string; // e.g. SOS-9021
-  touristId: string;
-  touristName: string;
-  touristPhone: string;
-  location: LocationPoint;
-  timestamp: string;
-  status: SOSStatus;
-  severity: AlertSeverity;
-  unitAssigned?: string;
-  hazardType: string;
-  notes: string;
-  audioRecordingUrl?: string;
-}
-
-export interface PatrollingUnit {
-  id: string;
-  unitName: string;
-  type: 'PCR Van' | 'Quick Response Motorcycle' | 'Women Safety Squad' | 'Highway Patrol';
-  unitLeader: string;
-  location: LocationPoint;
-  status: 'Patrolling' | 'Dispatched' | 'On Scene' | 'Standby';
-  contactPhone: string;
-  assignedIncidentId?: string;
-}
-
-export interface PoliceStation {
-  id: string;
-  name: string;
-  jurisdiction: string;
-  location: LocationPoint;
-  contactPhone: string;
-  activeOfficers: number;
-  availableVehicles: number;
-}
-
-export interface Hospital {
-  id: string;
-  name: string;
-  jurisdiction: string;
-  location: LocationPoint;
-  contactPhone: string;
-  icuBedsAvailable: number;
-  ambulancesReady: number;
-}
-
-export interface AnomalyCluster {
-  id: string;
-  regionName: string;
-  riskScore: number; // 0 - 100
-  touristDensity: number;
-  anomalyType: AnomalyType;
-  confidenceScore: number; // %
-  descriptionEn: string;
-  descriptionHi: string;
-  recommendedActionEn: string;
-  recommendedActionHi: string;
-  coordinates: { lat: number; lng: number };
-  timestamp: string;
-}
-
-export interface BroadcastAlert {
-  id: string;
-  senderBadge: string;
-  region: string;
-  radiusKm: number;
-  titleEn: string;
-  titleHi: string;
-  bodyEn: string;
-  bodyHi: string;
-  severity: AlertSeverity;
-  timestamp: string;
-  recipientCount: number;
-  deliveredCount: number;
-  status: 'Active' | 'Completed' | 'Draft';
-}
-
-export interface AuditLog {
-  id: string;
-  timestamp: string;
-  officerName: string;
-  officerBadge: string;
-  actionType: 'TOURIST_LOOKUP' | 'DISPATCH_UNIT' | 'BROADCAST_SENT' | 'TICKET_STATUS_CHANGE' | 'AUTHORITY_LOGIN';
-  targetId: string;
-  reason?: InterceptionReason | string;
-  details: string;
-  ipAddress: string;
-}
-
-export interface AILog {
-  id: string;
-  timestamp: string;
-  severity: 'info' | 'warning' | 'critical';
-  messageEn: string;
-  messageHi: string;
-  modelConfidence: number;
-  region: string;
-}
-
-export interface ItineraryItem {
-  id: string;
-  destination: string;
-  date: string;
-  hotel: string;
-  activities: string;
-  safetyStatus: 'Safe Corridor' | 'Weather Advisory' | 'High Risk Zone';
-  coordinates?: { lat: number; lng: number };
-}
-
-export interface ChatMessage {
-  id: string;
-  sender: 'user' | 'bot';
-  text: string;
-  timestamp: string;
-  quickActions?: string[];
-}
-
-export type GeoFenceRiskLevel = 'Safe' | 'Caution' | 'Unsafe';
-
-export interface GeoFenceZone {
-  id: string;
-  name: string;
-  riskLevel: GeoFenceRiskLevel;
-  description: string;
-  center: { lat: number; lng: number };
-  radiusKm: number;
-}
-
-export type SosStepState = 'ready' | 'confirming' | 'sending' | 'success' | 'error' | 'active';
-
-```
-
-### `frontend/src/lib/api.ts`
-```typescript
-import { SOSRecord, getQueuedSOSRecords, updateSOSRecordStatus } from "./db";
-
-let isSyncing = false;
-
-export function getApiBaseUrl(): string {
-  return localStorage.getItem("sos_api_base_url") || "http://localhost:8000/api/v1";
-}
-
-export function getAuthToken(): string {
-  return localStorage.getItem("sos_auth_token") || "";
-}
-
-export function getTouristId(): string {
-  return localStorage.getItem("sos_tourist_id") || "eee6684b-dee5-4471-bfd0-00b9a7ee9b66";
-}
-
-export async function submitSOSOnline(sosRecord: SOSRecord): Promise<any> {
-  const baseUrl = getApiBaseUrl();
-  const token = getAuthToken();
-
-  const touristId = sosRecord.tourist_id || getTouristId();
-
-  const payload = {
-    tourist_id: touristId,
-    latitude: sosRecord.latitude !== undefined ? sosRecord.latitude : null,
-    longitude: sosRecord.longitude !== undefined ? sosRecord.longitude : null,
-    description: sosRecord.description || `SOS Emergency Alert (${sosRecord.location_source || "live"})`,
-    severity: sosRecord.severity || "HIGH",
-    trigger_source: "APP",
-  };
-
-  const response = await fetch(`${baseUrl}/sos`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(payload),
-  });
-
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new Error(`Server returned status ${response.status}: ${errText}`);
-  }
-
-  return await response.json();
-}
-
-export async function syncQueuedSOS(
-  onProgressCallback?: (status: string, record: SOSRecord, serverRes?: any) => void
-): Promise<{ count: number; synced: number; error?: string }> {
-  if (isSyncing) {
-    console.log("Sync process already in progress. Skipping duplicate invocation.");
-    return { count: 0, synced: 0 };
-  }
-
-  if (!navigator.onLine) {
-    console.log("Device is offline. Cannot perform synchronization.");
-    return { count: 0, synced: 0, error: "Offline" };
-  }
-
-  isSyncing = true;
-  let syncedCount = 0;
-  let queuedRecords: SOSRecord[] = [];
-
-  try {
-    queuedRecords = await getQueuedSOSRecords();
-    console.log(`Found ${queuedRecords.length} queued offline SOS records to synchronize.`);
-
-    for (const record of queuedRecords) {
-      if (record.status === "SYNCED") continue;
-
-      try {
-        if (record.local_sos_id) {
-          await updateSOSRecordStatus(record.local_sos_id, "SYNCING");
-        }
-
-        if (onProgressCallback) onProgressCallback("SYNCING", record);
-
-        const serverResponse = await submitSOSOnline(record);
-        console.log("Successfully synchronized SOS record:", serverResponse);
-
-        if (record.local_sos_id) {
-          await updateSOSRecordStatus(record.local_sos_id, "SYNCED", {
-            server_sos_id: serverResponse.sos_id || `MOCK-${Date.now()}`,
-            server_incident_id: serverResponse.incident_id || `MOCK-INC-${Date.now()}`,
-          });
-        }
-
-        syncedCount++;
-        if (onProgressCallback) onProgressCallback("SYNCED", record, serverResponse);
-      } catch (err: any) {
-        console.error(`Failed to synchronize SOS record ${record.local_sos_id}:`, err);
-        if (record.local_sos_id) {
-          await updateSOSRecordStatus(record.local_sos_id, "QUEUED_OFFLINE");
-        }
-        if (onProgressCallback) onProgressCallback("FAILED", record, err);
-      }
-    }
-  } catch (e) {
-    console.error("Error during synchronization process:", e);
-  } finally {
-    isSyncing = false;
-  }
-
-  return { count: queuedRecords.length, synced: syncedCount };
-}
-```
-
-### `frontend/src/lib/db.ts`
-```typescript
-export interface LocationData {
-  latitude: number | null;
-  longitude: number | null;
-  accuracy: number | null;
-  timestamp: string;
-  location_source?: string;
-}
-
-export interface SOSRecord {
-  local_sos_id?: string;
-  tourist_id?: string | null;
-  triggered_at?: string;
-  latitude?: number | null;
-  longitude?: number | null;
-  accuracy?: number | null;
-  location_source?: string;
-  description?: string;
-  severity?: string;
-  status?: string;
-  server_sos_id?: string | null;
-  server_incident_id?: string | null;
-  synced_at?: string | null;
-}
-
-const DB_NAME = "smart_tourist_safety_sos";
-const DB_VERSION = 1;
-const STORE_LOCATION = "last_location";
-const STORE_QUEUE = "sos_queue";
-
-let dbInstance: IDBDatabase | null = null;
-
-export async function initDB(): Promise<IDBDatabase> {
-  if (dbInstance) return dbInstance;
-
-  return new Promise((resolve, reject) => {
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-
-    request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
-      const db = (event.target as IDBOpenDBRequest).result;
-      if (!db.objectStoreNames.contains(STORE_LOCATION)) {
-        db.createObjectStore(STORE_LOCATION, { keyPath: "id" });
-      }
-      if (!db.objectStoreNames.contains(STORE_QUEUE)) {
-        const queueStore = db.createObjectStore(STORE_QUEUE, { keyPath: "local_sos_id" });
-        queueStore.createIndex("status", "status", { unique: false });
-        queueStore.createIndex("triggered_at", "triggered_at", { unique: false });
-      }
-    };
-
-    request.onsuccess = (event: Event) => {
-      dbInstance = (event.target as IDBOpenDBRequest).result;
-      resolve(dbInstance);
-    };
-
-    request.onerror = (event: Event) => {
-      console.error("IndexedDB error:", (event.target as IDBOpenDBRequest).error);
-      reject((event.target as IDBOpenDBRequest).error);
-    };
-  });
-}
-
-export async function saveLastKnownLocation(locationData: LocationData): Promise<any> {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_LOCATION, "readwrite");
-    const store = tx.objectStore(STORE_LOCATION);
-    const record = {
-      id: "latest",
-      latitude: locationData.latitude,
-      longitude: locationData.longitude,
-      accuracy: locationData.accuracy || null,
-      timestamp: locationData.timestamp || new Date().toISOString(),
-    };
-    const request = store.put(record);
-    request.onsuccess = () => resolve(record);
-    request.onerror = (e) => reject((e.target as IDBRequest).error);
-  });
-}
-
-export async function getLastKnownLocation(): Promise<LocationData | null> {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_LOCATION, "readonly");
-    const store = tx.objectStore(STORE_LOCATION);
-    const request = store.get("latest");
-    request.onsuccess = () => resolve(request.result || null);
-    request.onerror = (e) => reject((e.target as IDBRequest).error);
-  });
-}
-
-export async function queueSOSRecord(sosRecord: SOSRecord): Promise<SOSRecord> {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_QUEUE, "readwrite");
-    const store = tx.objectStore(STORE_QUEUE);
-    const record: SOSRecord = {
-      local_sos_id: sosRecord.local_sos_id || crypto.randomUUID(),
-      tourist_id: sosRecord.tourist_id || null,
-      triggered_at: sosRecord.triggered_at || new Date().toISOString(),
-      latitude: sosRecord.latitude !== undefined ? sosRecord.latitude : null,
-      longitude: sosRecord.longitude !== undefined ? sosRecord.longitude : null,
-      accuracy: sosRecord.accuracy || null,
-      location_source: sosRecord.location_source || "unavailable",
-      description: sosRecord.description || "Offline Emergency SOS Alert",
-      severity: sosRecord.severity || "HIGH",
-      status: sosRecord.status || "QUEUED_OFFLINE",
-      server_sos_id: sosRecord.server_sos_id || null,
-      server_incident_id: sosRecord.server_incident_id || null,
-      synced_at: sosRecord.synced_at || null,
-    };
-    const request = store.put(record);
-    request.onsuccess = () => resolve(record as SOSRecord);
-    request.onerror = (e) => reject((e.target as IDBRequest).error);
-  });
-}
-
-export async function getQueuedSOSRecords(): Promise<SOSRecord[]> {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_QUEUE, "readonly");
-    const store = tx.objectStore(STORE_QUEUE);
-    const request = store.getAll();
-    request.onsuccess = () => {
-      const all: SOSRecord[] = request.result || [];
-      const queued = all.filter((r) => r.status === "QUEUED_OFFLINE");
-      resolve(queued);
-    };
-    request.onerror = (e) => reject((e.target as IDBRequest).error);
-  });
-}
-
-export async function updateSOSRecordStatus(
-  local_sos_id: string,
-  newStatus: string,
-  serverData: Partial<SOSRecord> = {}
-): Promise<SOSRecord> {
-  const db = await initDB();
-  return new Promise((resolve, reject) => {
-    const tx = db.transaction(STORE_QUEUE, "readwrite");
-    const store = tx.objectStore(STORE_QUEUE);
-    const getReq = store.get(local_sos_id);
-    getReq.onsuccess = () => {
-      const record = getReq.result as SOSRecord;
-      if (!record) return reject(new Error("Record not found"));
-
-      record.status = newStatus;
-      if (serverData.server_sos_id) record.server_sos_id = serverData.server_sos_id;
-      if (serverData.server_incident_id) record.server_incident_id = serverData.server_incident_id;
-      if (newStatus === "SYNCED") record.synced_at = new Date().toISOString();
-
-      const putReq = store.put(record);
-      putReq.onsuccess = () => resolve(record);
-      putReq.onerror = (e) => reject((e.target as IDBRequest).error);
-    };
-    getReq.onerror = (e) => reject((e.target as IDBRequest).error);
-  });
-}
-```
-
-### `frontend/src/lib/location.ts`
-```typescript
-import { saveLastKnownLocation, getLastKnownLocation, LocationData } from "./db";
-
-export async function getLiveLocation(
-  options = { timeout: 6000, maxAge: 0, enableHighAccuracy: true }
-): Promise<LocationData> {
-  if (!navigator.geolocation) {
-    throw new Error("Geolocation API not supported by browser");
-  }
-
-  return new Promise((resolve, reject) => {
-    navigator.geolocation.getCurrentPosition(
-      async (position) => {
-        const locData: LocationData = {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-          timestamp: new Date(position.timestamp).toISOString(),
-          location_source: "live",
-        };
-
-        try {
-          await saveLastKnownLocation(locData);
-        } catch (err) {
-          console.warn("Could not save last known location to IndexedDB:", err);
-        }
-
-        resolve(locData);
-      },
-      (error) => {
-        reject(error);
-      },
-      options
-    );
-  });
-}
-
-export async function getSOSLocation(): Promise<LocationData> {
-  try {
-    console.log("Attempting live GPS location acquisition...");
-    const liveLoc = await getLiveLocation();
-    console.log("Live GPS acquired:", liveLoc);
-    return liveLoc;
-  } catch (gpsError: any) {
-    console.warn("Live GPS unavailable or timed out:", gpsError.message || gpsError);
-
-    try {
-      const lastKnown = await getLastKnownLocation();
-      if (lastKnown && lastKnown.latitude && lastKnown.longitude) {
-        console.log("Using last-known location from IndexedDB:", lastKnown);
-        return {
-          latitude: lastKnown.latitude,
-          longitude: lastKnown.longitude,
-          accuracy: lastKnown.accuracy || null,
-          timestamp: lastKnown.timestamp,
-          location_source: "last_known",
-        };
-      }
-    } catch (dbError) {
-      console.warn("Could not read last-known location from IndexedDB:", dbError);
-    }
-
-    console.log("No GPS or last-known location available. Proceeding with 'unavailable'.");
-    return {
-      latitude: null,
-      longitude: null,
-      accuracy: null,
-      timestamp: new Date().toISOString(),
-      location_source: "unavailable",
-    };
-  }
-}
-```
-
-### `frontend/src/data/i18n.ts`
-```typescript
-import { Language } from '../types';
-
-export const i18n = {
-  en: {
-    // Top Bar & Branding
-    nationalPortalName: 'SURAKSHA SETU',
-    nationalPortalSub: 'Tourist Safety & AI Predictive Emergency Portal',
-    stateGovt: 'Suraksha Setu • Ministry of Home & Tourism',
-    officerTitle: 'Chief Safety Controller',
-    officerName: 'Rajesh Kumar, IPS',
-    languageLabel: 'Language / भाषा',
-    liveTicker: '⚡ LIVE STATUS: 3 Active SOS Beacons • 14 Patrolling Responders Online • AI Anomaly Engine: NORMAL (22% Risk)',
-    searchPlaceholder: 'Global Search Tourist ID / Incident / Patrol Unit...',
-    
-    // Gateway & Roles
-    gatewayTitle: 'SURAKSHA SETU Safety Command Gateway',
-    gatewaySub: 'Integrated emergency response, AI threat prediction, and tourist safety monitoring ecosystem.',
-    selectRoleTitle: 'Select Access Portal',
-    forTouristsTitle: 'For Tourists & Travelers',
-    forTouristsDesc: 'Public mobile safety web app with instant emergency SOS panic trigger, live safety beacon, and regional helplines.',
-    enterTouristPortal: 'Launch Tourist Safety Web App',
-    
-    forAuthoritiesTitle: 'For Authorized Personnel',
-    forAuthoritiesDesc: 'Command Center access for IPS officers, state police, and disaster response teams. Requires MFA verification.',
-    enterAuthorityPortal: 'Authenticate as Authority',
-    
-    mfaModalTitle: 'Authority MFA Security Verification',
-    mfaBadgeIdLabel: 'Officer Badge ID / IPS No.',
-    mfaOtpLabel: '2FA Auth Code / OTP',
-    mfaVerifyBtn: 'Verify Identity & Enter Command Dashboard',
-    mfaDemoNote: 'Demo Mode: Pre-filled with Chief Controller Credentials (IPS-7742 / 789012)',
-    
-    // Navigation Modules
-    modAiHub: 'AI Anomaly & Prediction Hub',
-    modTouristTracking: 'Tourist Detail Tracking',
-    modSosMap: 'SOS Alert & Command Map',
-    modBroadcast: 'Broadcast & Geofenced Alerts',
-    modAnalyticsAudit: 'Audit Logs & Analytics',
-    
-    // Module 1: AI Anomaly
-    highRiskHeatmap: 'High-Risk Zones & Heatmap Intelligence',
-    incidentClusters: 'AI Incident Anomaly Clusters',
-    contextualAnalysis: 'AI Contextual Stream & Threat Metrics',
-    predictiveTracking: 'Continuous Predictive Anomaly Feed',
-    riskScore: 'AI Threat Index',
-    touristDensity: 'Active Density',
-    confidenceLevel: 'Model Confidence',
-    anomalyType: 'Anomaly Type',
-    investigateBtn: 'Investigate Zone & Tourists',
-    viewInMap: 'View on GIS Command Map',
-    
-    // Module 2: Tourist Tracking
-    touristSearchTitle: 'Tourist ID Verification & Live Lookup',
-    touristSearchSub: 'Enter official Tourist ID (e.g., TR-88219) or digital safety band number.',
-    searchBtn: 'Execute Lookup',
-    interceptionTitle: 'Mandatory Interception & Privacy Mandate',
-    interceptionDesc: 'Under statutory safety protocols, accessing personal telemetry and live location of citizens or visitors requires a logged legal justification.',
-    selectReasonLabel: 'Select Mandatory Search Reason',
-    reasonActiveSos: 'Active SOS Response',
-    reasonMissing: 'Filed Missing Person Report',
-    reasonRoutine: 'Designated Check-in Routine',
-    reasonWarrant: 'Judicial / Legal Warrant',
-    officerNotesLabel: 'Officer Case Notes / Dispatch Ref (Optional)',
-    confirmAccessBtn: 'Confirm & View Telemetry Profile',
-    cancelBtn: 'Cancel Request',
-    
-    // Tourist Profile Card
-    profileTitle: 'Tourist Safety Profile',
-    passportNo: 'Passport / ID Hash',
-    nationality: 'Nationality / Origin',
-    phoneNo: 'Registered Mobile',
-    emergencyContact: 'Emergency Contact',
-    hotelStay: 'Hotel / Stay Location',
-    batteryStatus: 'Safety Band Battery',
-    safetyStatus: 'Current Safety Status',
-    liveLocation: 'Real-Time Location Coordinate',
-    sosHistory: 'Past SOS & Incident Records',
-    dispatchToTourist: 'Dispatch Patrol Unit to Location',
-    sendDirectMsg: 'Send Priority SMS Alert',
-    markSafeBtn: 'Mark Tourist as Safe',
-    
-    // Module 3: SOS Command Map
-    gisMapTitle: 'Real-Time GIS Command Map',
-    layersLabel: 'Toggle Map Layers:',
-    layerSosBeacons: 'Active SOS Beacons',
-    layerResponders: 'Patrolling Units',
-    layerStations: 'Police Stations & Safe Havens',
-    layerHospitals: 'Hospitals & Medical Care',
-    layerHeatmap: 'AI Threat Heatmap',
-    
-    kanbanTitle: 'Incident Lifecycle Ticketing System',
-    kanbanNew: 'New SOS Alerts',
-    kanbanDispatched: 'Units Dispatched',
-    kanbanResolved: 'Resolved & Safe',
-    dispatchUnitBtn: 'Dispatch PCR Unit',
-    markResolvedBtn: 'Resolve Incident',
-    addMockSosBtn: '+ Simulate Incoming SOS Emergency',
-    
-    // Module 4: Broadcast & Geofence
-    broadcastTitle: 'Geofenced Emergency Broadcast Centre',
-    broadcastSub: 'Draft and push targeted emergency SMS and app alerts to all travelers in specific high-risk radiuses.',
-    selectRegion: 'Target Zone / Administrative Division',
-    radiusKm: 'Geofence Radius (km)',
-    severityLabel: 'Alert Severity Level',
-    titleEnLabel: 'Alert Title (English)',
-    titleHiLabel: 'Alert Title (Hindi / हिंदी)',
-    bodyEnLabel: 'Alert Message Body (English)',
-    bodyHiLabel: 'Alert Message Body (Hindi / हिंदी)',
-    estimatedRecipients: 'Estimated Target Audience in Selected Geofence',
-    quickTemplates: 'Load Emergency Template:',
-    templateWeather: 'Extreme Weather / Flash Flood',
-    templateHeatwave: 'Severe Heatwave Alert',
-    templateUnsafe: 'Unsafe Mountain Pass / Landslide',
-    sendBroadcastBtn: '🚀 Push Geofenced Alert Now',
-    broadcastHistoryTitle: 'Recent Broadcast Log & Delivery Telemetry',
-    
-    // Audit & Analytics
-    auditLogsTitle: 'Authority Access & Audit Trail',
-    auditLogsDesc: 'Immutable system log tracking officer search justifications, SOS dispatches, and emergency broadcasts.',
-    exportCsvBtn: 'Export Audit Logs (CSV)',
-    colTimestamp: 'Timestamp',
-    colOfficer: 'Officer / Badge ID',
-    colAction: 'Action Taken',
-    colTarget: 'Target ID',
-    colReason: 'Mandatory Reason',
-    colIp: 'IP / Terminal',
-    
-    performanceTitle: 'Response Performance & Zone Analytics',
-    avgResponseTime: 'Avg Emergency Response Time',
-    resolutionRate: 'Incident Resolution Rate',
-    frequentZones: 'Frequent Incident Zones Breakdown',
-    inflowVsRisk: 'Tourist Inflow vs Risk Trend',
-    
-    // Tourist Public Portal
-    touristPortalTitle: 'National Tourist Safety Portal',
-    touristPortalSub: 'Official emergency beacon & safety companion for travelers in India.',
-    sosPanicBtnText: 'EMERGENCY SOS',
-    sosHoldInstruction: 'Tap to trigger immediate SOS beacon to nearest Police Command Center.',
-    sosCancelTimer: 'SOS Activating in',
-    sosActiveNotice: '🚨 SOS BEACON ACTIVE! Patrol Unit PCR-04 dispatched to your GPS coordinates.',
-    hotlinesTitle: 'National Emergency Hotlines',
-    safeHavensNearby: 'Nearby Safe Havens & Police Posts',
-    currentAddress: 'Your GPS Location',
-    locationAccuracy: 'GPS Accuracy',
-    switchGatewayBtn: 'Return to Entry Gateway',
-    logoutBtn: 'Logout Officer',
-
-    // Tourist Auth & Onboarding Flow
-    authSignUpTab: 'Sign Up (New Tourist)',
-    authSignInTab: 'Sign In & Trip Activation',
-    signUpTitle: 'Tourist Safety Registration',
-    signUpSub: 'Create your official Suraksha Setu Digital Tourist Pass with instant DigiLocker e-KYC verification.',
-    signInTitle: 'Activate Trip / Sign In',
-    signInSub: 'Enter your unique Tourist ID (e.g. TR-2026-8942) and registered phone number to activate safety session.',
-    fullNameLabel: 'Full Name (as per Govt ID)',
-    phoneLabel: 'Mobile Phone Number',
-    emailLabel: 'Email Address',
-    emergencyContactLabel: 'Emergency Contact Full Name',
-    emergencyRelationLabel: 'Relationship to Contact',
-    emergencyPhoneLabel: 'Emergency Contact Mobile',
-    connectDigiLockerBtn: 'Connect with DigiLocker (e-KYC)',
-    digiLockerVerifiedBadge: 'DigiLocker e-KYC Verified',
-    sendOtpBtn: 'Send Mobile OTP',
-    otpModalTitle: 'Mobile Number OTP Verification',
-    otpModalSub: 'Enter 6-digit verification code sent to',
-    verifyOtpBtn: 'Verify OTP & Generate Tourist ID',
-    digitalPassTitle: 'Suraksha Setu Digital Tourist Safety Pass',
-    touristIdLabel: 'Unique Tourist ID',
-    copyIdBtn: 'Copy Tourist ID',
-    downloadPassBtn: 'Download Digital Pass',
-    proceedToConsentBtn: 'Proceed to Activate Trip & Location Consent',
-    consentModalTitle: 'Mandatory Safety Permission: Grant Live Location Access',
-    consentModalSub: 'Suraksha Setu Civil Protection & Emergency Response Protocol',
-    consentModalDesc: 'To enable 1-tap SOS panic triggers, AI geofenced hazard alerts, and real-time police dispatch during emergencies in remote or high-altitude zones, Suraksha Setu requests continuous encrypted live location tracking for your trip duration.',
-    consentEnableBtn: 'Enable Live Location Access & Start Trip',
-    consentDeclineBtn: 'Decline (Standard Manual SOS Only)',
-
-    // Dashboard Tabs & Modules
-    tabOverview: 'Safety Status',
-    tabItinerary: 'Itinerary Planner',
-    tabHeatmap: 'Safety Heatmap',
-    tabRouteFinder: 'Route Finder Map',
-    chatbotTitle: 'Suraksha AI Safety Assistant',
-    quickContactsBtn: 'Emergency Hotlines Drawer',
-    broadcastAlertTitle: 'Geofenced Safety Advisory Broadcast',
-    simulateBroadcastBtn: 'Simulate Live Area Broadcast Test'
-  },
-  
-  hi: {
-    // Top Bar & Branding
-    nationalPortalName: 'सुरक्षा सेतु',
-    nationalPortalSub: 'पर्यटक सुरक्षा एवं एआई पूर्वानुमानित आपातकालीन पोर्टल',
-    stateGovt: 'सुरक्षा सेतु • गृह एवं पर्यटन मंत्रालय',
-    officerTitle: 'मुख्य सुरक्षा नियंत्रक',
-    officerName: 'राजेश कुमार, आईपीएस',
-    languageLabel: 'भाषा / Language',
-    liveTicker: '⚡ लाइव स्थिति: 3 सक्रिय एसओएस बीकन • 14 गश्ती दल ऑनलाइन • एआई विसंगति इंजन: सामान्य (22% जोखिम)',
-    searchPlaceholder: 'ग्लोबल खोज: पर्यटक आईडी / घटना / गश्ती इकाई...',
-    
-    // Gateway & Roles
-    gatewayTitle: 'सुरक्षा सेतु सुरक्षा कमान प्रवेश द्वार',
-    gatewaySub: 'एकीकृत आपातकालीन प्रतिक्रिया, एआई खतरा पूर्वानुमान और पर्यटक सुरक्षा निगरानी पारिस्थितिकी तंत्र।',
-    selectRoleTitle: 'प्रवेश पोर्टल चुनें',
-    forTouristsTitle: 'पर्यटकों और यात्रियों के लिए',
-    forTouristsDesc: 'तत्काल आपातकालीन एसओएस पैनिक बटन, लाइव सुरक्षा बीकन और क्षेत्रीय हेल्पलाइन के साथ सार्वजनिक मोबाइल सुरक्षा ऐप।',
-    enterTouristPortal: 'पर्यटक सुरक्षा ऐप खोलें',
-    
-    forAuthoritiesTitle: 'प्राधिकृत अधिकारियों के लिए',
-    forAuthoritiesDesc: 'आईपीएस अधिकारियों, राज्य पुलिस और आपदा प्रतिक्रिया टीमों के लिए कमान केंद्र। एमएफए सत्यापन आवश्यक है।',
-    enterAuthorityPortal: 'अधिकारी के रूप में सत्यापित करें',
-    
-    mfaModalTitle: 'प्राधिकरण एमएफए सुरक्षा सत्यापन',
-    mfaBadgeIdLabel: 'अधिकारी बैज आईडी / आईपीएस संख्या',
-    mfaOtpLabel: '2FA प्रमाणन कोड / ओटीपी',
-    mfaVerifyBtn: 'पहचान सत्यापित करें और कमान केंद्र में प्रवेश करें',
-    mfaDemoNote: 'डेमो मोड: मुख्य नियंत्रक क्रेडेंशियल्स के साथ पहले से भरा हुआ (IPS-7742 / 789012)',
-    
-    // Navigation Modules
-    modAiHub: 'एआई विसंगति एवं पूर्वानुमान केंद्र',
-    modTouristTracking: 'पर्यटक विवरण और ट्रैकिंग',
-    modSosMap: 'एसओएस चेतावनी एवं कमान नक्शा',
-    modBroadcast: 'प्रसारण और जियोफेन्स्ड अलर्ट',
-    modAnalyticsAudit: 'ऑडिट लॉग और विश्लेषिकी',
-    
-    // Module 1: AI Anomaly
-    highRiskHeatmap: 'उच्च जोखिम वाले क्षेत्र और हीटमैप इंटेलिजेंस',
-    incidentClusters: 'एआई घटना विसंगति क्लस्टर',
-    contextualAnalysis: 'एआई संदर्भ धारा और खतरा मेट्रिक्स',
-    predictiveTracking: 'सतत पूर्वानुमानित विसंगति फीड',
-    riskScore: 'एआई खतरा सूचकांक',
-    touristDensity: 'सक्रिय घनत्व',
-    confidenceLevel: 'मॉडल विश्वसनीयता',
-    anomalyType: 'विसंगति प्रकार',
-    investigateBtn: 'क्षेत्र और पर्यटकों की जांच करें',
-    viewInMap: 'जीआईएस नक्शे पर देखें',
-    
-    // Module 2: Tourist Tracking
-    touristSearchTitle: 'पर्यटक आईडी सत्यापन और लाइव खोज',
-    touristSearchSub: 'आधिकारिक पर्यटक आईडी (उदा. TR-88219) या डिजिटल सुरक्षा बैंड संख्या दर्ज करें।',
-    searchBtn: 'खोज निष्पादित करें',
-    interceptionTitle: 'अनिवार्य इंटरसेप्शन और गोपनीयता जनादेश',
-    interceptionDesc: 'वैधानिक सुरक्षा प्रोटोकॉल के तहत, नागरिकों या आगंतुकों के व्यक्तिगत टेलीमेट्री और लाइव स्थान तक पहुंचने के लिए कानूनी औचित्य दर्ज करना अनिवार्य है।',
-    selectReasonLabel: 'अनिवार्य खोज कारण चुनें',
-    reasonActiveSos: 'सक्रिय एसओएस प्रतिक्रिया (Active SOS Response)',
-    reasonMissing: 'गुमशुदा व्यक्ति रिपोर्ट (Filed Missing Person Report)',
-    reasonRoutine: 'निर्दिष्ट चेक-इन दिनचर्या (Designated Check-in Routine)',
-    reasonWarrant: 'न्यायिक / कानूनी वारंट (Judicial / Legal Warrant)',
-    officerNotesLabel: 'अधिकारी केस नोट / प्रेषण संदर्भ (वैकल्पिक)',
-    confirmAccessBtn: 'पुष्टि करें और टेलीमेट्री प्रोफ़ाइल देखें',
-    cancelBtn: 'अनुरोध रद्द करें',
-    
-    // Tourist Profile Card
-    profileTitle: 'पर्यटक सुरक्षा प्रोफ़ाइल',
-    passportNo: 'पासपोर्ट / आईडी हैश',
-    nationality: 'राष्ट्रीयता / मूल देश',
-    phoneNo: 'पंजीकृत मोबाइल',
-    emergencyContact: 'आपातकालीन संपर्क',
-    hotelStay: 'होटल / रहने का स्थान',
-    batteryStatus: 'सुरक्षा बैंड बैटरी',
-    safetyStatus: 'वर्तमान सुरक्षा स्थिति',
-    liveLocation: 'वास्तविक समय स्थान निर्देशांक',
-    sosHistory: 'अतीत के एसओएस और घटना रिकॉर्ड',
-    dispatchToTourist: 'स्थान पर गश्ती इकाई भेजें',
-    sendDirectMsg: 'प्राथमिकता एसएमएस अलर्ट भेजें',
-    markSafeBtn: 'पर्यटक को सुरक्षित चिह्नित करें',
-    
-    // Module 3: SOS Command Map
-    gisMapTitle: 'वास्तविक समय जीआईएस कमान नक्शा',
-    layersLabel: 'मानचित्र परतें टगल करें:',
-    layerSosBeacons: 'सक्रिय एसओएस बीकन',
-    layerResponders: 'गश्ती प्रतिक्रिया दल',
-    layerStations: 'पुलिस स्टेशन और सुरक्षित केंद्र',
-    layerHospitals: 'अस्पताल और आपातकालीन चिकित्सा',
-    layerHeatmap: 'एआई खतरा हीटमैप',
-    
-    kanbanTitle: 'घटना जीवनचक्र टिकटिंग प्रणाली',
-    kanbanNew: 'नया एसओएस अलर्ट',
-    kanbanDispatched: 'दल रवाना किया गया',
-    kanbanResolved: 'हल किया गया और सुरक्षित',
-    dispatchUnitBtn: 'पीसीआर इकाई भेजें',
-    markResolvedBtn: 'घटना का समाधान करें',
-    addMockSosBtn: '+ आने वाले एसओएस आपातकाल अनुकरण करें',
-    
-    // Module 4: Broadcast & Geofence
-    broadcastTitle: 'जियोफेन्स्ड आपातकालीन प्रसारण केंद्र',
-    broadcastSub: 'विशिष्ट उच्च जोखिम वाले क्षेत्रों में सभी यात्रियों को लक्षित आपातकालीन एसएमएस और ऐप अलर्ट का मसौदा तैयार करें और भेजें।',
-    selectRegion: 'लक्षित क्षेत्र / प्रशासनिक प्रभाग',
-    radiusKm: 'जियोफेंस त्रिज्या (किमी)',
-    severityLabel: 'अलर्ट गंभीरता स्तर',
-    titleEnLabel: 'अलर्ट शीर्षक (अंग्रेजी)',
-    titleHiLabel: 'अलर्ट शीर्षक (हिंदी)',
-    bodyEnLabel: 'अलर्ट संदेश (अंग्रेजी)',
-    bodyHiLabel: 'अलर्ट संदेश (हिंदी)',
-    estimatedRecipients: 'चयनित जियोफेंस में अनुमानित लक्षित दर्शक',
-    quickTemplates: 'आपातकालीन टेम्प्लेट लोड करें:',
-    templateWeather: 'खराब मौसम / अचानक बाढ़',
-    templateHeatwave: 'अत्यधिक गर्मी का अलर्ट',
-    templateUnsafe: 'असुरक्षित पहाड़ी दर्रा / भूस्खलन',
-    sendBroadcastBtn: '🚀 जियोफेन्स्ड अलर्ट अभी भेजें',
-    broadcastHistoryTitle: 'हाल का प्रसारण लॉग और डिलीवरी टेलीमेट्री',
-    
-    // Audit & Analytics
-    auditLogsTitle: 'प्राधिकरण पहुंच और ऑडिट ट्रेल',
-    auditLogsDesc: 'अधिकारी खोज औचित्य, एसओएस प्रेषण और आपातकालीन प्रसारण को ट्रैक करने वाला अपरिवर्तनीय सिस्टम लॉग।',
-    exportCsvBtn: 'ऑडिट लॉग निर्यात करें (CSV)',
-    colTimestamp: 'समय',
-    colOfficer: 'अधिकारी / बैज आईडी',
-    colAction: 'की गई कार्रवाई',
-    colTarget: 'लक्ष्य आईडी',
-    colReason: 'अनिवार्य कारण',
-    colIp: 'आईपी / टर्मिनल',
-    
-    performanceTitle: 'प्रतिक्रिया प्रदर्शन और क्षेत्र विश्लेषिकी',
-    avgResponseTime: 'औसत आपातकालीन प्रतिक्रिया समय',
-    resolutionRate: 'घटना समाधान दर',
-    frequentZones: 'बार-बार होने वाली घटना क्षेत्रों का विवरण',
-    inflowVsRisk: 'पर्यटक आगमन बनाम जोखिम प्रवृत्ति',
-    
-    // Tourist Public Portal
-    touristPortalTitle: 'राष्ट्रीय पर्यटक सुरक्षा पोर्टल',
-    touristPortalSub: 'भारत में यात्रियों के लिए आधिकारिक आपातकालीन बीकन और सुरक्षा साथी।',
-    sosPanicBtnText: 'आपातकालीन एसओएस',
-    sosHoldInstruction: 'निकटतम पुलिस कमान केंद्र को तत्काल एसओएस बीकन भेजने के लिए दबाएं।',
-    sosCancelTimer: 'एसओएस सक्रिय हो रहा है',
-    sosActiveNotice: '🚨 एसओएस बीकन सक्रिय! गश्ती इकाई PCR-04 आपके जीपीएस निर्देशांकों पर भेजी गई है।',
-    hotlinesTitle: 'राष्ट्रीय आपातकालीन हेल्पलाइन',
-    safeHavensNearby: 'आसपास के सुरक्षित स्थान और पुलिस चौकियां',
-    currentAddress: 'आपका जीपीएस स्थान',
-    locationAccuracy: 'जीपीएस सटीकता',
-    switchGatewayBtn: 'प्रवेश द्वार पर लौटें',
-    logoutBtn: 'अधिकारी लॉगआउट',
-
-    // Tourist Auth & Onboarding Flow
-    authSignUpTab: 'नया पंजीकरण (साइन अप)',
-    authSignInTab: 'साइन इन एवं यात्रा सक्रियण',
-    signUpTitle: 'पर्यटक सुरक्षा पंजीकरण',
-    signUpSub: 'डिजीलॉकर ई-केवाईसी सत्यापन के साथ अपना आधिकारिक सुरक्षा सेतु डिजिटल पर्यटक पास बनाएं।',
-    signInTitle: 'यात्रा सक्रियण / साइन इन',
-    signInSub: 'अपनी सुरक्षा सत्र को पुनः आरंभ करने के लिए अपनी अद्वितीय पर्यटक आईडी (उदा. TR-2026-8942) और मोबाइल नंबर दर्ज करें।',
-    fullNameLabel: 'पूरा नाम (सरकारी पहचान पत्र के अनुसार)',
-    phoneLabel: 'मोबाइल फोन नंबर',
-    emailLabel: 'ईमेल पता',
-    emergencyContactLabel: 'आपातकालीन संपर्क का नाम',
-    emergencyRelationLabel: 'संपर्क से संबंध',
-    emergencyPhoneLabel: 'आपातकालीन संपर्क का मोबाइल नंबर',
-    connectDigiLockerBtn: 'डिजीलॉकर (e-KYC) से जोड़ें',
-    digiLockerVerifiedBadge: 'डिजीलॉकर ई-केवाईसी सत्यापित',
-    sendOtpBtn: 'मोबाइल ओटीपी भेजें',
-    otpModalTitle: 'मोबाइल नंबर ओटीपी सत्यापन',
-    otpModalSub: 'भेजा गया 6-अंकों का सत्यापन कोड दर्ज करें',
-    verifyOtpBtn: 'ओटीपी सत्यापित करें और पर्यटक आईडी बनाएं',
-    digitalPassTitle: 'सुरक्षा सेतु डिजिटल पर्यटक सुरक्षा पास',
-    touristIdLabel: 'अद्वितीय पर्यटक आईडी',
-    copyIdBtn: 'पर्यटक आईडी कॉपी करें',
-    downloadPassBtn: 'डिजिटल पास डाउनलोड करें',
-    proceedToConsentBtn: 'यात्रा सक्रियण एवं स्थान अनुमति हेतु आगे बढ़ें',
-    consentModalTitle: 'अनिवार्य सुरक्षा अनुमति: लाइव स्थान पहुंच प्रदान करें',
-    consentModalSub: 'सुरक्षा सेतु नागरिक सुरक्षा एवं आपातकालीन प्रतिक्रिया प्रोटोकॉल',
-    consentModalDesc: 'दुर्गम या ऊंचाई वाले क्षेत्रों में आपात स्थिति के दौरान 1-टैप एसओएस पैनिक ट्रिगर, एआई जियोफेंस जोखिम अलर्ट और वास्तविक समय पुलिस प्रतिक्रिया सक्षम करने के लिए, सुरक्षा सेतु आपकी यात्रा अवधि के लिए निरंतर एन्क्रिप्टेड लाइव स्थान ट्रैकिंग का अनुरोध करता है।',
-    consentEnableBtn: 'लाइव स्थान पहुंच सक्षम करें और यात्रा शुरू करें',
-    consentDeclineBtn: 'अस्वीकार करें (केवल मानक मैनुअल एसओएस)',
-
-    // Dashboard Tabs & Modules
-    tabOverview: 'सुरक्षा स्थिति',
-    tabItinerary: 'यात्रा योजनाकार',
-    tabHeatmap: 'सुरक्षा हीटमैप',
-    tabRouteFinder: 'सुरक्षित मार्ग खोजक',
-    chatbotTitle: 'सुरक्षा एआई सहायक',
-    quickContactsBtn: 'आपातकालीन हॉटलाइन',
-    broadcastAlertTitle: 'जियोफेंस सुरक्षा चेतावनी प्रसारण',
-    simulateBroadcastBtn: 'लाइव प्रसारण परीक्षण ट्रिगर करें'
-  }
-};
-```
-
-### `frontend/src/data/mockData.ts`
-```typescript
-import {
-  TouristProfile,
-  SOSIncident,
-  PatrollingUnit,
-  PoliceStation,
-  Hospital,
-  AnomalyCluster,
-  BroadcastAlert,
-  AuditLog,
-  AILog,
-  GeoFenceZone
-} from '../types';
-
-
-export const INITIAL_TOURISTS: TouristProfile[] = [
-  {
-    id: 'TR-88219',
-    name: 'Elena Rostova',
-    nationality: 'Spain',
-    passportHash: 'ESP-9874****',
-    photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300',
-    phone: '+34 612 884 902',
-    emergencyContact: '+34 612 001 223',
-    emergencyRelation: 'Father',
-    hotel: 'The Grand Himalayan Resort, Old Manali',
-    currentLocation: {
-      lat: 32.2432,
-      lng: 77.1892,
-      address: 'Solang Valley North Trail, Kullu, HP'
-    },
-    batteryLevel: 84,
-    safetyStatus: 'SOS Active',
-    lastSeenTime: '10 mins ago',
-    digitalBandId: 'BAND-3301',
-    pastSOSHistory: [
-      {
-        id: 'SOS-8012',
-        date: '2026-08-01',
-        location: 'Hadimba Temple Trek',
-        reason: 'Network Drop & Altitude Confusion',
-        status: 'Resolved'
-      }
-    ],
-    tourist_id: '8f7a9d1b-3c4e-4f52-a1b2-c3d4e5f67890',
-    digital_id: 'TR-88219',
-    full_name: 'Elena Rostova',
-    kyc_document_type: 'Passport',
-    kyc_verified: true,
-    email: 'elena.rostova@example.com',
-    emergency_contact: '+34 612 001 223',
-    preferred_language: 'Spanish',
-    created_at: '2026-07-15T08:30:00Z'
-  },
-  {
-    id: 'TR-44021',
-    name: 'Marcus Vance',
-    nationality: 'Australia',
-    passportHash: 'AUS-4412****',
-    photoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=300',
-    phone: '+61 412 990 123',
-    emergencyContact: '+61 412 000 888',
-    emergencyRelation: 'Sister',
-    hotel: 'Ganga View Heritage Guest House, Varanasi',
-    currentLocation: {
-      lat: 25.3176,
-      lng: 83.0062,
-      address: 'Dashashwamedh Ghat Alley #4, Varanasi, UP'
-    },
-    batteryLevel: 62,
-    safetyStatus: 'Watch',
-    lastSeenTime: '2 mins ago',
-    digitalBandId: 'BAND-1192',
-    pastSOSHistory: [],
-    tourist_id: '3b2a1c0d-9e8f-4765-b4a3-102938475610',
-    digital_id: 'TR-44021',
-    full_name: 'Marcus Vance',
-    kyc_document_type: 'Passport',
-    kyc_verified: true,
-    email: 'marcus.vance@example.au',
-    emergency_contact: '+61 412 000 888',
-    preferred_language: 'English',
-    created_at: '2026-07-20T11:15:00Z'
-  },
-  {
-    id: 'TR-90423',
-    name: 'Amina Al-Mansoor',
-    nationality: 'UAE',
-    passportHash: 'ARE-7712****',
-    photoUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=300',
-    phone: '+971 50 123 4567',
-    emergencyContact: '+971 50 999 8877',
-    emergencyRelation: 'Spouse',
-    hotel: 'Taj Palace, New Delhi',
-    currentLocation: {
-      lat: 28.6315,
-      lng: 77.2167,
-      address: 'Connaught Place Inner Circle, New Delhi'
-    },
-    batteryLevel: 91,
-    safetyStatus: 'Safe',
-    lastSeenTime: 'Just now',
-    digitalBandId: 'BAND-9081',
-    pastSOSHistory: [],
-    tourist_id: '6c5b4a3f-2e1d-4890-a5b6-7c8d9e0f1a2b',
-    digital_id: 'TR-90423',
-    full_name: 'Amina Al-Mansoor',
-    kyc_document_type: 'National ID',
-    kyc_verified: true,
-    email: 'amina.almansoor@example.ae',
-    emergency_contact: '+971 50 999 8877',
-    preferred_language: 'Arabic',
-    created_at: '2026-08-01T14:45:00Z'
-  },
-  {
-    id: 'TR-12890',
-    name: 'Kenji Takahashi',
-    nationality: 'Japan',
-    passportHash: 'JPN-3301****',
-    photoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=300',
-    phone: '+81 90 4432 1100',
-    emergencyContact: '+81 90 0011 2233',
-    emergencyRelation: 'Mother',
-    hotel: 'Palolem Beach Shack Inn, Goa',
-    currentLocation: {
-      lat: 15.0102,
-      lng: 74.0231,
-      address: 'South Palolem Cliff Point, Canacona, Goa'
-    },
-    batteryLevel: 45,
-    safetyStatus: 'SOS Active',
-    lastSeenTime: '5 mins ago',
-    digitalBandId: 'BAND-5512',
-    pastSOSHistory: [
-      {
-        id: 'SOS-7110',
-        date: '2026-07-28',
-        location: 'Agonda Beach Cliff',
-        reason: 'Water Tide Isolation Warning',
-        status: 'Resolved'
-      }
-    ],
-    tourist_id: '9d8c7b6a-5f4e-3d2c-1b0a-fe9d8c7b6a5f',
-    digital_id: 'TR-12890',
-    full_name: 'Kenji Takahashi',
-    kyc_document_type: 'Passport',
-    kyc_verified: true,
-    email: 'kenji.takahashi@example.jp',
-    emergency_contact: '+81 90 0011 2233',
-    preferred_language: 'Japanese',
-    created_at: '2026-07-25T09:20:00Z'
-  },
-  {
-    id: 'TR-55310',
-    name: 'Priya Sharma',
-    nationality: 'India (Domestic Traveler)',
-    passportHash: 'IND-8821****',
-    photoUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=300',
-    phone: '+91 98765 43210',
-    emergencyContact: '+91 98123 45678',
-    emergencyRelation: 'Brother',
-    hotel: 'Zostel Rishikesh, Tapovan',
-    currentLocation: {
-      lat: 30.1231,
-      lng: 78.3211,
-      address: 'Laxman Jhula North Bank, Rishikesh, Uttarakhand'
-    },
-    batteryLevel: 78,
-    safetyStatus: 'Safe',
-    lastSeenTime: '15 mins ago',
-    digitalBandId: 'BAND-8840',
-    pastSOSHistory: [],
-    tourist_id: '1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d',
-    digital_id: 'TR-55310',
-    full_name: 'Priya Sharma',
-    kyc_document_type: 'Aadhaar Card',
-    kyc_verified: true,
-    email: 'priya.sharma@example.in',
-    emergency_contact: '+91 98123 45678',
-    preferred_language: 'Hindi',
-    created_at: '2026-08-05T16:10:00Z'
-  }
-];
-
-export const INITIAL_INCIDENTS: SOSIncident[] = [
-  {
-    id: 'SOS-9021',
-    touristId: 'TR-88219',
-    touristName: 'Elena Rostova',
-    touristPhone: '+34 612 884 902',
-    location: {
-      lat: 32.2432,
-      lng: 77.1892,
-      address: 'Solang Valley North Trail (Off-route 2.4 km)'
-    },
-    timestamp: '2026-08-12 08:10:12',
-    status: 'New',
-    severity: 'Critical',
-    hazardType: 'Panic Beacon / Off-Route Isolation',
-    notes: 'Panic button pressed continuously for 5s. Rapid heart-rate spike recorded by digital band.',
-  },
-  {
-    id: 'SOS-9022',
-    touristId: 'TR-12890',
-    touristName: 'Kenji Takahashi',
-    touristPhone: '+81 90 4432 1100',
-    location: {
-      lat: 15.0102,
-      lng: 74.0231,
-      address: 'South Palolem Cliff Point, Goa'
-    },
-    timestamp: '2026-08-12 07:55:00',
-    status: 'Units Dispatched',
-    severity: 'Critical',
-    unitAssigned: 'PCR-GOA-08',
-    hazardType: 'High Tide Cliff Isolation',
-    notes: 'Coastal Patrol boat dispatched with life jackets.'
-  },
-  {
-    id: 'SOS-9018',
-    touristId: 'TR-44021',
-    touristName: 'Marcus Vance',
-    touristPhone: '+61 412 990 123',
-    location: {
-      lat: 25.3176,
-      lng: 83.0062,
-      address: 'Manikarnika Ghat Lane, Varanasi'
-    },
-    timestamp: '2026-08-12 06:30:15',
-    status: 'Resolved',
-    severity: 'Warning',
-    unitAssigned: 'PCR-VAR-02',
-    hazardType: 'Crowd Disorientation',
-    notes: 'Tourist safely escorted back to hotel by Ghat Tourist Squad.'
-  }
-];
-
-export const INITIAL_PATROL_UNITS: PatrollingUnit[] = [
-  {
-    id: 'PCR-KULLU-04',
-    unitName: 'PCR Van - Himachal High Sector 04',
-    type: 'PCR Van',
-    unitLeader: 'SI Inspector Vikram Singh',
-    location: {
-      lat: 32.2390,
-      lng: 77.1820,
-      address: 'Solang Valley Checkpost'
-    },
-    status: 'Patrolling',
-    contactPhone: '+91 94180 12345'
-  },
-  {
-    id: 'PCR-GOA-08',
-    unitName: 'Coastal Rescue Speedboat - Unit 8',
-    type: 'Quick Response Motorcycle',
-    unitLeader: 'Coast Guard Sub-Officer Rahul Naik',
-    location: {
-      lat: 15.0080,
-      lng: 74.0210,
-      address: 'Palolem Beach Patrol Bay'
-    },
-    status: 'Dispatched',
-    contactPhone: '+91 98221 88990',
-    assignedIncidentId: 'SOS-9022'
-  },
-  {
-    id: 'WSS-DELHI-01',
-    unitName: 'Pink Panther Women Safety Squad - CP',
-    type: 'Women Safety Squad',
-    unitLeader: 'Inspector Sunita Rani',
-    location: {
-      lat: 28.6320,
-      lng: 77.2180,
-      address: 'Connaught Place Outer Ring'
-    },
-    status: 'Patrolling',
-    contactPhone: '+91 98100 55443'
-  },
-  {
-    id: 'PCR-VAR-02',
-    unitName: 'Ghat Quick Response Bike Team 2',
-    type: 'Quick Response Motorcycle',
-    unitLeader: 'Head Constable Ramesh Yadav',
-    location: {
-      lat: 25.3120,
-      lng: 83.0080,
-      address: 'Godowlia Crossing, Varanasi'
-    },
-    status: 'Standby',
-    contactPhone: '+91 94500 11223'
-  }
-];
-
-export const POLICE_STATIONS: PoliceStation[] = [
-  {
-    id: 'PS-MANALI-01',
-    name: 'Manali Central Tourist Police Station',
-    jurisdiction: 'Kullu Valley & Solang Pass',
-    location: {
-      lat: 32.2400,
-      lng: 77.1850,
-      address: 'Mall Road, Manali, Himachal Pradesh'
-    },
-    contactPhone: '01902-252326',
-    activeOfficers: 34,
-    availableVehicles: 8
-  },
-  {
-    id: 'PS-VARANASI-01',
-    name: 'Kotwali Tourist Helpdesk & Station',
-    jurisdiction: 'Varanasi Ghats & Heritage Corridor',
-    location: {
-      lat: 25.3150,
-      lng: 83.0040,
-      address: 'Dashashwamedh Main Road, Varanasi'
-    },
-    contactPhone: '0542-2502220',
-    activeOfficers: 42,
-    availableVehicles: 12
-  },
-  {
-    id: 'PS-DELHI-01',
-    name: 'Connaught Place Police Station',
-    jurisdiction: 'Central Delhi & Janpath Tourist Hub',
-    location: {
-      lat: 28.6300,
-      lng: 77.2150,
-      address: 'Parliament Street, Connaught Place, New Delhi'
-    },
-    contactPhone: '011-23361234',
-    activeOfficers: 65,
-    availableVehicles: 18
-  },
-  {
-    id: 'PS-GOA-01',
-    name: 'Canacona Coastal Police Station',
-    jurisdiction: 'South Goa Beaches & Cliff Circuits',
-    location: {
-      lat: 15.0150,
-      lng: 74.0200,
-      address: 'Chaudi, Canacona, South Goa'
-    },
-    contactPhone: '0832-2643323',
-    activeOfficers: 28,
-    availableVehicles: 6
-  }
-];
-
-export const HOSPITALS: Hospital[] = [
-  {
-    id: 'HOSP-MANALI-01',
-    name: 'Manali Civil District Hospital & Trauma Center',
-    jurisdiction: 'Mall Road Emergency Ward',
-    location: {
-      lat: 32.2380,
-      lng: 77.1890,
-      address: 'Mall Road, Manali, Himachal Pradesh'
-    },
-    contactPhone: '+91 1902 252222',
-    icuBedsAvailable: 14,
-    ambulancesReady: 4
-  },
-  {
-    id: 'HOSP-KULLU-02',
-    name: 'Kullu Regional Emergency Care Center',
-    jurisdiction: 'Kullu Valley Medical Command',
-    location: {
-      lat: 31.9580,
-      lng: 77.1090,
-      address: 'Regional Hospital Campus, Kullu'
-    },
-    contactPhone: '+91 1902 222340',
-    icuBedsAvailable: 22,
-    ambulancesReady: 6
-  },
-  {
-    id: 'HOSP-VARANASI-03',
-    name: 'Heritage Super Specialty Hospital',
-    jurisdiction: 'Varanasi Central Trauma Response',
-    location: {
-      lat: 25.3120,
-      lng: 83.0080,
-      address: 'Lanka Crossing, Varanasi'
-    },
-    contactPhone: '+91 542 2369999',
-    icuBedsAvailable: 18,
-    ambulancesReady: 5
-  }
-];
-
-export const ANOMALY_CLUSTERS: AnomalyCluster[] = [
-  {
-    id: 'AC-101',
-    regionName: 'Solang Valley North Trail (Kullu Sector)',
-    riskScore: 88,
-    touristDensity: 142,
-    anomalyType: 'Off-Route Signal Loss',
-    confidenceScore: 94,
-    descriptionEn: 'AI detected 3 active tourist digital bands deviating >2km from marked trekking trail after dusk.',
-    descriptionHi: 'एआई ने सूर्यास्त के बाद चिह्नित ट्रैकिंग ट्रेल से >2 किमी दूर भटक रहे 3 सक्रिय पर्यटक डिजिटल बैंड का पता लगाया।',
-    recommendedActionEn: 'Deploy High Altitude PCR-04 van and send automated SMS advisory to registered trekking groups.',
-    recommendedActionHi: 'हाई एल्टीट्यूड पीसीआर-04 वैन भेजें और पंजीकृत ट्रैकिंग समूहों को स्वचालित एसएमएस सलाह भेजें।',
-    coordinates: { lat: 32.2432, lng: 77.1892 },
-    timestamp: '2026-08-12 08:12:00'
-  },
-  {
-    id: 'AC-102',
-    regionName: 'Varanasi Ghat Narrow Alleyway Grid',
-    riskScore: 72,
-    touristDensity: 890,
-    anomalyType: 'Unusual Grouping',
-    confidenceScore: 89,
-    descriptionEn: 'High density congestion detected near unlit alley #4. Slow movement and sudden drop in GPS precision.',
-    descriptionHi: 'अप्रकाशित गली #4 के पास उच्च घनत्व वाली भीड़ का पता चला। धीमी गति और जीपीएस सटीकता में अचानक गिरावट।',
-    recommendedActionEn: 'Dispatch Ghat Bike Team for crowd flow management and illuminate emergency LED arrays.',
-    recommendedActionHi: 'भीड़ प्रवाह प्रबंधन के लिए घाट बाइक टीम भेजें और आपातकालीन एलईडी समूह चालू करें।',
-    coordinates: { lat: 25.3176, lng: 83.0062 },
-    timestamp: '2026-08-12 08:05:00'
-  },
-  {
-    id: 'AC-103',
-    regionName: 'Anjuna - Palolem Coastal Cliff Edge',
-    riskScore: 81,
-    touristDensity: 210,
-    anomalyType: 'Hazard Zone Entry',
-    confidenceScore: 91,
-    descriptionEn: 'High tide alert active. 5 tourists located past danger warning barrier near tidal cliff.',
-    descriptionHi: 'उच्च ज्वार की चेतावनी सक्रिय। ज्वारीय चट्टान के पास खतरे की चेतावनी बाधा के पार 5 पर्यटक स्थित हैं।',
-    recommendedActionEn: 'Trigger geofenced audio warning beacon and broadcast SMS to coastal cell towers.',
-    recommendedActionHi: 'जियोफेंस किए गए ऑडियो चेतावनी बीकन को ट्रिगर करें और तटीय सेल टावरों पर एसएमएस प्रसारित करें।',
-    coordinates: { lat: 15.0102, lng: 74.0231 },
-    timestamp: '2026-08-12 07:50:00'
-  }
-];
-
-export const INITIAL_BROADCASTS: BroadcastAlert[] = [
-  {
-    id: 'BC-501',
-    senderBadge: 'IPS-7742 (Rajesh Kumar)',
-    region: 'Himachal Pradesh (Solang Valley & Rohtang Pass)',
-    radiusKm: 15,
-    titleEn: '⚠️ Flash Flood & Sudden Weather Warning',
-    titleHi: '⚠️ अचानक बाढ़ और खराब मौसम की चेतावनी',
-    bodyEn: 'Heavy rainfall and cloudburst alert in Solang Valley. Avoid unmapped riverbanks and return to main highway immediately.',
-    bodyHi: 'सोलंग घाटी में भारी बारिश और बादल फटने का अलर्ट। बिना नक्शे वाले नदी तटों से दूर रहें और तुरंत मुख्य राजमार्ग पर लौटें।',
-    severity: 'Critical',
-    timestamp: '2026-08-12 07:30:00',
-    recipientCount: 3420,
-    deliveredCount: 3389,
-    status: 'Completed'
-  },
-  {
-    id: 'BC-502',
-    senderBadge: 'IPS-7742 (Rajesh Kumar)',
-    region: 'Varanasi Ghats Heritage Area',
-    radiusKm: 3,
-    titleEn: 'ℹ️ Ganga Aarti Crowd Diversion Advisory',
-    titleHi: 'ℹ️ गंगा आरती भीड़ डायवर्जन सलाह',
-    bodyEn: 'Dashashwamedh Ghat experiencing maximum capacity. Please use Rajghat or Assi Ghat for comfortable view.',
-    bodyHi: 'दशाश्वमेध घाट अधिकतम क्षमता पर है। आरामदायक दर्शन के लिए कृपया राजघाट या अस्सी घाट का उपयोग करें।',
-    severity: 'Advisory',
-    timestamp: '2026-08-11 18:00:00',
-    recipientCount: 12500,
-    deliveredCount: 12410,
-    status: 'Completed'
-  }
-];
-
-export const INITIAL_AUDIT_LOGS: AuditLog[] = [
-  {
-    id: 'AUD-9901',
-    timestamp: '2026-08-12 08:14:02',
-    officerName: 'Rajesh Kumar, IPS',
-    officerBadge: 'IPS-7742',
-    actionType: 'TOURIST_LOOKUP',
-    targetId: 'TR-88219 (Elena Rostova)',
-    reason: 'Active SOS Response',
-    details: 'Accessed live GPS telemetry and emergency contact records during active panic beacon event SOS-9021.',
-    ipAddress: '10.142.0.88 (NIC Secure Gateway)'
-  },
-  {
-    id: 'AUD-9902',
-    timestamp: '2026-08-12 07:56:10',
-    officerName: 'Rajesh Kumar, IPS',
-    officerBadge: 'IPS-7742',
-    actionType: 'DISPATCH_UNIT',
-    targetId: 'PCR-GOA-08',
-    reason: 'Active SOS Response',
-    details: 'Dispatched Coastal Rescue Speedboat to South Palolem Cliff Point for incident SOS-9022.',
-    ipAddress: '10.142.0.88 (NIC Secure Gateway)'
-  },
-  {
-    id: 'AUD-9903',
-    timestamp: '2026-08-12 07:30:15',
-    officerName: 'Rajesh Kumar, IPS',
-    officerBadge: 'IPS-7742',
-    actionType: 'BROADCAST_SENT',
-    targetId: 'Geofence Solang (15km)',
-    reason: 'Disaster Prevention Protocol',
-    details: 'Pushed Critical Flash Flood warning SMS to 3,420 active tourist devices.',
-    ipAddress: '10.142.0.88 (NIC Secure Gateway)'
-  }
-];
-
-export const INITIAL_AI_LOGS: AILog[] = [
-  {
-    id: 'LOG-1',
-    timestamp: '08:19:12',
-    severity: 'critical',
-    messageEn: 'AI Model Threat-Predictor v4.2 flagged rapid signal loss for TR-88219 near Solang Ravine. Anomaly confidence: 94%.',
-    messageHi: 'एआई मॉडल खतरा-पूर्वानुमानकर्ता v4.2 ने सोलंग खड्ड के पास TR-88219 के लिए तेज सिग्नल हानि को चिह्नित किया। विसंगति विश्वसनीयता: 94%।',
-    modelConfidence: 94,
-    region: 'Solang Valley, HP'
-  },
-  {
-    id: 'LOG-2',
-    timestamp: '08:15:30',
-    severity: 'warning',
-    messageEn: 'Density threshold surpassed in Varanasi Sector 4 (+38% over average baseline). Recommended squad re-allocation.',
-    messageHi: 'वाराणसी सेक्टर 4 में घनत्व सीमा पार हो गई (औसत आधार रेखा से +38% अधिक)। अनुशंसित दस्ता पुनरावंटन।',
-    modelConfidence: 89,
-    region: 'Varanasi, UP'
-  },
-  {
-    id: 'LOG-3',
-    timestamp: '08:02:44',
-    severity: 'info',
-    messageEn: 'Geofence heartbeats synced with 18,940 active tourist digital wristbands across major national circuits.',
-    messageHi: 'प्रमुख राष्ट्रीय सर्किटों में 18,940 सक्रिय पर्यटक डिजिटल कलाई बैंड के साथ जियोफेंस धड़कनें सिंक की गईं।',
-    modelConfidence: 99,
-    region: 'National Network'
-  }
-];
-
-export const MOCK_GEOFENCE_ZONES: GeoFenceZone[] = [
-  {
-    id: 'zone-1',
-    name: 'Solang Riverbank & Avalanche Slope',
-    riskLevel: 'Unsafe',
-    description: 'High flash flood & avalanche hazard zone. Night movement prohibited after 17:00 IST.',
-    center: { lat: 32.2432, lng: 77.1892 },
-    radiusKm: 1.5
-  },
-  {
-    id: 'zone-2',
-    name: 'Hadimba Pine Forest Trek',
-    riskLevel: 'Caution',
-    description: 'Dense forest cover area. Stick to designated trails and maintain band connectivity.',
-    center: { lat: 32.2480, lng: 77.1850 },
-    radiusKm: 2.0
-  },
-  {
-    id: 'zone-3',
-    name: 'Manali Mall Road Safe Zone',
-    riskLevel: 'Safe',
-    description: 'Monitored safe tourist corridor with 24/7 Police Helpdesk & active PCR coverage.',
-    center: { lat: 32.2396, lng: 77.1887 },
-    radiusKm: 3.0
-  }
-];
-
-```
-
 ### `frontend/src/components/ActualGoogleMap.tsx`
+
 ```tsx
 import React, { useState } from 'react';
 import { APIProvider, Map, AdvancedMarker, Pin, InfoWindow, useAdvancedMarkerRef } from '@vis.gl/react-google-maps';
@@ -4708,6 +3764,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
 ```
 
 ### `frontend/src/components/CrowdHeatmap.tsx`
+
 ```tsx
 import React, { useState } from 'react';
 import { Users, AlertTriangle, ShieldCheck, Search, MapPin, ArrowRight, RefreshCw, Clock, CheckCircle2, Sparkles, Filter, Layers } from 'lucide-react';
@@ -5290,6 +4347,7 @@ export const CrowdHeatmap: React.FC<CrowdHeatmapProps> = ({ onAddItineraryDestin
 ```
 
 ### `frontend/src/components/Gateway.tsx`
+
 ```tsx
 import React, { useState } from 'react';
 import {
@@ -5312,7 +4370,7 @@ import { i18n } from '../data/i18n';
 interface GatewayProps {
   language: Language;
   onSelectRole: (role: UserRole) => void;
-  onAuthenticateAuthority: (badgeId: string, otp: string) => boolean;
+  onAuthenticateAuthority: (badgeId: string, otp: string) => Promise<boolean>;
 }
 
 export const Gateway: React.FC<GatewayProps> = ({
@@ -5322,21 +4380,28 @@ export const Gateway: React.FC<GatewayProps> = ({
 }) => {
   const t = i18n[language];
   const [showMfaModal, setShowMfaModal] = useState(false);
-  const [badgeId, setBadgeId] = useState('IPS-7742');
-  const [otp, setOtp] = useState('789012');
+  const [badgeId, setBadgeId] = useState('');
+  const [otp, setOtp] = useState('');
   const [mfaError, setMfaError] = useState('');
+  const [mfaSubmitting, setMfaSubmitting] = useState(false);
 
-  const handleMfaSubmit = (e: React.FormEvent) => {
+  const handleMfaSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!badgeId.trim() || !otp.trim()) {
       setMfaError('Please provide both Badge ID and MFA Auth Code.');
       return;
     }
-    const success = onAuthenticateAuthority(badgeId, otp);
-    if (!success) {
-      setMfaError('Invalid credentials. Use demo credentials (IPS-7742 / 789012)');
-    } else {
-      setShowMfaModal(false);
+    setMfaError('');
+    setMfaSubmitting(true);
+    try {
+      const success = await onAuthenticateAuthority(badgeId, otp);
+      if (!success) {
+        setMfaError('Could not verify credentials against the command server. Please try again.');
+      } else {
+        setShowMfaModal(false);
+      }
+    } finally {
+      setMfaSubmitting(false);
     }
   };
 
@@ -5541,9 +4606,10 @@ export const Gateway: React.FC<GatewayProps> = ({
                 </button>
                 <button
                   type="submit"
-                  className="flex-1 px-4 py-2.5 rounded-lg bg-[#0B2447] hover:bg-[#071933] text-white text-sm font-extrabold transition shadow-lg flex items-center justify-center gap-2"
+                  disabled={mfaSubmitting}
+                  className="flex-1 px-4 py-2.5 rounded-lg bg-[#0B2447] hover:bg-[#071933] disabled:opacity-60 text-white text-sm font-extrabold transition shadow-lg flex items-center justify-center gap-2"
                 >
-                  <span>{t.mfaVerifyBtn}</span>
+                  <span>{mfaSubmitting ? 'Verifying…' : t.mfaVerifyBtn}</span>
                   <ArrowRight className="w-4 h-4 text-[#FF9933]" />
                 </button>
               </div>
@@ -5559,6 +4625,7 @@ export const Gateway: React.FC<GatewayProps> = ({
 ```
 
 ### `frontend/src/components/Header.tsx`
+
 ```tsx
 import React from 'react';
 import {
@@ -5856,10 +4923,10 @@ export const Header: React.FC<HeaderProps> = ({
     </header>
   );
 };
-
 ```
 
 ### `frontend/src/components/InterceptionModal.tsx`
+
 ```tsx
 import React, { useState } from 'react';
 import {
@@ -6050,6 +5117,7 @@ export const InterceptionModal: React.FC<InterceptionModalProps> = ({
 ```
 
 ### `frontend/src/components/ModuleAIHub.tsx`
+
 ```tsx
 import React, { useState } from 'react';
 import {
@@ -6336,6 +5404,7 @@ export const ModuleAIHub: React.FC<ModuleAIHubProps> = ({
 ```
 
 ### `frontend/src/components/ModuleAnalyticsAudit.tsx`
+
 ```tsx
 import React, { useState } from 'react';
 import {
@@ -6612,6 +5681,7 @@ export const ModuleAnalyticsAudit: React.FC<ModuleAnalyticsAuditProps> = ({
 ```
 
 ### `frontend/src/components/ModuleBroadcast.tsx`
+
 ```tsx
 import React, { useState } from 'react';
 import {
@@ -6878,6 +5948,7 @@ export const ModuleBroadcast: React.FC<ModuleBroadcastProps> = ({
 ```
 
 ### `frontend/src/components/ModuleSOSMap.tsx`
+
 ```tsx
 import React, { useState } from 'react';
 import {
@@ -7303,6 +6374,7 @@ export const ModuleSOSMap: React.FC<ModuleSOSMapProps> = ({
 ```
 
 ### `frontend/src/components/ModuleTouristTracking.tsx`
+
 ```tsx
 import React, { useState } from 'react';
 import {
@@ -7331,6 +6403,7 @@ import {
 import { Language, TouristProfile, InterceptionReason } from '../types';
 import { i18n } from '../data/i18n';
 import { InterceptionModal } from './InterceptionModal';
+import { getAuthorityTourist } from '../lib/api';
 
 interface ModuleTouristTrackingProps {
   language: Language;
@@ -7393,7 +6466,7 @@ export const ModuleTouristTracking: React.FC<ModuleTouristTrackingProps> = ({
     setShowInterceptionModal(true);
   };
 
-  const handleConfirmInterception = (reason: InterceptionReason, notes: string) => {
+  const handleConfirmInterception = async (reason: InterceptionReason, notes: string) => {
     if (!pendingTouristId) return;
 
     const found = tourists.find(
@@ -7409,6 +6482,33 @@ export const ModuleTouristTracking: React.FC<ModuleTouristTrackingProps> = ({
         `Accessed profile & telemetry. Notes: ${notes || 'None'}`
       );
       setToastMessage(`✓ Interception Verified: Audit Logged for ${found.name}`);
+
+      // If this tourist has a real backend UUID (i.e. registered through the
+      // Tourist Portal against the live backend), refresh the record with
+      // live data via GET /api/v1/authority/tourists/{tourist_id} so the KYC
+      // panel reflects the authoritative source. Falls back silently to the
+      // already-displayed local record on any failure.
+      if (found.tourist_id) {
+        try {
+          const live = await getAuthorityTourist(found.tourist_id);
+          setSelectedTourist((prev) =>
+            prev && prev.id === found.id
+              ? {
+                  ...prev,
+                  full_name: live.full_name,
+                  digital_id: live.digital_id,
+                  kyc_verified: live.kyc_verified,
+                  kyc_document_type: live.kyc_document_type,
+                  created_at: live.created_at,
+                  phone: live.phone || prev.phone,
+                  email: live.email || prev.email
+                }
+              : prev
+          );
+        } catch (err) {
+          console.warn('Live tourist lookup failed; showing local record only:', err);
+        }
+      }
     } else {
       setToastMessage(`⚠️ Tourist ID "${pendingTouristId}" not found in database.`);
     }
@@ -7902,10 +7002,10 @@ export const ModuleTouristTracking: React.FC<ModuleTouristTrackingProps> = ({
     </div>
   );
 };
-
 ```
 
 ### `frontend/src/components/Sidebar.tsx`
+
 ```tsx
 import React from 'react';
 import {
@@ -8047,6 +7147,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 ```
 
 ### `frontend/src/components/TouristPortal.tsx`
+
 ```tsx
 import React, { useState, useEffect } from 'react';
 import {
@@ -8099,13 +7200,13 @@ import { ActualGoogleMap } from './ActualGoogleMap';
 import { CrowdHeatmap } from './CrowdHeatmap';
 import { getSOSLocation } from '../lib/location';
 import { queueSOSRecord } from '../lib/db';
-import { submitSOSOnline, syncQueuedSOS } from '../lib/api';
+import { submitSOSOnline, syncQueuedSOS, registerAndLoginTourist, loginTouristByPhone, updateIncidentStatus, clearSession, logoutUser, getTouristId, ApiError, createItineraryEntry, deleteItineraryEntry } from '../lib/api';
 
 
 interface TouristPortalProps {
   language: Language;
   onLanguageChange?: (lang: Language) => void;
-  onTriggerSos: (touristName: string, locationStr: string) => void;
+  onTriggerSos: (touristName: string, locationStr: string, touristId?: string, touristPhone?: string) => void;
   onReturnToGateway: () => void;
   onRegisterTourist?: (tourist: TouristProfile) => void;
   existingTourists?: TouristProfile[];
@@ -8142,12 +7243,12 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
   const [activeBroadcastModal, setActiveBroadcastModal] = useState<BroadcastAlert | null>(null);
 
   // Sign Up Form States
-  const [fullName, setFullName] = useState('Elena Rostova');
-  const [phone, setPhone] = useState('+91 98765 43210');
-  const [email, setEmail] = useState('elena.rostova@traveler.org');
-  const [emergencyContactName, setEmergencyContactName] = useState('Carlos Rostova');
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [emergencyContactName, setEmergencyContactName] = useState('');
   const [emergencyRelation, setEmergencyRelation] = useState('Father');
-  const [emergencyContactPhone, setEmergencyContactPhone] = useState('+91 98765 00000');
+  const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
 
   // DigiLocker States
   const [digiLockerVerified, setDigiLockerVerified] = useState(false);
@@ -8155,11 +7256,11 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
   const [digiLockerStep, setDigiLockerStep] = useState<'connect' | 'loading' | 'fetched'>('connect');
 
   // Sign In Form States
-  const [signinTouristId, setSigninTouristId] = useState('TR-88219');
-  const [signinPhone, setSigninPhone] = useState('+34 612 884 902');
+  const [signinTouristId, setSigninTouristId] = useState('');
+  const [signinPhone, setSigninPhone] = useState('');
 
   // OTP Modal States
-  const [otpValue, setOtpValue] = useState('654321');
+  const [otpValue, setOtpValue] = useState('');
   const [otpError, setOtpError] = useState('');
   const [otpPendingAction, setOtpPendingAction] = useState<'signup' | 'signin'>('signup');
 
@@ -8181,6 +7282,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
   const [sosSendingProgress, setSosSendingProgress] = useState(0);
   const [incidentRef, setIncidentRef] = useState<string | null>(null);
   const [sosErrorMessage, setSosErrorMessage] = useState<string | null>(null);
+  const [activeBackendIncidentId, setActiveBackendIncidentId] = useState<string | null>(null);
 
   // Integrated Geo-Fence States
   const [activeGeoFenceZone, setActiveGeoFenceZone] = useState<GeoFenceZone>(MOCK_GEOFENCE_ZONES[0]); // Solang Valley (Unsafe)
@@ -8200,9 +7302,12 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
       setSosSendingProgress(40);
 
       // 2. Build local SOS record
+      // Prefer the real backend tourist UUID (set after registration/sign-in
+      // against the backend) over the cosmetic display ID, since the backend
+      // requires an existing tourists.tourist_id to accept the SOS request.
       const localRecord = {
         local_sos_id: crypto.randomUUID(),
-        tourist_id: authenticatedUser?.id || 'TR-88219',
+        tourist_id: authenticatedUser?.tourist_id || getTouristId(),
         triggered_at: new Date().toISOString(),
         latitude: loc.latitude,
         longitude: loc.longitude,
@@ -8229,22 +7334,34 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
           setSosSendingProgress(100);
           setSosStep('success');
           setIncidentRef(res.incident_id || res.sos_id || `INC-${Math.floor(1000 + Math.random() * 9000)}`);
+          if (res.incident_id) setActiveBackendIncidentId(res.incident_id);
           setSosActive(true);
-          onTriggerSos(authenticatedUser?.name || 'Elena Rostova', `${loc.latitude?.toFixed(4) || lat.toFixed(4)}, ${loc.longitude?.toFixed(4) || lng.toFixed(4)} (${activeGeoFenceZone.name})`);
+          onTriggerSos(authenticatedUser?.name || 'Tourist', `${loc.latitude?.toFixed(4) || lat.toFixed(4)}, ${loc.longitude?.toFixed(4) || lng.toFixed(4)} (${activeGeoFenceZone.name})`, authenticatedUser?.tourist_id || authenticatedUser?.id, authenticatedUser?.phone);
         } catch (err: any) {
+          // A DB/auth-level failure (400/401/404) means the request reached
+          // the backend and was rejected — this is a real data/auth problem,
+          // not a dropped connection, so it must not be silently queued as
+          // an offline record. Only genuine network failures fall through to
+          // the offline queue below.
+          if (err instanceof ApiError && [400, 401, 404].includes(err.status)) {
+            console.error("SOS submission rejected by backend (auth/data error):", err);
+            setSosStep('error');
+            setSosErrorMessage(err.message || 'Your session or request data was rejected by the server. Please sign in again.');
+            return;
+          }
           console.warn("Online transmission failed, record queued:", err);
           setSosSendingProgress(100);
           setSosStep('success');
           setIncidentRef('QUEUED-OFFLINE');
           setSosActive(true);
-          onTriggerSos(authenticatedUser?.name || 'Elena Rostova', `${loc.latitude?.toFixed(4) || lat.toFixed(4)}, ${loc.longitude?.toFixed(4) || lng.toFixed(4)} (Queued Offline)`);
+          onTriggerSos(authenticatedUser?.name || 'Tourist', `${loc.latitude?.toFixed(4) || lat.toFixed(4)}, ${loc.longitude?.toFixed(4) || lng.toFixed(4)} (Queued Offline)`, authenticatedUser?.tourist_id || authenticatedUser?.id, authenticatedUser?.phone);
         }
       } else {
         setSosSendingProgress(100);
         setSosStep('success');
         setIncidentRef('QUEUED-OFFLINE');
         setSosActive(true);
-        onTriggerSos(authenticatedUser?.name || 'Elena Rostova', `${loc.latitude?.toFixed(4) || lat.toFixed(4)}, ${loc.longitude?.toFixed(4) || lng.toFixed(4)} (Queued Offline)`);
+        onTriggerSos(authenticatedUser?.name || 'Tourist', `${loc.latitude?.toFixed(4) || lat.toFixed(4)}, ${loc.longitude?.toFixed(4) || lng.toFixed(4)} (Queued Offline)`, authenticatedUser?.tourist_id || authenticatedUser?.id, authenticatedUser?.phone);
       }
     } catch (err: any) {
       setSosStep('error');
@@ -8253,10 +7370,18 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
   };
 
   const handleResetSosFlow = () => {
+    // If this SOS created a real backend incident, mark it resolved server-side
+    // (mirrors the authority-side "Resolve Case" / "Mark Safe" PATCH flow).
+    if (activeBackendIncidentId) {
+      updateIncidentStatus(activeBackendIncidentId, { status: 'RESOLVED' }).catch((err) =>
+        console.warn('Failed to resolve backend incident on reset:', err)
+      );
+    }
     setSosStep('ready');
     setSosActive(false);
     setSirenPlaying(false);
     setIncidentRef(null);
+    setActiveBackendIncidentId(null);
     setSosErrorMessage(null);
     setSosSendingProgress(0);
   };
@@ -8404,81 +7529,134 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
   };
 
   // Verify OTP
-  const handleVerifyOtp = (e: React.FormEvent) => {
+  const handleVerifyOtp = async (e: React.FormEvent) => {
     e.preventDefault();
     if (otpValue.trim().length < 4) {
       setOtpError('Please enter a valid 6-digit OTP code.');
       return;
     }
-
-    setShowOtpModal(false);
+    setOtpError('');
 
     if (otpPendingAction === 'signup') {
-      const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-      const newTouristId = `TR-2026-${randomSuffix}`;
+      // Create a real backend account + tourist profile. If the backend
+      // call fails or does not return a tourist record, the sign-up is
+      // aborted entirely — the user stays on the auth screen and sees the
+      // error instead of being logged in with a mock local-only profile.
+      try {
+        const backendResult = await registerAndLoginTourist({
+          fullName: fullName,
+          phone: phone,
+          email: email || '',
+          emergencyContact: `${emergencyContactName} (${emergencyRelation || 'Father'})`
+        });
 
-      const newProfile: TouristProfile = {
-        id: newTouristId,
-        name: fullName || 'Elena Rostova',
-        nationality: 'India',
-        passportHash: digiLockerVerified ? 'Aadhaar XXXX-XXXX-4912' : 'PASSPORT-VERIFIED',
-        photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300',
-        phone: phone || '+91 98765 43210',
-        emergencyContact: `${emergencyContactName || 'Carlos Rostova'} (${emergencyRelation || 'Father'})`,
-        emergencyRelation: emergencyRelation || 'Father',
-        hotel: 'Solang Resort & Spa, Manali',
-        currentLocation: {
-          lat: 32.2432,
-          lng: 77.1892,
-          address: currentAddress
-        },
-        batteryLevel: 88,
-        safetyStatus: 'Safe',
-        lastSeenTime: 'Just now',
-        digitalBandId: `BAND-${randomSuffix}`,
-        pastSOSHistory: [],
-        email: email,
-        digiLockerVerified: digiLockerVerified,
-        locationConsent: 'granted'
-      };
+        if (!backendResult || !backendResult.tourist || !backendResult.tourist.tourist_id) {
+          throw new Error('Registration failed. Please check your details and try again.');
+        }
 
-      setAuthenticatedUser(newProfile);
-      setLocationConsent('granted');
-      if (onRegisterTourist) {
-        onRegisterTourist(newProfile);
+        const bt = backendResult.tourist;
+        const newProfile: TouristProfile = {
+          id: bt.tourist_id,
+          name: bt.full_name || fullName,
+          nationality: 'India',
+          passportHash: digiLockerVerified ? 'Aadhaar XXXX-XXXX-4912' : 'PASSPORT-VERIFIED',
+          photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300',
+          phone: bt.phone || phone,
+          emergencyContact: bt.emergency_contact || `${emergencyContactName} (${emergencyRelation || 'Father'})`,
+          emergencyRelation: emergencyRelation || 'Father',
+          hotel: 'Solang Resort & Spa, Manali',
+          currentLocation: {
+            lat: 32.2432,
+            lng: 77.1892,
+            address: currentAddress
+          },
+          batteryLevel: 88,
+          safetyStatus: 'Safe',
+          lastSeenTime: 'Just now',
+          digitalBandId: bt.digital_id || bt.tourist_id,
+          pastSOSHistory: [],
+          email: bt.email || email,
+          digiLockerVerified: digiLockerVerified,
+          locationConsent: 'granted',
+          tourist_id: bt.tourist_id,
+          digital_id: bt.digital_id,
+          full_name: bt.full_name,
+          kyc_verified: bt.kyc_verified,
+          emergency_contact: bt.emergency_contact,
+          preferred_language: bt.preferred_language,
+          created_at: bt.created_at
+        };
+
+        setAuthenticatedUser(newProfile);
+        setLocationConsent('granted');
+        if (onRegisterTourist) {
+          onRegisterTourist(newProfile);
+        }
+
+        setShowOtpModal(false);
+        setShowDigitalPassModal(true);
+      } catch (err: any) {
+        console.error('Tourist registration failed:', err);
+        setOtpError(err?.message || 'Registration failed. Please check your details and try again.');
+        // Keep the OTP modal open so the user stays on the auth screen.
+        return;
       }
 
-      setShowDigitalPassModal(true);
-
     } else {
-      const found = existingTourists.find(
-        (t) => t.id.toLowerCase() === signinTouristId.trim().toLowerCase()
-      );
+      // Re-authenticate against the real backend using the same derived
+      // credentials established at sign-up (see lib/api.ts
+      // loginTouristByPhone). If the backend call fails or does not
+      // resolve a tourist record, the sign-in is aborted — the user stays
+      // on the auth screen and sees the error instead of being logged in
+      // with a mock local-only profile.
+      try {
+        const backendResult = await loginTouristByPhone(signinPhone);
 
-      const userProfile: TouristProfile = found || {
-        id: signinTouristId.trim().toUpperCase(),
-        name: 'Elena Rostova',
-        nationality: 'Spain',
-        passportHash: 'ESP-9874****',
-        photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300',
-        phone: signinPhone,
-        emergencyContact: '+34 612 001 223 (Father - Carlos)',
-        emergencyRelation: 'Father',
-        hotel: 'The Grand Himalayan Resort, Old Manali',
-        currentLocation: {
-          lat: 32.2432,
-          lng: 77.1892,
-          address: currentAddress
-        },
-        batteryLevel: 84,
-        safetyStatus: 'Safe',
-        lastSeenTime: 'Just now',
-        digitalBandId: 'BAND-3301',
-        pastSOSHistory: []
-      };
+        if (!backendResult || !backendResult.tourist || !backendResult.tourist.tourist_id) {
+          throw new Error('Sign-in failed. Please check your Tourist ID and phone number.');
+        }
 
-      setAuthenticatedUser(userProfile);
-      setShowConsentModal(true);
+        const bt = backendResult.tourist;
+        const userProfile: TouristProfile = {
+          id: bt.tourist_id,
+          name: bt.full_name || 'Tourist',
+          nationality: 'India',
+          passportHash: 'VERIFIED',
+          photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300',
+          phone: bt.phone || signinPhone,
+          emergencyContact: bt.emergency_contact || '',
+          emergencyRelation: '',
+          hotel: '',
+          currentLocation: {
+            lat: 32.2432,
+            lng: 77.1892,
+            address: currentAddress
+          },
+          batteryLevel: 84,
+          safetyStatus: 'Safe',
+          lastSeenTime: 'Just now',
+          digitalBandId: bt.digital_id || bt.tourist_id,
+          pastSOSHistory: [],
+          email: bt.email,
+          locationConsent: 'granted',
+          tourist_id: bt.tourist_id,
+          digital_id: bt.digital_id,
+          full_name: bt.full_name,
+          kyc_verified: bt.kyc_verified,
+          emergency_contact: bt.emergency_contact,
+          preferred_language: bt.preferred_language,
+          created_at: bt.created_at
+        };
+
+        setAuthenticatedUser(userProfile);
+        setShowOtpModal(false);
+        setShowConsentModal(true);
+      } catch (err: any) {
+        console.error('Tourist sign-in failed:', err);
+        setOtpError(err?.message || 'Sign-in failed. Please check your Tourist ID and phone number.');
+        // Keep the OTP modal open so the user stays on the auth screen.
+        return;
+      }
     }
   };
 
@@ -8515,13 +7693,14 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
   };
 
   const handleSignOut = () => {
+    logoutUser().finally(() => clearSession());
     setAuthenticatedUser(null);
     setLocationConsent(null);
     setSosActive(false);
   };
 
   // Add Item to Itinerary
-  const handleAddItinerary = (e: React.FormEvent) => {
+  const handleAddItinerary = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDest.trim()) return;
 
@@ -8547,11 +7726,40 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
     setNewHotel('');
     setNewActivities('');
     setShowAddItineraryModal(false);
+
+    // Persist to the backend (public.itinerary_entries) when signed in. This
+    // is best-effort: the entry stays visible locally either way, but a
+    // successful save lets it be deleted from the backend too.
+    if (authenticatedUser?.tourist_id) {
+      try {
+        const plannedArrival = newDate ? new Date(newDate).toISOString() : undefined;
+        const saved = await createItineraryEntry({
+          destination_name: newItem.destination,
+          latitude: newItem.coordinates?.lat,
+          longitude: newItem.coordinates?.lng,
+          planned_arrival: plannedArrival
+        });
+        if (saved?.itinerary_id) {
+          setItinerary((prev) =>
+            prev.map((it) => (it.id === newItem.id ? { ...it, backendItineraryId: saved.itinerary_id } : it))
+          );
+        }
+      } catch (err) {
+        console.warn('Failed to persist itinerary entry to backend:', err);
+      }
+    }
   };
 
   // Delete Itinerary Item
   const handleDeleteItinerary = (id: string) => {
+    const target = itinerary.find((item) => item.id === id);
     setItinerary(itinerary.filter((item) => item.id !== id));
+
+    if (target?.backendItineraryId) {
+      deleteItineraryEntry(target.backendItineraryId).catch((err) =>
+        console.warn('Failed to delete itinerary entry from backend:', err)
+      );
+    }
   };
 
   // Chatbot Send Message Handler
@@ -8790,7 +7998,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
               </div>
 
               <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 font-medium">
-                💡 <strong>Demo Quick Sign-In:</strong> Pre-filled with demo registered tourist ID (<code>TR-88219</code>).
+                💡 Enter the Tourist ID and phone number you used when you registered.
               </div>
 
               <button
@@ -10082,7 +9290,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
                     <div className="px-2 py-0.5 rounded bg-[#138808] text-white text-[10px] font-black inline-block mb-1">
                       DIGILOCKER VERIFIED E-KYC
                     </div>
-                    <div className="text-sm font-extrabold text-slate-900">{fullName || 'Elena Rostova'}</div>
+                    <div className="text-sm font-extrabold text-slate-900">{fullName || 'Tourist'}</div>
                     <div className="text-xs text-slate-600 font-mono">Aadhaar No: XXXX-XXXX-4912</div>
                   </div>
                 </div>
@@ -10410,57 +9618,1920 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
 };
 ```
 
----
+### `frontend/src/data/i18n.ts`
 
-## 7. Frontend Client
+```typescript
+import { Language } from '../types';
 
-The frontend client is built using React, Vite, TypeScript, and styled with Vanilla CSS and Tailwind CSS classes. It acts as a client interface supporting two core portal roles:
+export const i18n = {
+  en: {
+    // Top Bar & Branding
+    nationalPortalName: 'SURAKSHA SETU',
+    nationalPortalSub: 'Tourist Safety & AI Predictive Emergency Portal',
+    stateGovt: 'Suraksha Setu • Ministry of Home & Tourism',
+    officerTitle: 'Chief Safety Controller',
+    officerName: 'Rajesh Kumar, IPS',
+    languageLabel: 'Language / भाषा',
+    liveTicker: '⚡ LIVE STATUS: 3 Active SOS Beacons • 14 Patrolling Responders Online • AI Anomaly Engine: NORMAL (22% Risk)',
+    searchPlaceholder: 'Global Search Tourist ID / Incident / Patrol Unit...',
+    
+    // Gateway & Roles
+    gatewayTitle: 'SURAKSHA SETU Safety Command Gateway',
+    gatewaySub: 'Integrated emergency response, AI threat prediction, and tourist safety monitoring ecosystem.',
+    selectRoleTitle: 'Select Access Portal',
+    forTouristsTitle: 'For Tourists & Travelers',
+    forTouristsDesc: 'Public mobile safety web app with instant emergency SOS panic trigger, live safety beacon, and regional helplines.',
+    enterTouristPortal: 'Launch Tourist Safety Web App',
+    
+    forAuthoritiesTitle: 'For Authorized Personnel',
+    forAuthoritiesDesc: 'Command Center access for IPS officers, state police, and disaster response teams. Requires MFA verification.',
+    enterAuthorityPortal: 'Authenticate as Authority',
+    
+    mfaModalTitle: 'Authority MFA Security Verification',
+    mfaBadgeIdLabel: 'Officer Badge ID / IPS No.',
+    mfaOtpLabel: '2FA Auth Code / OTP',
+    mfaVerifyBtn: 'Verify Identity & Enter Command Dashboard',
+    mfaDemoNote: 'Enter your officer Badge ID and the OTP sent to your registered device.',
+    
+    // Navigation Modules
+    modAiHub: 'AI Anomaly & Prediction Hub',
+    modTouristTracking: 'Tourist Detail Tracking',
+    modSosMap: 'SOS Alert & Command Map',
+    modBroadcast: 'Broadcast & Geofenced Alerts',
+    modAnalyticsAudit: 'Audit Logs & Analytics',
+    
+    // Module 1: AI Anomaly
+    highRiskHeatmap: 'High-Risk Zones & Heatmap Intelligence',
+    incidentClusters: 'AI Incident Anomaly Clusters',
+    contextualAnalysis: 'AI Contextual Stream & Threat Metrics',
+    predictiveTracking: 'Continuous Predictive Anomaly Feed',
+    riskScore: 'AI Threat Index',
+    touristDensity: 'Active Density',
+    confidenceLevel: 'Model Confidence',
+    anomalyType: 'Anomaly Type',
+    investigateBtn: 'Investigate Zone & Tourists',
+    viewInMap: 'View on GIS Command Map',
+    
+    // Module 2: Tourist Tracking
+    touristSearchTitle: 'Tourist ID Verification & Live Lookup',
+    touristSearchSub: 'Enter official Tourist ID (e.g., TR-88219) or digital safety band number.',
+    searchBtn: 'Execute Lookup',
+    interceptionTitle: 'Mandatory Interception & Privacy Mandate',
+    interceptionDesc: 'Under statutory safety protocols, accessing personal telemetry and live location of citizens or visitors requires a logged legal justification.',
+    selectReasonLabel: 'Select Mandatory Search Reason',
+    reasonActiveSos: 'Active SOS Response',
+    reasonMissing: 'Filed Missing Person Report',
+    reasonRoutine: 'Designated Check-in Routine',
+    reasonWarrant: 'Judicial / Legal Warrant',
+    officerNotesLabel: 'Officer Case Notes / Dispatch Ref (Optional)',
+    confirmAccessBtn: 'Confirm & View Telemetry Profile',
+    cancelBtn: 'Cancel Request',
+    
+    // Tourist Profile Card
+    profileTitle: 'Tourist Safety Profile',
+    passportNo: 'Passport / ID Hash',
+    nationality: 'Nationality / Origin',
+    phoneNo: 'Registered Mobile',
+    emergencyContact: 'Emergency Contact',
+    hotelStay: 'Hotel / Stay Location',
+    batteryStatus: 'Safety Band Battery',
+    safetyStatus: 'Current Safety Status',
+    liveLocation: 'Real-Time Location Coordinate',
+    sosHistory: 'Past SOS & Incident Records',
+    dispatchToTourist: 'Dispatch Patrol Unit to Location',
+    sendDirectMsg: 'Send Priority SMS Alert',
+    markSafeBtn: 'Mark Tourist as Safe',
+    
+    // Module 3: SOS Command Map
+    gisMapTitle: 'Real-Time GIS Command Map',
+    layersLabel: 'Toggle Map Layers:',
+    layerSosBeacons: 'Active SOS Beacons',
+    layerResponders: 'Patrolling Units',
+    layerStations: 'Police Stations & Safe Havens',
+    layerHospitals: 'Hospitals & Medical Care',
+    layerHeatmap: 'AI Threat Heatmap',
+    
+    kanbanTitle: 'Incident Lifecycle Ticketing System',
+    kanbanNew: 'New SOS Alerts',
+    kanbanDispatched: 'Units Dispatched',
+    kanbanResolved: 'Resolved & Safe',
+    dispatchUnitBtn: 'Dispatch PCR Unit',
+    markResolvedBtn: 'Resolve Incident',
+    addMockSosBtn: '+ Simulate Incoming SOS Emergency',
+    
+    // Module 4: Broadcast & Geofence
+    broadcastTitle: 'Geofenced Emergency Broadcast Centre',
+    broadcastSub: 'Draft and push targeted emergency SMS and app alerts to all travelers in specific high-risk radiuses.',
+    selectRegion: 'Target Zone / Administrative Division',
+    radiusKm: 'Geofence Radius (km)',
+    severityLabel: 'Alert Severity Level',
+    titleEnLabel: 'Alert Title (English)',
+    titleHiLabel: 'Alert Title (Hindi / हिंदी)',
+    bodyEnLabel: 'Alert Message Body (English)',
+    bodyHiLabel: 'Alert Message Body (Hindi / हिंदी)',
+    estimatedRecipients: 'Estimated Target Audience in Selected Geofence',
+    quickTemplates: 'Load Emergency Template:',
+    templateWeather: 'Extreme Weather / Flash Flood',
+    templateHeatwave: 'Severe Heatwave Alert',
+    templateUnsafe: 'Unsafe Mountain Pass / Landslide',
+    sendBroadcastBtn: '🚀 Push Geofenced Alert Now',
+    broadcastHistoryTitle: 'Recent Broadcast Log & Delivery Telemetry',
+    
+    // Audit & Analytics
+    auditLogsTitle: 'Authority Access & Audit Trail',
+    auditLogsDesc: 'Immutable system log tracking officer search justifications, SOS dispatches, and emergency broadcasts.',
+    exportCsvBtn: 'Export Audit Logs (CSV)',
+    colTimestamp: 'Timestamp',
+    colOfficer: 'Officer / Badge ID',
+    colAction: 'Action Taken',
+    colTarget: 'Target ID',
+    colReason: 'Mandatory Reason',
+    colIp: 'IP / Terminal',
+    
+    performanceTitle: 'Response Performance & Zone Analytics',
+    avgResponseTime: 'Avg Emergency Response Time',
+    resolutionRate: 'Incident Resolution Rate',
+    frequentZones: 'Frequent Incident Zones Breakdown',
+    inflowVsRisk: 'Tourist Inflow vs Risk Trend',
+    
+    // Tourist Public Portal
+    touristPortalTitle: 'National Tourist Safety Portal',
+    touristPortalSub: 'Official emergency beacon & safety companion for travelers in India.',
+    sosPanicBtnText: 'EMERGENCY SOS',
+    sosHoldInstruction: 'Tap to trigger immediate SOS beacon to nearest Police Command Center.',
+    sosCancelTimer: 'SOS Activating in',
+    sosActiveNotice: '🚨 SOS BEACON ACTIVE! Patrol Unit PCR-04 dispatched to your GPS coordinates.',
+    hotlinesTitle: 'National Emergency Hotlines',
+    safeHavensNearby: 'Nearby Safe Havens & Police Posts',
+    currentAddress: 'Your GPS Location',
+    locationAccuracy: 'GPS Accuracy',
+    switchGatewayBtn: 'Return to Entry Gateway',
+    logoutBtn: 'Logout Officer',
 
-1. **Tourist Portal**: A mobile-first interface designed for public safety, onboarding, e-KYC validation (via simulated DigiLocker integration), digital passport QR generation, GPS-tracking settings, an offline-first panic SOS countdown system, safety advisories, and an AI-driven safety assistant chatbot.
-2. **Authority Dashboard**: A Command and Control hub locked behind an OTP badge verification prompt. It gives state administrators and rescue coordinators multi-module dashboards:
-   - **AI Anomaly & Prediction Hub**: Real-time telemetry feed predicting risk factors in specific sectors, highlighting outlier groups, and flagging off-trail movement.
-   - **Tourist Detail Tracking**: Allows quick search lookup of any traveler ID, displaying their passport details, phone, emergency contacts, and active GPS coordinates under audit protocol.
-   - **SOS Alert & Command Map**: Renders an interactive GIS-enabled map plotting emergency pins, responders, stations, and medical clinics, with a Kanban ticketing interface to dispatch units or resolve cases.
-   - **Broadcast & Geofenced Alerts**: Permits drafting weather/safety notices and broadcasting them to estimated populations within dynamic radiuses.
-   - **Audit Logs & Analytics**: Visual charts mapping response times, frequent incident zones, tourist-risk correlations, and exports audit tables as CSV format.
+    // Tourist Auth & Onboarding Flow
+    authSignUpTab: 'Sign Up (New Tourist)',
+    authSignInTab: 'Sign In & Trip Activation',
+    signUpTitle: 'Tourist Safety Registration',
+    signUpSub: 'Create your official Suraksha Setu Digital Tourist Pass with instant DigiLocker e-KYC verification.',
+    signInTitle: 'Activate Trip / Sign In',
+    signInSub: 'Enter your unique Tourist ID (e.g. TR-2026-8942) and registered phone number to activate safety session.',
+    fullNameLabel: 'Full Name (as per Govt ID)',
+    phoneLabel: 'Mobile Phone Number',
+    emailLabel: 'Email Address',
+    emergencyContactLabel: 'Emergency Contact Full Name',
+    emergencyRelationLabel: 'Relationship to Contact',
+    emergencyPhoneLabel: 'Emergency Contact Mobile',
+    connectDigiLockerBtn: 'Connect with DigiLocker (e-KYC)',
+    digiLockerVerifiedBadge: 'DigiLocker e-KYC Verified',
+    sendOtpBtn: 'Send Mobile OTP',
+    otpModalTitle: 'Mobile Number OTP Verification',
+    otpModalSub: 'Enter 6-digit verification code sent to',
+    verifyOtpBtn: 'Verify OTP & Generate Tourist ID',
+    digitalPassTitle: 'Suraksha Setu Digital Tourist Safety Pass',
+    touristIdLabel: 'Unique Tourist ID',
+    copyIdBtn: 'Copy Tourist ID',
+    downloadPassBtn: 'Download Digital Pass',
+    proceedToConsentBtn: 'Proceed to Activate Trip & Location Consent',
+    consentModalTitle: 'Mandatory Safety Permission: Grant Live Location Access',
+    consentModalSub: 'Suraksha Setu Civil Protection & Emergency Response Protocol',
+    consentModalDesc: 'To enable 1-tap SOS panic triggers, AI geofenced hazard alerts, and real-time police dispatch during emergencies in remote or high-altitude zones, Suraksha Setu requests continuous encrypted live location tracking for your trip duration.',
+    consentEnableBtn: 'Enable Live Location Access & Start Trip',
+    consentDeclineBtn: 'Decline (Standard Manual SOS Only)',
 
-### Offline-First SOS Architecture
-To ensure continuous operation in low-connectivity zones, the emergency panic system implements the following pipeline:
-1. **Coordination Retrieval (`location.ts`)**: Requests user position using standard `navigator.geolocation` APIs, caching the results or failing back to IndexedDB.
-2. **Local Caching (`db.ts`)**: Creates a local IndexedDB client called `smart_tourist_safety_sos` housing stores for location updates and queued SOS alarms (`sos_queue`).
-3. **Transmission & Background Sync (`api.ts` & `TouristPortal.tsx`)**: Posts SOS alerts directly to the backend (`/api/v1/sos`) when online. If offline, the request stays in the local database queue with status `QUEUED_OFFLINE`. The application listens for `window.online` events to automatically retry and synchronize queued alarms in the background.
+    // Dashboard Tabs & Modules
+    tabOverview: 'Safety Status',
+    tabItinerary: 'Itinerary Planner',
+    tabHeatmap: 'Safety Heatmap',
+    tabRouteFinder: 'Route Finder Map',
+    chatbotTitle: 'Suraksha AI Safety Assistant',
+    quickContactsBtn: 'Emergency Hotlines Drawer',
+    broadcastAlertTitle: 'Geofenced Safety Advisory Broadcast',
+    simulateBroadcastBtn: 'Simulate Live Area Broadcast Test'
+  },
+  
+  hi: {
+    // Top Bar & Branding
+    nationalPortalName: 'सुरक्षा सेतु',
+    nationalPortalSub: 'पर्यटक सुरक्षा एवं एआई पूर्वानुमानित आपातकालीन पोर्टल',
+    stateGovt: 'सुरक्षा सेतु • गृह एवं पर्यटन मंत्रालय',
+    officerTitle: 'मुख्य सुरक्षा नियंत्रक',
+    officerName: 'राजेश कुमार, आईपीएस',
+    languageLabel: 'भाषा / Language',
+    liveTicker: '⚡ लाइव स्थिति: 3 सक्रिय एसओएस बीकन • 14 गश्ती दल ऑनलाइन • एआई विसंगति इंजन: सामान्य (22% जोखिम)',
+    searchPlaceholder: 'ग्लोबल खोज: पर्यटक आईडी / घटना / गश्ती इकाई...',
+    
+    // Gateway & Roles
+    gatewayTitle: 'सुरक्षा सेतु सुरक्षा कमान प्रवेश द्वार',
+    gatewaySub: 'एकीकृत आपातकालीन प्रतिक्रिया, एआई खतरा पूर्वानुमान और पर्यटक सुरक्षा निगरानी पारिस्थितिकी तंत्र।',
+    selectRoleTitle: 'प्रवेश पोर्टल चुनें',
+    forTouristsTitle: 'पर्यटकों और यात्रियों के लिए',
+    forTouristsDesc: 'तत्काल आपातकालीन एसओएस पैनिक बटन, लाइव सुरक्षा बीकन और क्षेत्रीय हेल्पलाइन के साथ सार्वजनिक मोबाइल सुरक्षा ऐप।',
+    enterTouristPortal: 'पर्यटक सुरक्षा ऐप खोलें',
+    
+    forAuthoritiesTitle: 'प्राधिकृत अधिकारियों के लिए',
+    forAuthoritiesDesc: 'आईपीएस अधिकारियों, राज्य पुलिस और आपदा प्रतिक्रिया टीमों के लिए कमान केंद्र। एमएफए सत्यापन आवश्यक है।',
+    enterAuthorityPortal: 'अधिकारी के रूप में सत्यापित करें',
+    
+    mfaModalTitle: 'प्राधिकरण एमएफए सुरक्षा सत्यापन',
+    mfaBadgeIdLabel: 'अधिकारी बैज आईडी / आईपीएस संख्या',
+    mfaOtpLabel: '2FA प्रमाणन कोड / ओटीपी',
+    mfaVerifyBtn: 'पहचान सत्यापित करें और कमान केंद्र में प्रवेश करें',
+    mfaDemoNote: 'अपनी अधिकारी बैज आईडी और अपने पंजीकृत डिवाइस पर भेजा गया ओटीपी दर्ज करें।',
+    
+    // Navigation Modules
+    modAiHub: 'एआई विसंगति एवं पूर्वानुमान केंद्र',
+    modTouristTracking: 'पर्यटक विवरण और ट्रैकिंग',
+    modSosMap: 'एसओएस चेतावनी एवं कमान नक्शा',
+    modBroadcast: 'प्रसारण और जियोफेन्स्ड अलर्ट',
+    modAnalyticsAudit: 'ऑडिट लॉग और विश्लेषिकी',
+    
+    // Module 1: AI Anomaly
+    highRiskHeatmap: 'उच्च जोखिम वाले क्षेत्र और हीटमैप इंटेलिजेंस',
+    incidentClusters: 'एआई घटना विसंगति क्लस्टर',
+    contextualAnalysis: 'एआई संदर्भ धारा और खतरा मेट्रिक्स',
+    predictiveTracking: 'सतत पूर्वानुमानित विसंगति फीड',
+    riskScore: 'एआई खतरा सूचकांक',
+    touristDensity: 'सक्रिय घनत्व',
+    confidenceLevel: 'मॉडल विश्वसनीयता',
+    anomalyType: 'विसंगति प्रकार',
+    investigateBtn: 'क्षेत्र और पर्यटकों की जांच करें',
+    viewInMap: 'जीआईएस नक्शे पर देखें',
+    
+    // Module 2: Tourist Tracking
+    touristSearchTitle: 'पर्यटक आईडी सत्यापन और लाइव खोज',
+    touristSearchSub: 'आधिकारिक पर्यटक आईडी (उदा. TR-88219) या डिजिटल सुरक्षा बैंड संख्या दर्ज करें।',
+    searchBtn: 'खोज निष्पादित करें',
+    interceptionTitle: 'अनिवार्य इंटरसेप्शन और गोपनीयता जनादेश',
+    interceptionDesc: 'वैधानिक सुरक्षा प्रोटोकॉल के तहत, नागरिकों या आगंतुकों के व्यक्तिगत टेलीमेट्री और लाइव स्थान तक पहुंचने के लिए कानूनी औचित्य दर्ज करना अनिवार्य है।',
+    selectReasonLabel: 'अनिवार्य खोज कारण चुनें',
+    reasonActiveSos: 'सक्रिय एसओएस प्रतिक्रिया (Active SOS Response)',
+    reasonMissing: 'गुमशुदा व्यक्ति रिपोर्ट (Filed Missing Person Report)',
+    reasonRoutine: 'निर्दिष्ट चेक-इन दिनचर्या (Designated Check-in Routine)',
+    reasonWarrant: 'न्यायिक / कानूनी वारंट (Judicial / Legal Warrant)',
+    officerNotesLabel: 'अधिकारी केस नोट / प्रेषण संदर्भ (वैकल्पिक)',
+    confirmAccessBtn: 'पुष्टि करें और टेलीमेट्री प्रोफ़ाइल देखें',
+    cancelBtn: 'अनुरोध रद्द करें',
+    
+    // Tourist Profile Card
+    profileTitle: 'पर्यटक सुरक्षा प्रोफ़ाइल',
+    passportNo: 'पासपोर्ट / आईडी हैश',
+    nationality: 'राष्ट्रीयता / मूल देश',
+    phoneNo: 'पंजीकृत मोबाइल',
+    emergencyContact: 'आपातकालीन संपर्क',
+    hotelStay: 'होटल / रहने का स्थान',
+    batteryStatus: 'सुरक्षा बैंड बैटरी',
+    safetyStatus: 'वर्तमान सुरक्षा स्थिति',
+    liveLocation: 'वास्तविक समय स्थान निर्देशांक',
+    sosHistory: 'अतीत के एसओएस और घटना रिकॉर्ड',
+    dispatchToTourist: 'स्थान पर गश्ती इकाई भेजें',
+    sendDirectMsg: 'प्राथमिकता एसएमएस अलर्ट भेजें',
+    markSafeBtn: 'पर्यटक को सुरक्षित चिह्नित करें',
+    
+    // Module 3: SOS Command Map
+    gisMapTitle: 'वास्तविक समय जीआईएस कमान नक्शा',
+    layersLabel: 'मानचित्र परतें टगल करें:',
+    layerSosBeacons: 'सक्रिय एसओएस बीकन',
+    layerResponders: 'गश्ती प्रतिक्रिया दल',
+    layerStations: 'पुलिस स्टेशन और सुरक्षित केंद्र',
+    layerHospitals: 'अस्पताल और आपातकालीन चिकित्सा',
+    layerHeatmap: 'एआई खतरा हीटमैप',
+    
+    kanbanTitle: 'घटना जीवनचक्र टिकटिंग प्रणाली',
+    kanbanNew: 'नया एसओएस अलर्ट',
+    kanbanDispatched: 'दल रवाना किया गया',
+    kanbanResolved: 'हल किया गया और सुरक्षित',
+    dispatchUnitBtn: 'पीसीआर इकाई भेजें',
+    markResolvedBtn: 'घटना का समाधान करें',
+    addMockSosBtn: '+ आने वाले एसओएस आपातकाल अनुकरण करें',
+    
+    // Module 4: Broadcast & Geofence
+    broadcastTitle: 'जियोफेन्स्ड आपातकालीन प्रसारण केंद्र',
+    broadcastSub: 'विशिष्ट उच्च जोखिम वाले क्षेत्रों में सभी यात्रियों को लक्षित आपातकालीन एसएमएस और ऐप अलर्ट का मसौदा तैयार करें और भेजें।',
+    selectRegion: 'लक्षित क्षेत्र / प्रशासनिक प्रभाग',
+    radiusKm: 'जियोफेंस त्रिज्या (किमी)',
+    severityLabel: 'अलर्ट गंभीरता स्तर',
+    titleEnLabel: 'अलर्ट शीर्षक (अंग्रेजी)',
+    titleHiLabel: 'अलर्ट शीर्षक (हिंदी)',
+    bodyEnLabel: 'अलर्ट संदेश (अंग्रेजी)',
+    bodyHiLabel: 'अलर्ट संदेश (हिंदी)',
+    estimatedRecipients: 'चयनित जियोफेंस में अनुमानित लक्षित दर्शक',
+    quickTemplates: 'आपातकालीन टेम्प्लेट लोड करें:',
+    templateWeather: 'खराब मौसम / अचानक बाढ़',
+    templateHeatwave: 'अत्यधिक गर्मी का अलर्ट',
+    templateUnsafe: 'असुरक्षित पहाड़ी दर्रा / भूस्खलन',
+    sendBroadcastBtn: '🚀 जियोफेन्स्ड अलर्ट अभी भेजें',
+    broadcastHistoryTitle: 'हाल का प्रसारण लॉग और डिलीवरी टेलीमेट्री',
+    
+    // Audit & Analytics
+    auditLogsTitle: 'प्राधिकरण पहुंच और ऑडिट ट्रेल',
+    auditLogsDesc: 'अधिकारी खोज औचित्य, एसओएस प्रेषण और आपातकालीन प्रसारण को ट्रैक करने वाला अपरिवर्तनीय सिस्टम लॉग।',
+    exportCsvBtn: 'ऑडिट लॉग निर्यात करें (CSV)',
+    colTimestamp: 'समय',
+    colOfficer: 'अधिकारी / बैज आईडी',
+    colAction: 'की गई कार्रवाई',
+    colTarget: 'लक्ष्य आईडी',
+    colReason: 'अनिवार्य कारण',
+    colIp: 'आईपी / टर्मिनल',
+    
+    performanceTitle: 'प्रतिक्रिया प्रदर्शन और क्षेत्र विश्लेषिकी',
+    avgResponseTime: 'औसत आपातकालीन प्रतिक्रिया समय',
+    resolutionRate: 'घटना समाधान दर',
+    frequentZones: 'बार-बार होने वाली घटना क्षेत्रों का विवरण',
+    inflowVsRisk: 'पर्यटक आगमन बनाम जोखिम प्रवृत्ति',
+    
+    // Tourist Public Portal
+    touristPortalTitle: 'राष्ट्रीय पर्यटक सुरक्षा पोर्टल',
+    touristPortalSub: 'भारत में यात्रियों के लिए आधिकारिक आपातकालीन बीकन और सुरक्षा साथी।',
+    sosPanicBtnText: 'आपातकालीन एसओएस',
+    sosHoldInstruction: 'निकटतम पुलिस कमान केंद्र को तत्काल एसओएस बीकन भेजने के लिए दबाएं।',
+    sosCancelTimer: 'एसओएस सक्रिय हो रहा है',
+    sosActiveNotice: '🚨 एसओएस बीकन सक्रिय! गश्ती इकाई PCR-04 आपके जीपीएस निर्देशांकों पर भेजी गई है।',
+    hotlinesTitle: 'राष्ट्रीय आपातकालीन हेल्पलाइन',
+    safeHavensNearby: 'आसपास के सुरक्षित स्थान और पुलिस चौकियां',
+    currentAddress: 'आपका जीपीएस स्थान',
+    locationAccuracy: 'जीपीएस सटीकता',
+    switchGatewayBtn: 'प्रवेश द्वार पर लौटें',
+    logoutBtn: 'अधिकारी लॉगआउट',
 
----
+    // Tourist Auth & Onboarding Flow
+    authSignUpTab: 'नया पंजीकरण (साइन अप)',
+    authSignInTab: 'साइन इन एवं यात्रा सक्रियण',
+    signUpTitle: 'पर्यटक सुरक्षा पंजीकरण',
+    signUpSub: 'डिजीलॉकर ई-केवाईसी सत्यापन के साथ अपना आधिकारिक सुरक्षा सेतु डिजिटल पर्यटक पास बनाएं।',
+    signInTitle: 'यात्रा सक्रियण / साइन इन',
+    signInSub: 'अपनी सुरक्षा सत्र को पुनः आरंभ करने के लिए अपनी अद्वितीय पर्यटक आईडी (उदा. TR-2026-8942) और मोबाइल नंबर दर्ज करें।',
+    fullNameLabel: 'पूरा नाम (सरकारी पहचान पत्र के अनुसार)',
+    phoneLabel: 'मोबाइल फोन नंबर',
+    emailLabel: 'ईमेल पता',
+    emergencyContactLabel: 'आपातकालीन संपर्क का नाम',
+    emergencyRelationLabel: 'संपर्क से संबंध',
+    emergencyPhoneLabel: 'आपातकालीन संपर्क का मोबाइल नंबर',
+    connectDigiLockerBtn: 'डिजीलॉकर (e-KYC) से जोड़ें',
+    digiLockerVerifiedBadge: 'डिजीलॉकर ई-केवाईसी सत्यापित',
+    sendOtpBtn: 'मोबाइल ओटीपी भेजें',
+    otpModalTitle: 'मोबाइल नंबर ओटीपी सत्यापन',
+    otpModalSub: 'भेजा गया 6-अंकों का सत्यापन कोड दर्ज करें',
+    verifyOtpBtn: 'ओटीपी सत्यापित करें और पर्यटक आईडी बनाएं',
+    digitalPassTitle: 'सुरक्षा सेतु डिजिटल पर्यटक सुरक्षा पास',
+    touristIdLabel: 'अद्वितीय पर्यटक आईडी',
+    copyIdBtn: 'पर्यटक आईडी कॉपी करें',
+    downloadPassBtn: 'डिजिटल पास डाउनलोड करें',
+    proceedToConsentBtn: 'यात्रा सक्रियण एवं स्थान अनुमति हेतु आगे बढ़ें',
+    consentModalTitle: 'अनिवार्य सुरक्षा अनुमति: लाइव स्थान पहुंच प्रदान करें',
+    consentModalSub: 'सुरक्षा सेतु नागरिक सुरक्षा एवं आपातकालीन प्रतिक्रिया प्रोटोकॉल',
+    consentModalDesc: 'दुर्गम या ऊंचाई वाले क्षेत्रों में आपात स्थिति के दौरान 1-टैप एसओएस पैनिक ट्रिगर, एआई जियोफेंस जोखिम अलर्ट और वास्तविक समय पुलिस प्रतिक्रिया सक्षम करने के लिए, सुरक्षा सेतु आपकी यात्रा अवधि के लिए निरंतर एन्क्रिप्टेड लाइव स्थान ट्रैकिंग का अनुरोध करता है।',
+    consentEnableBtn: 'लाइव स्थान पहुंच सक्षम करें और यात्रा शुरू करें',
+    consentDeclineBtn: 'अस्वीकार करें (केवल मानक मैनुअल एसओएस)',
 
-## 8. Configuration
+    // Dashboard Tabs & Modules
+    tabOverview: 'सुरक्षा स्थिति',
+    tabItinerary: 'यात्रा योजनाकार',
+    tabHeatmap: 'सुरक्षा हीटमैप',
+    tabRouteFinder: 'सुरक्षित मार्ग खोजक',
+    chatbotTitle: 'सुरक्षा एआई सहायक',
+    quickContactsBtn: 'आपातकालीन हॉटलाइन',
+    broadcastAlertTitle: 'जियोफेंस सुरक्षा चेतावनी प्रसारण',
+    simulateBroadcastBtn: 'लाइव प्रसारण परीक्षण ट्रिगर करें'
+  }
+};
+```
 
-### Environment Variables & Purpose
-The following variables are supported and parsed:
-- **Backend (Python)**:
-  - `DATABASE_URL`: Connection string for PostgreSQL database pooling. (Default: `""`)
-  - `SUPABASE_URL`: Target endpoint url for Supabase Auth API calls. (Default: `""`)
-  - `SUPABASE_ANON_KEY`: Public client-side token for Supabase Auth. (Default: `""`)
-  - `JWT_SECRET`: Signature key for validating and decoding incoming JWT tokens. (Default: `""`)
-  - `CORS_ALLOWED_ORIGINS`: Comma-separated list of origins permitted to call the API. (Default: `""`)
-- **Frontend (Vite/TypeScript)**:
-  - `VITE_GOOGLE_MAPS_PLATFORM_KEY` / `GOOGLE_MAPS_PLATFORM_KEY`: API key for loading Google Maps vector libraries.
+### `frontend/src/data/mockData.ts`
 
-*Note: Secrets are redacted and replaced with `<SECRET>` or `<ENV_VALUE>` placeholders in configuration profiles.*
+```typescript
+import {
+  TouristProfile,
+  SOSIncident,
+  PatrollingUnit,
+  PoliceStation,
+  Hospital,
+  AnomalyCluster,
+  BroadcastAlert,
+  AuditLog,
+  AILog,
+  GeoFenceZone
+} from '../types';
 
----
 
-## 9. Current State
+export const INITIAL_TOURISTS: TouristProfile[] = [
+  {
+    id: 'TR-88219',
+    name: 'Elena Rostova',
+    nationality: 'Spain',
+    passportHash: 'ESP-9874****',
+    photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300',
+    phone: '+34 612 884 902',
+    emergencyContact: '+34 612 001 223',
+    emergencyRelation: 'Father',
+    hotel: 'The Grand Himalayan Resort, Old Manali',
+    currentLocation: {
+      lat: 32.2432,
+      lng: 77.1892,
+      address: 'Solang Valley North Trail, Kullu, HP'
+    },
+    batteryLevel: 84,
+    safetyStatus: 'SOS Active',
+    lastSeenTime: '10 mins ago',
+    digitalBandId: 'BAND-3301',
+    pastSOSHistory: [
+      {
+        id: 'SOS-8012',
+        date: '2026-08-01',
+        location: 'Hadimba Temple Trek',
+        reason: 'Network Drop & Altitude Confusion',
+        status: 'Resolved'
+      }
+    ],
+    tourist_id: '8f7a9d1b-3c4e-4f52-a1b2-c3d4e5f67890',
+    digital_id: 'TR-88219',
+    full_name: 'Elena Rostova',
+    kyc_document_type: 'Passport',
+    kyc_verified: true,
+    email: 'elena.rostova@example.com',
+    emergency_contact: '+34 612 001 223',
+    preferred_language: 'Spanish',
+    created_at: '2026-07-15T08:30:00Z'
+  },
+  {
+    id: 'TR-44021',
+    name: 'Marcus Vance',
+    nationality: 'Australia',
+    passportHash: 'AUS-4412****',
+    photoUrl: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&q=80&w=300',
+    phone: '+61 412 990 123',
+    emergencyContact: '+61 412 000 888',
+    emergencyRelation: 'Sister',
+    hotel: 'Ganga View Heritage Guest House, Varanasi',
+    currentLocation: {
+      lat: 25.3176,
+      lng: 83.0062,
+      address: 'Dashashwamedh Ghat Alley #4, Varanasi, UP'
+    },
+    batteryLevel: 62,
+    safetyStatus: 'Watch',
+    lastSeenTime: '2 mins ago',
+    digitalBandId: 'BAND-1192',
+    pastSOSHistory: [],
+    tourist_id: '3b2a1c0d-9e8f-4765-b4a3-102938475610',
+    digital_id: 'TR-44021',
+    full_name: 'Marcus Vance',
+    kyc_document_type: 'Passport',
+    kyc_verified: true,
+    email: 'marcus.vance@example.au',
+    emergency_contact: '+61 412 000 888',
+    preferred_language: 'English',
+    created_at: '2026-07-20T11:15:00Z'
+  },
+  {
+    id: 'TR-90423',
+    name: 'Amina Al-Mansoor',
+    nationality: 'UAE',
+    passportHash: 'ARE-7712****',
+    photoUrl: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&q=80&w=300',
+    phone: '+971 50 123 4567',
+    emergencyContact: '+971 50 999 8877',
+    emergencyRelation: 'Spouse',
+    hotel: 'Taj Palace, New Delhi',
+    currentLocation: {
+      lat: 28.6315,
+      lng: 77.2167,
+      address: 'Connaught Place Inner Circle, New Delhi'
+    },
+    batteryLevel: 91,
+    safetyStatus: 'Safe',
+    lastSeenTime: 'Just now',
+    digitalBandId: 'BAND-9081',
+    pastSOSHistory: [],
+    tourist_id: '6c5b4a3f-2e1d-4890-a5b6-7c8d9e0f1a2b',
+    digital_id: 'TR-90423',
+    full_name: 'Amina Al-Mansoor',
+    kyc_document_type: 'National ID',
+    kyc_verified: true,
+    email: 'amina.almansoor@example.ae',
+    emergency_contact: '+971 50 999 8877',
+    preferred_language: 'Arabic',
+    created_at: '2026-08-01T14:45:00Z'
+  },
+  {
+    id: 'TR-12890',
+    name: 'Kenji Takahashi',
+    nationality: 'Japan',
+    passportHash: 'JPN-3301****',
+    photoUrl: 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&q=80&w=300',
+    phone: '+81 90 4432 1100',
+    emergencyContact: '+81 90 0011 2233',
+    emergencyRelation: 'Mother',
+    hotel: 'Palolem Beach Shack Inn, Goa',
+    currentLocation: {
+      lat: 15.0102,
+      lng: 74.0231,
+      address: 'South Palolem Cliff Point, Canacona, Goa'
+    },
+    batteryLevel: 45,
+    safetyStatus: 'SOS Active',
+    lastSeenTime: '5 mins ago',
+    digitalBandId: 'BAND-5512',
+    pastSOSHistory: [
+      {
+        id: 'SOS-7110',
+        date: '2026-07-28',
+        location: 'Agonda Beach Cliff',
+        reason: 'Water Tide Isolation Warning',
+        status: 'Resolved'
+      }
+    ],
+    tourist_id: '9d8c7b6a-5f4e-3d2c-1b0a-fe9d8c7b6a5f',
+    digital_id: 'TR-12890',
+    full_name: 'Kenji Takahashi',
+    kyc_document_type: 'Passport',
+    kyc_verified: true,
+    email: 'kenji.takahashi@example.jp',
+    emergency_contact: '+81 90 0011 2233',
+    preferred_language: 'Japanese',
+    created_at: '2026-07-25T09:20:00Z'
+  },
+  {
+    id: 'TR-55310',
+    name: 'Priya Sharma',
+    nationality: 'India (Domestic Traveler)',
+    passportHash: 'IND-8821****',
+    photoUrl: 'https://images.unsplash.com/photo-1544005313-94ddf0286df2?auto=format&fit=crop&q=80&w=300',
+    phone: '+91 98765 43210',
+    emergencyContact: '+91 98123 45678',
+    emergencyRelation: 'Brother',
+    hotel: 'Zostel Rishikesh, Tapovan',
+    currentLocation: {
+      lat: 30.1231,
+      lng: 78.3211,
+      address: 'Laxman Jhula North Bank, Rishikesh, Uttarakhand'
+    },
+    batteryLevel: 78,
+    safetyStatus: 'Safe',
+    lastSeenTime: '15 mins ago',
+    digitalBandId: 'BAND-8840',
+    pastSOSHistory: [],
+    tourist_id: '1a2b3c4d-5e6f-7a8b-9c0d-1e2f3a4b5c6d',
+    digital_id: 'TR-55310',
+    full_name: 'Priya Sharma',
+    kyc_document_type: 'Aadhaar Card',
+    kyc_verified: true,
+    email: 'priya.sharma@example.in',
+    emergency_contact: '+91 98123 45678',
+    preferred_language: 'Hindi',
+    created_at: '2026-08-05T16:10:00Z'
+  }
+];
 
-### Working Features
-- **Frontend Client Application**: Fully implemented, featuring bilingual support, responsive styling, and modern UI dashboards.
-- **Offline-First SOS Beacon Countdown**: countdown-to-trigger workflow that integrates live Geolocation fetching, IndexedDB queue storage, online transmission fallback, and automatic network-restore background syncing.
-- **Authority Portal Security**: MFA badge/OTP gate.
-- **Bilingual Interface**: Seamless translation switcher between English and Hindi across all headers, cards, overlays, and warnings.
-- **GIS Command and Interactive Map Layers**: Overlays for active incidents, medical assets, patrolling units, and geofence caution boundaries.
-- **AI Anomaly prediction feeds** and live telemetry analytics dashboards.
-- **Dual-mode backend routing** dynamically matching PostgreSQL database pools or mock thread-safe stores.
-- **Row Level Security (RLS) simulation** injecting authentication claims to PostgreSQL transactions.
+export const INITIAL_INCIDENTS: SOSIncident[] = [
+  {
+    id: 'SOS-9021',
+    touristId: 'TR-88219',
+    touristName: 'Elena Rostova',
+    touristPhone: '+34 612 884 902',
+    location: {
+      lat: 32.2432,
+      lng: 77.1892,
+      address: 'Solang Valley North Trail (Off-route 2.4 km)'
+    },
+    timestamp: '2026-08-12 08:10:12',
+    status: 'New',
+    severity: 'Critical',
+    hazardType: 'Panic Beacon / Off-Route Isolation',
+    notes: 'Panic button pressed continuously for 5s. Rapid heart-rate spike recorded by digital band.',
+  },
+  {
+    id: 'SOS-9022',
+    touristId: 'TR-12890',
+    touristName: 'Kenji Takahashi',
+    touristPhone: '+81 90 4432 1100',
+    location: {
+      lat: 15.0102,
+      lng: 74.0231,
+      address: 'South Palolem Cliff Point, Goa'
+    },
+    timestamp: '2026-08-12 07:55:00',
+    status: 'Units Dispatched',
+    severity: 'Critical',
+    unitAssigned: 'PCR-GOA-08',
+    hazardType: 'High Tide Cliff Isolation',
+    notes: 'Coastal Patrol boat dispatched with life jackets.'
+  },
+  {
+    id: 'SOS-9018',
+    touristId: 'TR-44021',
+    touristName: 'Marcus Vance',
+    touristPhone: '+61 412 990 123',
+    location: {
+      lat: 25.3176,
+      lng: 83.0062,
+      address: 'Manikarnika Ghat Lane, Varanasi'
+    },
+    timestamp: '2026-08-12 06:30:15',
+    status: 'Resolved',
+    severity: 'Warning',
+    unitAssigned: 'PCR-VAR-02',
+    hazardType: 'Crowd Disorientation',
+    notes: 'Tourist safely escorted back to hotel by Ghat Tourist Squad.'
+  }
+];
 
-### Known Issues & TODOs
-- **Database synchronization for itinerary entries**: The frontend itinerary hazard planner is currently simulated and requires backend API routers to persist plans in `public.itinerary_entries`.
-- **Statutory Audit logging database mapping**: Authority audit activities are stored on the frontend client and should be persisted to backend databases.
+export const INITIAL_PATROL_UNITS: PatrollingUnit[] = [
+  {
+    id: 'PCR-KULLU-04',
+    unitName: 'PCR Van - Himachal High Sector 04',
+    type: 'PCR Van',
+    unitLeader: 'SI Inspector Vikram Singh',
+    location: {
+      lat: 32.2390,
+      lng: 77.1820,
+      address: 'Solang Valley Checkpost'
+    },
+    status: 'Patrolling',
+    contactPhone: '+91 94180 12345'
+  },
+  {
+    id: 'PCR-GOA-08',
+    unitName: 'Coastal Rescue Speedboat - Unit 8',
+    type: 'Quick Response Motorcycle',
+    unitLeader: 'Coast Guard Sub-Officer Rahul Naik',
+    location: {
+      lat: 15.0080,
+      lng: 74.0210,
+      address: 'Palolem Beach Patrol Bay'
+    },
+    status: 'Dispatched',
+    contactPhone: '+91 98221 88990',
+    assignedIncidentId: 'SOS-9022'
+  },
+  {
+    id: 'WSS-DELHI-01',
+    unitName: 'Pink Panther Women Safety Squad - CP',
+    type: 'Women Safety Squad',
+    unitLeader: 'Inspector Sunita Rani',
+    location: {
+      lat: 28.6320,
+      lng: 77.2180,
+      address: 'Connaught Place Outer Ring'
+    },
+    status: 'Patrolling',
+    contactPhone: '+91 98100 55443'
+  },
+  {
+    id: 'PCR-VAR-02',
+    unitName: 'Ghat Quick Response Bike Team 2',
+    type: 'Quick Response Motorcycle',
+    unitLeader: 'Head Constable Ramesh Yadav',
+    location: {
+      lat: 25.3120,
+      lng: 83.0080,
+      address: 'Godowlia Crossing, Varanasi'
+    },
+    status: 'Standby',
+    contactPhone: '+91 94500 11223'
+  }
+];
+
+export const POLICE_STATIONS: PoliceStation[] = [
+  {
+    id: 'PS-MANALI-01',
+    name: 'Manali Central Tourist Police Station',
+    jurisdiction: 'Kullu Valley & Solang Pass',
+    location: {
+      lat: 32.2400,
+      lng: 77.1850,
+      address: 'Mall Road, Manali, Himachal Pradesh'
+    },
+    contactPhone: '01902-252326',
+    activeOfficers: 34,
+    availableVehicles: 8
+  },
+  {
+    id: 'PS-VARANASI-01',
+    name: 'Kotwali Tourist Helpdesk & Station',
+    jurisdiction: 'Varanasi Ghats & Heritage Corridor',
+    location: {
+      lat: 25.3150,
+      lng: 83.0040,
+      address: 'Dashashwamedh Main Road, Varanasi'
+    },
+    contactPhone: '0542-2502220',
+    activeOfficers: 42,
+    availableVehicles: 12
+  },
+  {
+    id: 'PS-DELHI-01',
+    name: 'Connaught Place Police Station',
+    jurisdiction: 'Central Delhi & Janpath Tourist Hub',
+    location: {
+      lat: 28.6300,
+      lng: 77.2150,
+      address: 'Parliament Street, Connaught Place, New Delhi'
+    },
+    contactPhone: '011-23361234',
+    activeOfficers: 65,
+    availableVehicles: 18
+  },
+  {
+    id: 'PS-GOA-01',
+    name: 'Canacona Coastal Police Station',
+    jurisdiction: 'South Goa Beaches & Cliff Circuits',
+    location: {
+      lat: 15.0150,
+      lng: 74.0200,
+      address: 'Chaudi, Canacona, South Goa'
+    },
+    contactPhone: '0832-2643323',
+    activeOfficers: 28,
+    availableVehicles: 6
+  }
+];
+
+export const HOSPITALS: Hospital[] = [
+  {
+    id: 'HOSP-MANALI-01',
+    name: 'Manali Civil District Hospital & Trauma Center',
+    jurisdiction: 'Mall Road Emergency Ward',
+    location: {
+      lat: 32.2380,
+      lng: 77.1890,
+      address: 'Mall Road, Manali, Himachal Pradesh'
+    },
+    contactPhone: '+91 1902 252222',
+    icuBedsAvailable: 14,
+    ambulancesReady: 4
+  },
+  {
+    id: 'HOSP-KULLU-02',
+    name: 'Kullu Regional Emergency Care Center',
+    jurisdiction: 'Kullu Valley Medical Command',
+    location: {
+      lat: 31.9580,
+      lng: 77.1090,
+      address: 'Regional Hospital Campus, Kullu'
+    },
+    contactPhone: '+91 1902 222340',
+    icuBedsAvailable: 22,
+    ambulancesReady: 6
+  },
+  {
+    id: 'HOSP-VARANASI-03',
+    name: 'Heritage Super Specialty Hospital',
+    jurisdiction: 'Varanasi Central Trauma Response',
+    location: {
+      lat: 25.3120,
+      lng: 83.0080,
+      address: 'Lanka Crossing, Varanasi'
+    },
+    contactPhone: '+91 542 2369999',
+    icuBedsAvailable: 18,
+    ambulancesReady: 5
+  }
+];
+
+export const ANOMALY_CLUSTERS: AnomalyCluster[] = [
+  {
+    id: 'AC-101',
+    regionName: 'Solang Valley North Trail (Kullu Sector)',
+    riskScore: 88,
+    touristDensity: 142,
+    anomalyType: 'Off-Route Signal Loss',
+    confidenceScore: 94,
+    descriptionEn: 'AI detected 3 active tourist digital bands deviating >2km from marked trekking trail after dusk.',
+    descriptionHi: 'एआई ने सूर्यास्त के बाद चिह्नित ट्रैकिंग ट्रेल से >2 किमी दूर भटक रहे 3 सक्रिय पर्यटक डिजिटल बैंड का पता लगाया।',
+    recommendedActionEn: 'Deploy High Altitude PCR-04 van and send automated SMS advisory to registered trekking groups.',
+    recommendedActionHi: 'हाई एल्टीट्यूड पीसीआर-04 वैन भेजें और पंजीकृत ट्रैकिंग समूहों को स्वचालित एसएमएस सलाह भेजें।',
+    coordinates: { lat: 32.2432, lng: 77.1892 },
+    timestamp: '2026-08-12 08:12:00'
+  },
+  {
+    id: 'AC-102',
+    regionName: 'Varanasi Ghat Narrow Alleyway Grid',
+    riskScore: 72,
+    touristDensity: 890,
+    anomalyType: 'Unusual Grouping',
+    confidenceScore: 89,
+    descriptionEn: 'High density congestion detected near unlit alley #4. Slow movement and sudden drop in GPS precision.',
+    descriptionHi: 'अप्रकाशित गली #4 के पास उच्च घनत्व वाली भीड़ का पता चला। धीमी गति और जीपीएस सटीकता में अचानक गिरावट।',
+    recommendedActionEn: 'Dispatch Ghat Bike Team for crowd flow management and illuminate emergency LED arrays.',
+    recommendedActionHi: 'भीड़ प्रवाह प्रबंधन के लिए घाट बाइक टीम भेजें और आपातकालीन एलईडी समूह चालू करें।',
+    coordinates: { lat: 25.3176, lng: 83.0062 },
+    timestamp: '2026-08-12 08:05:00'
+  },
+  {
+    id: 'AC-103',
+    regionName: 'Anjuna - Palolem Coastal Cliff Edge',
+    riskScore: 81,
+    touristDensity: 210,
+    anomalyType: 'Hazard Zone Entry',
+    confidenceScore: 91,
+    descriptionEn: 'High tide alert active. 5 tourists located past danger warning barrier near tidal cliff.',
+    descriptionHi: 'उच्च ज्वार की चेतावनी सक्रिय। ज्वारीय चट्टान के पास खतरे की चेतावनी बाधा के पार 5 पर्यटक स्थित हैं।',
+    recommendedActionEn: 'Trigger geofenced audio warning beacon and broadcast SMS to coastal cell towers.',
+    recommendedActionHi: 'जियोफेंस किए गए ऑडियो चेतावनी बीकन को ट्रिगर करें और तटीय सेल टावरों पर एसएमएस प्रसारित करें।',
+    coordinates: { lat: 15.0102, lng: 74.0231 },
+    timestamp: '2026-08-12 07:50:00'
+  }
+];
+
+export const INITIAL_BROADCASTS: BroadcastAlert[] = [
+  {
+    id: 'BC-501',
+    senderBadge: 'IPS-7742 (Rajesh Kumar)',
+    region: 'Himachal Pradesh (Solang Valley & Rohtang Pass)',
+    radiusKm: 15,
+    titleEn: '⚠️ Flash Flood & Sudden Weather Warning',
+    titleHi: '⚠️ अचानक बाढ़ और खराब मौसम की चेतावनी',
+    bodyEn: 'Heavy rainfall and cloudburst alert in Solang Valley. Avoid unmapped riverbanks and return to main highway immediately.',
+    bodyHi: 'सोलंग घाटी में भारी बारिश और बादल फटने का अलर्ट। बिना नक्शे वाले नदी तटों से दूर रहें और तुरंत मुख्य राजमार्ग पर लौटें।',
+    severity: 'Critical',
+    timestamp: '2026-08-12 07:30:00',
+    recipientCount: 3420,
+    deliveredCount: 3389,
+    status: 'Completed'
+  },
+  {
+    id: 'BC-502',
+    senderBadge: 'IPS-7742 (Rajesh Kumar)',
+    region: 'Varanasi Ghats Heritage Area',
+    radiusKm: 3,
+    titleEn: 'ℹ️ Ganga Aarti Crowd Diversion Advisory',
+    titleHi: 'ℹ️ गंगा आरती भीड़ डायवर्जन सलाह',
+    bodyEn: 'Dashashwamedh Ghat experiencing maximum capacity. Please use Rajghat or Assi Ghat for comfortable view.',
+    bodyHi: 'दशाश्वमेध घाट अधिकतम क्षमता पर है। आरामदायक दर्शन के लिए कृपया राजघाट या अस्सी घाट का उपयोग करें।',
+    severity: 'Advisory',
+    timestamp: '2026-08-11 18:00:00',
+    recipientCount: 12500,
+    deliveredCount: 12410,
+    status: 'Completed'
+  }
+];
+
+export const INITIAL_AUDIT_LOGS: AuditLog[] = [
+  {
+    id: 'AUD-9901',
+    timestamp: '2026-08-12 08:14:02',
+    officerName: 'Rajesh Kumar, IPS',
+    officerBadge: 'IPS-7742',
+    actionType: 'TOURIST_LOOKUP',
+    targetId: 'TR-88219 (Elena Rostova)',
+    reason: 'Active SOS Response',
+    details: 'Accessed live GPS telemetry and emergency contact records during active panic beacon event SOS-9021.',
+    ipAddress: '10.142.0.88 (NIC Secure Gateway)'
+  },
+  {
+    id: 'AUD-9902',
+    timestamp: '2026-08-12 07:56:10',
+    officerName: 'Rajesh Kumar, IPS',
+    officerBadge: 'IPS-7742',
+    actionType: 'DISPATCH_UNIT',
+    targetId: 'PCR-GOA-08',
+    reason: 'Active SOS Response',
+    details: 'Dispatched Coastal Rescue Speedboat to South Palolem Cliff Point for incident SOS-9022.',
+    ipAddress: '10.142.0.88 (NIC Secure Gateway)'
+  },
+  {
+    id: 'AUD-9903',
+    timestamp: '2026-08-12 07:30:15',
+    officerName: 'Rajesh Kumar, IPS',
+    officerBadge: 'IPS-7742',
+    actionType: 'BROADCAST_SENT',
+    targetId: 'Geofence Solang (15km)',
+    reason: 'Disaster Prevention Protocol',
+    details: 'Pushed Critical Flash Flood warning SMS to 3,420 active tourist devices.',
+    ipAddress: '10.142.0.88 (NIC Secure Gateway)'
+  }
+];
+
+export const INITIAL_AI_LOGS: AILog[] = [
+  {
+    id: 'LOG-1',
+    timestamp: '08:19:12',
+    severity: 'critical',
+    messageEn: 'AI Model Threat-Predictor v4.2 flagged rapid signal loss for TR-88219 near Solang Ravine. Anomaly confidence: 94%.',
+    messageHi: 'एआई मॉडल खतरा-पूर्वानुमानकर्ता v4.2 ने सोलंग खड्ड के पास TR-88219 के लिए तेज सिग्नल हानि को चिह्नित किया। विसंगति विश्वसनीयता: 94%।',
+    modelConfidence: 94,
+    region: 'Solang Valley, HP'
+  },
+  {
+    id: 'LOG-2',
+    timestamp: '08:15:30',
+    severity: 'warning',
+    messageEn: 'Density threshold surpassed in Varanasi Sector 4 (+38% over average baseline). Recommended squad re-allocation.',
+    messageHi: 'वाराणसी सेक्टर 4 में घनत्व सीमा पार हो गई (औसत आधार रेखा से +38% अधिक)। अनुशंसित दस्ता पुनरावंटन।',
+    modelConfidence: 89,
+    region: 'Varanasi, UP'
+  },
+  {
+    id: 'LOG-3',
+    timestamp: '08:02:44',
+    severity: 'info',
+    messageEn: 'Geofence heartbeats synced with 18,940 active tourist digital wristbands across major national circuits.',
+    messageHi: 'प्रमुख राष्ट्रीय सर्किटों में 18,940 सक्रिय पर्यटक डिजिटल कलाई बैंड के साथ जियोफेंस धड़कनें सिंक की गईं।',
+    modelConfidence: 99,
+    region: 'National Network'
+  }
+];
+
+export const MOCK_GEOFENCE_ZONES: GeoFenceZone[] = [
+  {
+    id: 'zone-1',
+    name: 'Solang Riverbank & Avalanche Slope',
+    riskLevel: 'Unsafe',
+    description: 'High flash flood & avalanche hazard zone. Night movement prohibited after 17:00 IST.',
+    center: { lat: 32.2432, lng: 77.1892 },
+    radiusKm: 1.5
+  },
+  {
+    id: 'zone-2',
+    name: 'Hadimba Pine Forest Trek',
+    riskLevel: 'Caution',
+    description: 'Dense forest cover area. Stick to designated trails and maintain band connectivity.',
+    center: { lat: 32.2480, lng: 77.1850 },
+    radiusKm: 2.0
+  },
+  {
+    id: 'zone-3',
+    name: 'Manali Mall Road Safe Zone',
+    riskLevel: 'Safe',
+    description: 'Monitored safe tourist corridor with 24/7 Police Helpdesk & active PCR coverage.',
+    center: { lat: 32.2396, lng: 77.1887 },
+    radiusKm: 3.0
+  }
+];
+```
+
+### `frontend/src/index.css`
+
+```css
+@import "tailwindcss";
+```
+
+### `frontend/src/lib/api.ts`
+
+```typescript
+import { SOSRecord, getQueuedSOSRecords, updateSOSRecordStatus } from "./db";
+
+let isSyncing = false;
+
+// ---------------------------------------------------------------------------
+// Base URL & session storage
+//
+// Resolution order matches existing behavior (localStorage override first),
+// and additionally honors Vite's standard VITE_* env convention so a
+// deployment-specific URL can be set via frontend/.env without code changes.
+// ---------------------------------------------------------------------------
+
+export function getApiBaseUrl(): string {
+  const envUrl = (import.meta as any).env?.VITE_API_BASE_URL as string | undefined;
+  return localStorage.getItem("sos_api_base_url") || envUrl || "http://localhost:8000/api/v1";
+}
+
+export function getAuthToken(): string {
+  return localStorage.getItem("sos_auth_token") || "";
+}
+
+export function getTouristId(): string {
+  return localStorage.getItem("sos_tourist_id") || "";
+}
+
+export function getUserType(): string {
+  return localStorage.getItem("sos_user_type") || "";
+}
+
+export function getAuthorityId(): string {
+  return localStorage.getItem("sos_authority_id") || "";
+}
+
+export function getUsername(): string {
+  return localStorage.getItem("sos_username") || "";
+}
+
+interface SessionInfo {
+  access_token?: string;
+  user_type?: string;
+  tourist_id?: string | null;
+  authority_id?: string | null;
+  username?: string;
+}
+
+/** Persists an authenticated session (token + identity) to localStorage. */
+export function storeSession(session: SessionInfo): void {
+  if (session.access_token) localStorage.setItem("sos_auth_token", session.access_token);
+  if (session.user_type) localStorage.setItem("sos_user_type", session.user_type);
+  if (session.tourist_id) localStorage.setItem("sos_tourist_id", session.tourist_id);
+  if (session.authority_id) localStorage.setItem("sos_authority_id", session.authority_id);
+  if (session.username) localStorage.setItem("sos_username", session.username);
+}
+
+/** Clears any stored session/auth data (used on logout). */
+export function clearSession(): void {
+  localStorage.removeItem("sos_auth_token");
+  localStorage.removeItem("sos_user_type");
+  localStorage.removeItem("sos_tourist_id");
+  localStorage.removeItem("sos_authority_id");
+  localStorage.removeItem("sos_username");
+}
+
+// ---------------------------------------------------------------------------
+// Generic authenticated request helper
+// ---------------------------------------------------------------------------
+
+export class ApiError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.status = status;
+  }
+}
+
+async function apiRequest<T = any>(
+  path: string,
+  options: { method?: string; body?: any; auth?: boolean } = {}
+): Promise<T> {
+  const { method = "GET", body, auth = true } = options;
+  const baseUrl = getApiBaseUrl();
+  const token = getAuthToken();
+
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (auth && token) headers["Authorization"] = `Bearer ${token}`;
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  } catch (networkErr: any) {
+    throw new ApiError(0, `Network error contacting backend: ${networkErr.message || networkErr}`);
+  }
+
+  if (!response.ok) {
+    let detail = "";
+    try {
+      const errJson = await response.json();
+      detail = errJson.detail ? JSON.stringify(errJson.detail) : JSON.stringify(errJson);
+    } catch {
+      detail = await response.text().catch(() => "");
+    }
+    throw new ApiError(response.status, detail || `Request failed with status ${response.status}`);
+  }
+
+  if (response.status === 204) return undefined as unknown as T;
+  return (await response.json()) as T;
+}
+
+// ---------------------------------------------------------------------------
+// Authentication (backend/routers/auth.py)
+// ---------------------------------------------------------------------------
+
+export async function registerUser(
+  username: string,
+  password: string,
+  userType: "tourist" | "authority"
+): Promise<any> {
+  return apiRequest("/auth/register", {
+    method: "POST",
+    auth: false,
+    body: { username, password, user_type: userType },
+  });
+}
+
+export async function loginUser(username: string, password: string): Promise<any> {
+  return apiRequest("/auth/login", {
+    method: "POST",
+    auth: false,
+    body: { username, password },
+  });
+}
+
+export async function logoutUser(): Promise<void> {
+  try {
+    await apiRequest("/auth/logout", { method: "POST" });
+  } catch (err) {
+    console.warn("Logout request failed (clearing local session anyway):", err);
+  }
+}
+
+export async function getSession(): Promise<any> {
+  return apiRequest("/auth/session");
+}
+
+/**
+ * The existing Tourist Portal sign-up/sign-in UI never collects a password
+ * (only name/phone/email/OTP). The backend's register/login endpoints require
+ * username + password. To connect the two without adding a new field to the
+ * existing form, we derive stable, non-secret credentials from the tourist's
+ * phone number. This is a pragmatic integration bridge for this app, not a
+ * production-grade auth scheme.
+ */
+export function deriveTouristCredentials(phone: string): { username: string; password: string } {
+  const normalized = (phone || "").replace(/[^0-9]/g, "");
+  return {
+    username: `tourist-${normalized || "guest"}`,
+    password: `SurakshaSetu-${normalized || "guest"}-2026`,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tourist profile (backend/routers/tourists.py)
+// ---------------------------------------------------------------------------
+
+export async function createTouristProfile(payload: {
+  full_name: string;
+  phone?: string;
+  email?: string;
+  emergency_contact?: string;
+  preferred_language?: string;
+}): Promise<any> {
+  return apiRequest("/tourists", { method: "POST", body: payload });
+}
+
+export async function getTouristProfile(touristId: string): Promise<any> {
+  return apiRequest(`/tourists/${touristId}`);
+}
+
+export async function updateTouristProfile(touristId: string, payload: Record<string, any>): Promise<any> {
+  return apiRequest(`/tourists/${touristId}`, { method: "PATCH", body: payload });
+}
+
+export async function getDigitalId(touristId: string): Promise<any> {
+  return apiRequest(`/tourists/${touristId}/digital-id`);
+}
+
+// ---------------------------------------------------------------------------
+// Incidents (backend/routers/incidents.py)
+// ---------------------------------------------------------------------------
+
+export async function listIncidents(statusFilter?: string): Promise<any[]> {
+  const qs = statusFilter ? `?status=${encodeURIComponent(statusFilter)}` : "";
+  return apiRequest(`/incidents${qs}`);
+}
+
+export async function getIncident(incidentId: string): Promise<any> {
+  return apiRequest(`/incidents/${incidentId}`);
+}
+
+export async function updateIncidentStatus(
+  incidentId: string,
+  payload: { status?: string; severity?: string; description?: string; authority_id?: string }
+): Promise<any> {
+  return apiRequest(`/incidents/${incidentId}`, { method: "PATCH", body: payload });
+}
+
+export async function createIncidentResponse(
+  incidentId: string,
+  payload: { responder_unit?: string; action_taken?: string; resolved_at?: string; authority_id?: string }
+): Promise<any> {
+  return apiRequest(`/incidents/${incidentId}/responses`, { method: "POST", body: payload });
+}
+
+export async function listIncidentResponses(incidentId: string): Promise<any[]> {
+  return apiRequest(`/incidents/${incidentId}/responses`);
+}
+
+export async function createItineraryEntry(payload: {
+  location_id?: string;
+  destination_name?: string;
+  latitude?: number;
+  longitude?: number;
+  planned_arrival?: string;
+  planned_departure?: string;
+}): Promise<any> {
+  return apiRequest(`/itinerary`, { method: "POST", body: payload });
+}
+
+export async function listItineraryEntries(): Promise<any[]> {
+  return apiRequest(`/itinerary`);
+}
+
+export async function deleteItineraryEntry(itineraryId: string): Promise<void> {
+  await apiRequest(`/itinerary/${itineraryId}`, { method: "DELETE" });
+}
+
+export async function createAuditLog(payload: {
+  action_type: string;
+  target_id: string;
+  reason?: string;
+  details?: string;
+}): Promise<any> {
+  return apiRequest(`/audit-logs`, { method: "POST", body: payload });
+}
+
+export async function listAuditLogs(): Promise<any[]> {
+  return apiRequest(`/audit-logs`);
+}
+
+// ---------------------------------------------------------------------------
+// Locations (backend/routers/locations.py)
+// ---------------------------------------------------------------------------
+
+export async function listLocations(): Promise<any[]> {
+  return apiRequest("/locations");
+}
+
+export async function getLocation(locationId: string): Promise<any> {
+  return apiRequest(`/locations/${locationId}`);
+}
+
+// ---------------------------------------------------------------------------
+// Alerts (backend/routers/alerts.py)
+// ---------------------------------------------------------------------------
+
+export async function createAlert(payload: {
+  incident_id: string;
+  channel: "SMS" | "EMAIL" | "PUSH" | "APP";
+  recipient: string;
+}): Promise<any> {
+  return apiRequest("/alerts", { method: "POST", body: payload });
+}
+
+export async function listAlerts(incidentId?: string): Promise<any[]> {
+  const qs = incidentId ? `?incident_id=${encodeURIComponent(incidentId)}` : "";
+  return apiRequest(`/alerts${qs}`);
+}
+
+// ---------------------------------------------------------------------------
+// Authority (backend/routers/authority.py)
+// ---------------------------------------------------------------------------
+
+export async function authorityLoginRequest(username: string, password: string): Promise<any> {
+  return apiRequest("/authority/login", { method: "POST", auth: false, body: { username, password } });
+}
+
+export async function getAuthorityAlerts(): Promise<any[]> {
+  return apiRequest("/authority/alerts");
+}
+
+export async function getAuthorityIncidents(): Promise<any[]> {
+  return apiRequest("/authority/incidents");
+}
+
+export async function getAuthorityTourist(touristId: string): Promise<any> {
+  return apiRequest(`/authority/tourists/${touristId}`);
+}
+
+export async function getAuthorityIncidentLocation(incidentId: string): Promise<any> {
+  return apiRequest(`/authority/incidents/${incidentId}/location`);
+}
+
+/**
+ * Connects the Gateway's existing MFA form (Badge ID + Auth Code) to the real
+ * backend. The Auth Code field is already a masked "password" input in the
+ * UI, so Badge ID -> username and Auth Code -> password is a direct mapping,
+ * not an invented one.
+ *
+ * If the badge is not registered, or the credentials are otherwise invalid,
+ * login simply fails — there is no auto-registration fallback. Authority
+ * accounts must be provisioned separately.
+ */
+export async function authenticateAuthority(
+  badgeId: string,
+  otp: string
+): Promise<{ authority_id: string; username: string } | null> {
+  try {
+    const loginResp = await authorityLoginRequest(badgeId, otp);
+    storeSession({
+      access_token: loginResp.access_token,
+      user_type: loginResp.user_type,
+      authority_id: loginResp.authority_id,
+      username: loginResp.username,
+    });
+    return { authority_id: loginResp.authority_id, username: loginResp.username };
+  } catch (err: any) {
+    console.error("Authority login failed:", err);
+    return null;
+  }
+}
+
+/**
+ * Connects the Tourist Portal's existing sign-up form to the real backend:
+ * registers an auth account (derived credentials, see deriveTouristCredentials),
+ * logs in to obtain a session token, creates the tourist profile with the
+ * actual form data, and returns the resulting profile + token so the caller
+ * can populate the existing UI without changing its shape.
+ */
+export async function registerAndLoginTourist(details: {
+  fullName: string;
+  phone: string;
+  email: string;
+  emergencyContact: string;
+}): Promise<{ token: string; tourist: any } | null> {
+  const { username, password } = deriveTouristCredentials(details.phone);
+  try {
+    await registerUser(username, password, "tourist");
+  } catch (err: any) {
+    // If the derived account already exists (e.g. re-registering the same
+    // phone), fall through to login instead of failing the whole flow.
+    if (!(err instanceof ApiError && err.status === 409)) {
+      console.error("Tourist registration failed:", err);
+      return null;
+    }
+  }
+
+  try {
+    const loginResp = await loginUser(username, password);
+    storeSession({
+      access_token: loginResp.access_token,
+      user_type: loginResp.user_type,
+      tourist_id: loginResp.tourist_id,
+      username: loginResp.username,
+    });
+
+    if (!loginResp.tourist_id) return null;
+
+    const updated = await updateTouristProfile(loginResp.tourist_id, {
+      full_name: details.fullName,
+      phone: details.phone,
+      email: details.email,
+      emergency_contact: details.emergencyContact,
+    });
+
+    return { token: loginResp.access_token, tourist: updated };
+  } catch (err) {
+    console.error("Tourist login/profile-update failed:", err);
+    return null;
+  }
+}
+
+/**
+ * Connects the Tourist Portal's existing sign-in form (Tourist ID + Phone) to
+ * the real backend by attempting a re-login with the same derived credentials
+ * used at sign-up time. There is no backend endpoint to look a tourist up by
+ * phone number alone, so this only succeeds for a phone that previously
+ * registered through this app in the current backend session; otherwise it
+ * returns null and the caller falls back to its existing local demo lookup.
+ */
+export async function loginTouristByPhone(phone: string): Promise<{ token: string; tourist: any } | null> {
+  const { username, password } = deriveTouristCredentials(phone);
+  try {
+    const loginResp = await loginUser(username, password);
+    storeSession({
+      access_token: loginResp.access_token,
+      user_type: loginResp.user_type,
+      tourist_id: loginResp.tourist_id,
+      username: loginResp.username,
+    });
+    if (!loginResp.tourist_id) return null;
+    const tourist = await getTouristProfile(loginResp.tourist_id);
+    return { token: loginResp.access_token, tourist };
+  } catch (err) {
+    console.warn("Backend sign-in by phone did not match a registered account; using local demo lookup.", err);
+    return null;
+  }
+}
+
+export async function submitSOSOnline(sosRecord: SOSRecord): Promise<any> {
+  const baseUrl = getApiBaseUrl();
+  const token = getAuthToken();
+
+  const touristId = sosRecord.tourist_id || getTouristId();
+
+  const payload = {
+    tourist_id: touristId,
+    latitude: sosRecord.latitude !== undefined ? sosRecord.latitude : null,
+    longitude: sosRecord.longitude !== undefined ? sosRecord.longitude : null,
+    description: sosRecord.description || `SOS Emergency Alert (${sosRecord.location_source || "live"})`,
+    severity: sosRecord.severity || "HIGH",
+    trigger_source: "APP",
+  };
+
+  const response = await fetch(`${baseUrl}/sos`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify(payload),
+  });
+
+  if (!response.ok) {
+    const errText = await response.text();
+    throw new ApiError(response.status, errText || `Server returned status ${response.status}`);
+  }
+
+  return await response.json();
+}
+
+export async function syncQueuedSOS(
+  onProgressCallback?: (status: string, record: SOSRecord, serverRes?: any) => void
+): Promise<{ count: number; synced: number; error?: string }> {
+  if (isSyncing) {
+    console.log("Sync process already in progress. Skipping duplicate invocation.");
+    return { count: 0, synced: 0 };
+  }
+
+  if (!navigator.onLine) {
+    console.log("Device is offline. Cannot perform synchronization.");
+    return { count: 0, synced: 0, error: "Offline" };
+  }
+
+  isSyncing = true;
+  let syncedCount = 0;
+  let queuedRecords: SOSRecord[] = [];
+
+  try {
+    queuedRecords = await getQueuedSOSRecords();
+    console.log(`Found ${queuedRecords.length} queued offline SOS records to synchronize.`);
+
+    for (const record of queuedRecords) {
+      if (record.status === "SYNCED") continue;
+
+      try {
+        if (record.local_sos_id) {
+          await updateSOSRecordStatus(record.local_sos_id, "SYNCING");
+        }
+
+        if (onProgressCallback) onProgressCallback("SYNCING", record);
+
+        const serverResponse = await submitSOSOnline(record);
+        console.log("Successfully synchronized SOS record:", serverResponse);
+
+        if (record.local_sos_id) {
+          await updateSOSRecordStatus(record.local_sos_id, "SYNCED", {
+            server_sos_id: serverResponse.sos_id || `MOCK-${Date.now()}`,
+            server_incident_id: serverResponse.incident_id || `MOCK-INC-${Date.now()}`,
+          });
+        }
+
+        syncedCount++;
+        if (onProgressCallback) onProgressCallback("SYNCED", record, serverResponse);
+      } catch (err: any) {
+        console.error(`Failed to synchronize SOS record ${record.local_sos_id}:`, err);
+        if (record.local_sos_id) {
+          await updateSOSRecordStatus(record.local_sos_id, "QUEUED_OFFLINE");
+        }
+        if (onProgressCallback) onProgressCallback("FAILED", record, err);
+      }
+    }
+  } catch (e) {
+    console.error("Error during synchronization process:", e);
+  } finally {
+    isSyncing = false;
+  }
+
+  return { count: queuedRecords.length, synced: syncedCount };
+}
+```
+
+### `frontend/src/lib/db.ts`
+
+```typescript
+export interface LocationData {
+  latitude: number | null;
+  longitude: number | null;
+  accuracy: number | null;
+  timestamp: string;
+  location_source?: string;
+}
+
+export interface SOSRecord {
+  local_sos_id?: string;
+  tourist_id?: string | null;
+  triggered_at?: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  accuracy?: number | null;
+  location_source?: string;
+  description?: string;
+  severity?: string;
+  status?: string;
+  server_sos_id?: string | null;
+  server_incident_id?: string | null;
+  synced_at?: string | null;
+}
+
+const DB_NAME = "smart_tourist_safety_sos";
+const DB_VERSION = 1;
+const STORE_LOCATION = "last_location";
+const STORE_QUEUE = "sos_queue";
+
+let dbInstance: IDBDatabase | null = null;
+
+export async function initDB(): Promise<IDBDatabase> {
+  if (dbInstance) return dbInstance;
+
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, DB_VERSION);
+
+    request.onupgradeneeded = (event: IDBVersionChangeEvent) => {
+      const db = (event.target as IDBOpenDBRequest).result;
+      if (!db.objectStoreNames.contains(STORE_LOCATION)) {
+        db.createObjectStore(STORE_LOCATION, { keyPath: "id" });
+      }
+      if (!db.objectStoreNames.contains(STORE_QUEUE)) {
+        const queueStore = db.createObjectStore(STORE_QUEUE, { keyPath: "local_sos_id" });
+        queueStore.createIndex("status", "status", { unique: false });
+        queueStore.createIndex("triggered_at", "triggered_at", { unique: false });
+      }
+    };
+
+    request.onsuccess = (event: Event) => {
+      dbInstance = (event.target as IDBOpenDBRequest).result;
+      resolve(dbInstance);
+    };
+
+    request.onerror = (event: Event) => {
+      console.error("IndexedDB error:", (event.target as IDBOpenDBRequest).error);
+      reject((event.target as IDBOpenDBRequest).error);
+    };
+  });
+}
+
+export async function saveLastKnownLocation(locationData: LocationData): Promise<any> {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_LOCATION, "readwrite");
+    const store = tx.objectStore(STORE_LOCATION);
+    const record = {
+      id: "latest",
+      latitude: locationData.latitude,
+      longitude: locationData.longitude,
+      accuracy: locationData.accuracy || null,
+      timestamp: locationData.timestamp || new Date().toISOString(),
+    };
+    const request = store.put(record);
+    request.onsuccess = () => resolve(record);
+    request.onerror = (e) => reject((e.target as IDBRequest).error);
+  });
+}
+
+export async function getLastKnownLocation(): Promise<LocationData | null> {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_LOCATION, "readonly");
+    const store = tx.objectStore(STORE_LOCATION);
+    const request = store.get("latest");
+    request.onsuccess = () => resolve(request.result || null);
+    request.onerror = (e) => reject((e.target as IDBRequest).error);
+  });
+}
+
+export async function queueSOSRecord(sosRecord: SOSRecord): Promise<SOSRecord> {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_QUEUE, "readwrite");
+    const store = tx.objectStore(STORE_QUEUE);
+    const record: SOSRecord = {
+      local_sos_id: sosRecord.local_sos_id || crypto.randomUUID(),
+      tourist_id: sosRecord.tourist_id || null,
+      triggered_at: sosRecord.triggered_at || new Date().toISOString(),
+      latitude: sosRecord.latitude !== undefined ? sosRecord.latitude : null,
+      longitude: sosRecord.longitude !== undefined ? sosRecord.longitude : null,
+      accuracy: sosRecord.accuracy || null,
+      location_source: sosRecord.location_source || "unavailable",
+      description: sosRecord.description || "Offline Emergency SOS Alert",
+      severity: sosRecord.severity || "HIGH",
+      status: sosRecord.status || "QUEUED_OFFLINE",
+      server_sos_id: sosRecord.server_sos_id || null,
+      server_incident_id: sosRecord.server_incident_id || null,
+      synced_at: sosRecord.synced_at || null,
+    };
+    const request = store.put(record);
+    request.onsuccess = () => resolve(record as SOSRecord);
+    request.onerror = (e) => reject((e.target as IDBRequest).error);
+  });
+}
+
+export async function getQueuedSOSRecords(): Promise<SOSRecord[]> {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_QUEUE, "readonly");
+    const store = tx.objectStore(STORE_QUEUE);
+    const request = store.getAll();
+    request.onsuccess = () => {
+      const all: SOSRecord[] = request.result || [];
+      const queued = all.filter((r) => r.status === "QUEUED_OFFLINE");
+      resolve(queued);
+    };
+    request.onerror = (e) => reject((e.target as IDBRequest).error);
+  });
+}
+
+export async function updateSOSRecordStatus(
+  local_sos_id: string,
+  newStatus: string,
+  serverData: Partial<SOSRecord> = {}
+): Promise<SOSRecord> {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const tx = db.transaction(STORE_QUEUE, "readwrite");
+    const store = tx.objectStore(STORE_QUEUE);
+    const getReq = store.get(local_sos_id);
+    getReq.onsuccess = () => {
+      const record = getReq.result as SOSRecord;
+      if (!record) return reject(new Error("Record not found"));
+
+      record.status = newStatus;
+      if (serverData.server_sos_id) record.server_sos_id = serverData.server_sos_id;
+      if (serverData.server_incident_id) record.server_incident_id = serverData.server_incident_id;
+      if (newStatus === "SYNCED") record.synced_at = new Date().toISOString();
+
+      const putReq = store.put(record);
+      putReq.onsuccess = () => resolve(record);
+      putReq.onerror = (e) => reject((e.target as IDBRequest).error);
+    };
+    getReq.onerror = (e) => reject((e.target as IDBRequest).error);
+  });
+}
+```
+
+### `frontend/src/lib/location.ts`
+
+```typescript
+import { saveLastKnownLocation, getLastKnownLocation, LocationData } from "./db";
+
+export async function getLiveLocation(
+  options = { timeout: 6000, maxAge: 0, enableHighAccuracy: true }
+): Promise<LocationData> {
+  if (!navigator.geolocation) {
+    throw new Error("Geolocation API not supported by browser");
+  }
+
+  return new Promise((resolve, reject) => {
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const locData: LocationData = {
+          latitude: position.coords.latitude,
+          longitude: position.coords.longitude,
+          accuracy: position.coords.accuracy,
+          timestamp: new Date(position.timestamp).toISOString(),
+          location_source: "live",
+        };
+
+        try {
+          await saveLastKnownLocation(locData);
+        } catch (err) {
+          console.warn("Could not save last known location to IndexedDB:", err);
+        }
+
+        resolve(locData);
+      },
+      (error) => {
+        reject(error);
+      },
+      options
+    );
+  });
+}
+
+export async function getSOSLocation(): Promise<LocationData> {
+  try {
+    console.log("Attempting live GPS location acquisition...");
+    const liveLoc = await getLiveLocation();
+    console.log("Live GPS acquired:", liveLoc);
+    return liveLoc;
+  } catch (gpsError: any) {
+    console.warn("Live GPS unavailable or timed out:", gpsError.message || gpsError);
+
+    try {
+      const lastKnown = await getLastKnownLocation();
+      if (lastKnown && lastKnown.latitude && lastKnown.longitude) {
+        console.log("Using last-known location from IndexedDB:", lastKnown);
+        return {
+          latitude: lastKnown.latitude,
+          longitude: lastKnown.longitude,
+          accuracy: lastKnown.accuracy || null,
+          timestamp: lastKnown.timestamp,
+          location_source: "last_known",
+        };
+      }
+    } catch (dbError) {
+      console.warn("Could not read last-known location from IndexedDB:", dbError);
+    }
+
+    console.log("No GPS or last-known location available. Proceeding with 'unavailable'.");
+    return {
+      latitude: null,
+      longitude: null,
+      accuracy: null,
+      timestamp: new Date().toISOString(),
+      location_source: "unavailable",
+    };
+  }
+}
+```
+
+### `frontend/src/main.tsx`
+
+```tsx
+import {StrictMode} from 'react';
+import {createRoot} from 'react-dom/client';
+import App from './App.tsx';
+import './index.css';
+
+createRoot(document.getElementById('root')!).render(
+  <StrictMode>
+    <App />
+  </StrictMode>,
+);
+```
+
+### `frontend/src/types.ts`
+
+```typescript
+export type Language = 'en' | 'hi';
+
+export type UserRole = 'gateway' | 'tourist' | 'authority';
+
+export type ActiveModule = 'ai_hub' | 'tourist_tracking' | 'sos_map' | 'broadcast' | 'analytics_audit';
+
+export type InterceptionReason =
+  | 'Active SOS Response'
+  | 'Filed Missing Person Report'
+  | 'Designated Check-in Routine'
+  | 'Judicial / Legal Warrant';
+
+export type SOSStatus = 'New' | 'Units Dispatched' | 'Resolved';
+
+export type AlertSeverity = 'Critical' | 'Warning' | 'Advisory';
+
+export type AnomalyType =
+  | 'Unusual Grouping'
+  | 'Off-Route Signal Loss'
+  | 'Rapid Density Spike'
+  | 'Late-Night Isolated Signal'
+  | 'Hazard Zone Entry';
+
+export interface LocationPoint {
+  lat: number;
+  lng: number;
+  address: string;
+}
+
+export interface PastSOSRecord {
+  id: string;
+  date: string;
+  location: string;
+  reason: string;
+  status: 'Resolved' | 'False Alarm';
+}
+
+export interface TouristProfile {
+  id: string; // e.g. TR-88219 or TR-2026-8942
+  name: string;
+  nationality: string;
+  passportHash: string;
+  photoUrl: string;
+  phone: string;
+  emergencyContact: string;
+  emergencyRelation: string;
+  hotel: string;
+  currentLocation: LocationPoint;
+  batteryLevel: number;
+  safetyStatus: 'Safe' | 'Watch' | 'SOS Active';
+  lastSeenTime: string;
+  digitalBandId: string;
+  pastSOSHistory: PastSOSRecord[];
+  email?: string;
+  digiLockerVerified?: boolean;
+  aadhaarHash?: string;
+  locationConsent?: 'granted' | 'declined';
+
+  // Schema fields as per DB spec
+  tourist_id?: string;
+  digital_id?: string;
+  full_name?: string;
+  kyc_document_type?: string;
+  kyc_verified?: boolean;
+  emergency_contact?: string;
+  preferred_language?: string;
+  created_at?: string;
+}
+
+export interface SOSIncident {
+  id: string; // e.g. SOS-9021
+  touristId: string;
+  touristName: string;
+  touristPhone: string;
+  location: LocationPoint;
+  timestamp: string;
+  status: SOSStatus;
+  severity: AlertSeverity;
+  unitAssigned?: string;
+  hazardType: string;
+  notes: string;
+  audioRecordingUrl?: string;
+
+  // Backend linkage (real API), used to PATCH the actual incident record.
+  // Undefined for locally-generated demo/mock incidents that have no backend counterpart.
+  backendIncidentId?: string;
+}
+
+export interface PatrollingUnit {
+  id: string;
+  unitName: string;
+  type: 'PCR Van' | 'Quick Response Motorcycle' | 'Women Safety Squad' | 'Highway Patrol';
+  unitLeader: string;
+  location: LocationPoint;
+  status: 'Patrolling' | 'Dispatched' | 'On Scene' | 'Standby';
+  contactPhone: string;
+  assignedIncidentId?: string;
+}
+
+export interface PoliceStation {
+  id: string;
+  name: string;
+  jurisdiction: string;
+  location: LocationPoint;
+  contactPhone: string;
+  activeOfficers: number;
+  availableVehicles: number;
+}
+
+export interface Hospital {
+  id: string;
+  name: string;
+  jurisdiction: string;
+  location: LocationPoint;
+  contactPhone: string;
+  icuBedsAvailable: number;
+  ambulancesReady: number;
+}
+
+export interface AnomalyCluster {
+  id: string;
+  regionName: string;
+  riskScore: number; // 0 - 100
+  touristDensity: number;
+  anomalyType: AnomalyType;
+  confidenceScore: number; // %
+  descriptionEn: string;
+  descriptionHi: string;
+  recommendedActionEn: string;
+  recommendedActionHi: string;
+  coordinates: { lat: number; lng: number };
+  timestamp: string;
+}
+
+export interface BroadcastAlert {
+  id: string;
+  senderBadge: string;
+  region: string;
+  radiusKm: number;
+  titleEn: string;
+  titleHi: string;
+  bodyEn: string;
+  bodyHi: string;
+  severity: AlertSeverity;
+  timestamp: string;
+  recipientCount: number;
+  deliveredCount: number;
+  status: 'Active' | 'Completed' | 'Draft';
+}
+
+export interface AuditLog {
+  id: string;
+  timestamp: string;
+  officerName: string;
+  officerBadge: string;
+  actionType: 'TOURIST_LOOKUP' | 'DISPATCH_UNIT' | 'BROADCAST_SENT' | 'TICKET_STATUS_CHANGE' | 'AUTHORITY_LOGIN';
+  targetId: string;
+  reason?: InterceptionReason | string;
+  details: string;
+  ipAddress: string;
+  backendAuditId?: string;
+}
+
+export interface AILog {
+  id: string;
+  timestamp: string;
+  severity: 'info' | 'warning' | 'critical';
+  messageEn: string;
+  messageHi: string;
+  modelConfidence: number;
+  region: string;
+}
+
+export interface ItineraryItem {
+  id: string;
+  destination: string;
+  date: string;
+  hotel: string;
+  activities: string;
+  safetyStatus: 'Safe Corridor' | 'Weather Advisory' | 'High Risk Zone';
+  coordinates?: { lat: number; lng: number };
+  backendItineraryId?: string;
+}
+
+export interface ChatMessage {
+  id: string;
+  sender: 'user' | 'bot';
+  text: string;
+  timestamp: string;
+  quickActions?: string[];
+}
+
+export type GeoFenceRiskLevel = 'Safe' | 'Caution' | 'Unsafe';
+
+export interface GeoFenceZone {
+  id: string;
+  name: string;
+  riskLevel: GeoFenceRiskLevel;
+  description: string;
+  center: { lat: number; lng: number };
+  radiusKm: number;
+}
+
+export type SosStepState = 'ready' | 'confirming' | 'sending' | 'success' | 'error' | 'active';
+```

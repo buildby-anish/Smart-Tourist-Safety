@@ -28,7 +28,7 @@ export const i18n = {
     mfaBadgeIdLabel: 'Officer Badge ID / IPS No.',
     mfaOtpLabel: '2FA Auth Code / OTP',
     mfaVerifyBtn: 'Verify Identity & Enter Command Dashboard',
-    mfaDemoNote: 'Demo Mode: Pre-filled with Chief Controller Credentials (IPS-7742 / 789012)',
+    mfaDemoNote: 'Enter your officer Badge ID and the OTP sent to your registered device.',
     
     // Navigation Modules
     modAiHub: 'AI Anomaly & Prediction Hub',
@@ -213,7 +213,7 @@ export const i18n = {
     mfaBadgeIdLabel: 'अधिकारी बैज आईडी / आईपीएस संख्या',
     mfaOtpLabel: '2FA प्रमाणन कोड / ओटीपी',
     mfaVerifyBtn: 'पहचान सत्यापित करें और कमान केंद्र में प्रवेश करें',
-    mfaDemoNote: 'डेमो मोड: मुख्य नियंत्रक क्रेडेंशियल्स के साथ पहले से भरा हुआ (IPS-7742 / 789012)',
+    mfaDemoNote: 'अपनी अधिकारी बैज आईडी और अपने पंजीकृत डिवाइस पर भेजा गया ओटीपी दर्ज करें।',
     
     // Navigation Modules
     modAiHub: 'एआई विसंगति एवं पूर्वानुमान केंद्र',

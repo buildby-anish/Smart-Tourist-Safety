@@ -158,6 +158,7 @@ export interface AuditLog {
   reason?: InterceptionReason | string;
   details: string;
   ipAddress: string;
+  backendAuditId?: string;
 }
 
 export interface AILog {
@@ -178,6 +179,7 @@ export interface ItineraryItem {
   activities: string;
   safetyStatus: 'Safe Corridor' | 'Weather Advisory' | 'High Risk Zone';
   coordinates?: { lat: number; lng: number };
+  backendItineraryId?: string;
 }
 
 export interface ChatMessage {

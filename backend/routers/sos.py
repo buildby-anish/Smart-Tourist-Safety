@@ -72,7 +72,7 @@ def create_sos(
         _in_memory_sos_store[sos.sos_id] = sos
         return sos
 
-    # 2. Database Mode 
+    # 2. Database Mode
     now = datetime.now(timezone.utc)
     location_id = uuid4()
     incident_id = uuid4()

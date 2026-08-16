@@ -49,13 +49,13 @@ import { ActualGoogleMap } from './ActualGoogleMap';
 import { CrowdHeatmap } from './CrowdHeatmap';
 import { getSOSLocation } from '../lib/location';
 import { queueSOSRecord } from '../lib/db';
-import { submitSOSOnline, syncQueuedSOS, registerAndLoginTourist, loginTouristByPhone, updateIncidentStatus, clearSession, logoutUser, getTouristId } from '../lib/api';
+import { submitSOSOnline, syncQueuedSOS, registerAndLoginTourist, loginTouristByPhone, updateIncidentStatus, clearSession, logoutUser, getTouristId, ApiError, createItineraryEntry, deleteItineraryEntry } from '../lib/api';
 
 
 interface TouristPortalProps {
   language: Language;
   onLanguageChange?: (lang: Language) => void;
-  onTriggerSos: (touristName: string, locationStr: string) => void;
+  onTriggerSos: (touristName: string, locationStr: string, touristId?: string, touristPhone?: string) => void;
   onReturnToGateway: () => void;
   onRegisterTourist?: (tourist: TouristProfile) => void;
   existingTourists?: TouristProfile[];
@@ -92,12 +92,12 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
   const [activeBroadcastModal, setActiveBroadcastModal] = useState<BroadcastAlert | null>(null);
 
   // Sign Up Form States
-  const [fullName, setFullName] = useState('Elena Rostova');
-  const [phone, setPhone] = useState('+91 98765 43210');
-  const [email, setEmail] = useState('elena.rostova@traveler.org');
-  const [emergencyContactName, setEmergencyContactName] = useState('Carlos Rostova');
+  const [fullName, setFullName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [email, setEmail] = useState('');
+  const [emergencyContactName, setEmergencyContactName] = useState('');
   const [emergencyRelation, setEmergencyRelation] = useState('Father');
-  const [emergencyContactPhone, setEmergencyContactPhone] = useState('+91 98765 00000');
+  const [emergencyContactPhone, setEmergencyContactPhone] = useState('');
 
   // DigiLocker States
   const [digiLockerVerified, setDigiLockerVerified] = useState(false);
@@ -105,11 +105,11 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
   const [digiLockerStep, setDigiLockerStep] = useState<'connect' | 'loading' | 'fetched'>('connect');
 
   // Sign In Form States
-  const [signinTouristId, setSigninTouristId] = useState('TR-88219');
-  const [signinPhone, setSigninPhone] = useState('+34 612 884 902');
+  const [signinTouristId, setSigninTouristId] = useState('');
+  const [signinPhone, setSigninPhone] = useState('');
 
   // OTP Modal States
-  const [otpValue, setOtpValue] = useState('654321');
+  const [otpValue, setOtpValue] = useState('');
   const [otpError, setOtpError] = useState('');
   const [otpPendingAction, setOtpPendingAction] = useState<'signup' | 'signin'>('signup');
 
@@ -185,21 +185,32 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
           setIncidentRef(res.incident_id || res.sos_id || `INC-${Math.floor(1000 + Math.random() * 9000)}`);
           if (res.incident_id) setActiveBackendIncidentId(res.incident_id);
           setSosActive(true);
-          onTriggerSos(authenticatedUser?.name || 'Elena Rostova', `${loc.latitude?.toFixed(4) || lat.toFixed(4)}, ${loc.longitude?.toFixed(4) || lng.toFixed(4)} (${activeGeoFenceZone.name})`);
+          onTriggerSos(authenticatedUser?.name || 'Tourist', `${loc.latitude?.toFixed(4) || lat.toFixed(4)}, ${loc.longitude?.toFixed(4) || lng.toFixed(4)} (${activeGeoFenceZone.name})`, authenticatedUser?.tourist_id || authenticatedUser?.id, authenticatedUser?.phone);
         } catch (err: any) {
+          // A DB/auth-level failure (400/401/404) means the request reached
+          // the backend and was rejected — this is a real data/auth problem,
+          // not a dropped connection, so it must not be silently queued as
+          // an offline record. Only genuine network failures fall through to
+          // the offline queue below.
+          if (err instanceof ApiError && [400, 401, 404].includes(err.status)) {
+            console.error("SOS submission rejected by backend (auth/data error):", err);
+            setSosStep('error');
+            setSosErrorMessage(err.message || 'Your session or request data was rejected by the server. Please sign in again.');
+            return;
+          }
           console.warn("Online transmission failed, record queued:", err);
           setSosSendingProgress(100);
           setSosStep('success');
           setIncidentRef('QUEUED-OFFLINE');
           setSosActive(true);
-          onTriggerSos(authenticatedUser?.name || 'Elena Rostova', `${loc.latitude?.toFixed(4) || lat.toFixed(4)}, ${loc.longitude?.toFixed(4) || lng.toFixed(4)} (Queued Offline)`);
+          onTriggerSos(authenticatedUser?.name || 'Tourist', `${loc.latitude?.toFixed(4) || lat.toFixed(4)}, ${loc.longitude?.toFixed(4) || lng.toFixed(4)} (Queued Offline)`, authenticatedUser?.tourist_id || authenticatedUser?.id, authenticatedUser?.phone);
         }
       } else {
         setSosSendingProgress(100);
         setSosStep('success');
         setIncidentRef('QUEUED-OFFLINE');
         setSosActive(true);
-        onTriggerSos(authenticatedUser?.name || 'Elena Rostova', `${loc.latitude?.toFixed(4) || lat.toFixed(4)}, ${loc.longitude?.toFixed(4) || lng.toFixed(4)} (Queued Offline)`);
+        onTriggerSos(authenticatedUser?.name || 'Tourist', `${loc.latitude?.toFixed(4) || lat.toFixed(4)}, ${loc.longitude?.toFixed(4) || lng.toFixed(4)} (Queued Offline)`, authenticatedUser?.tourist_id || authenticatedUser?.id, authenticatedUser?.phone);
       }
     } catch (err: any) {
       setSosStep('error');
@@ -373,113 +384,128 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
       setOtpError('Please enter a valid 6-digit OTP code.');
       return;
     }
-
-    setShowOtpModal(false);
+    setOtpError('');
 
     if (otpPendingAction === 'signup') {
-      const randomSuffix = Math.floor(1000 + Math.random() * 9000);
-      const newTouristId = `TR-2026-${randomSuffix}`;
-
-      const newProfile: TouristProfile = {
-        id: newTouristId,
-        name: fullName || 'Elena Rostova',
-        nationality: 'India',
-        passportHash: digiLockerVerified ? 'Aadhaar XXXX-XXXX-4912' : 'PASSPORT-VERIFIED',
-        photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300',
-        phone: phone || '+91 98765 43210',
-        emergencyContact: `${emergencyContactName || 'Carlos Rostova'} (${emergencyRelation || 'Father'})`,
-        emergencyRelation: emergencyRelation || 'Father',
-        hotel: 'Solang Resort & Spa, Manali',
-        currentLocation: {
-          lat: 32.2432,
-          lng: 77.1892,
-          address: currentAddress
-        },
-        batteryLevel: 88,
-        safetyStatus: 'Safe',
-        lastSeenTime: 'Just now',
-        digitalBandId: `BAND-${randomSuffix}`,
-        pastSOSHistory: [],
-        email: email,
-        digiLockerVerified: digiLockerVerified,
-        locationConsent: 'granted'
-      };
-
-      // Create a real backend account + tourist profile behind the existing
-      // sign-up UI (see lib/api.ts registerAndLoginTourist). This is
-      // best-effort: if the backend is unreachable, the tourist still gets a
-      // fully working local session exactly as before — SOS will simply
-      // queue offline until a subsequent sync, matching existing behavior.
+      // Create a real backend account + tourist profile. If the backend
+      // call fails or does not return a tourist record, the sign-up is
+      // aborted entirely — the user stays on the auth screen and sees the
+      // error instead of being logged in with a mock local-only profile.
       try {
         const backendResult = await registerAndLoginTourist({
-          fullName: newProfile.name,
-          phone: newProfile.phone,
-          email: newProfile.email || '',
-          emergencyContact: newProfile.emergencyContact
+          fullName: fullName,
+          phone: phone,
+          email: email || '',
+          emergencyContact: `${emergencyContactName} (${emergencyRelation || 'Father'})`
         });
-        if (backendResult?.tourist) {
-          newProfile.tourist_id = backendResult.tourist.tourist_id;
-          newProfile.digital_id = backendResult.tourist.digital_id;
-          newProfile.full_name = backendResult.tourist.full_name;
-          newProfile.kyc_verified = backendResult.tourist.kyc_verified;
-          newProfile.created_at = backendResult.tourist.created_at;
+
+        if (!backendResult || !backendResult.tourist || !backendResult.tourist.tourist_id) {
+          throw new Error('Registration failed. Please check your details and try again.');
         }
-      } catch (err) {
-        console.warn('Backend registration failed; continuing with local-only profile:', err);
-      }
 
-      setAuthenticatedUser(newProfile);
-      setLocationConsent('granted');
-      if (onRegisterTourist) {
-        onRegisterTourist(newProfile);
-      }
+        const bt = backendResult.tourist;
+        const newProfile: TouristProfile = {
+          id: bt.tourist_id,
+          name: bt.full_name || fullName,
+          nationality: 'India',
+          passportHash: digiLockerVerified ? 'Aadhaar XXXX-XXXX-4912' : 'PASSPORT-VERIFIED',
+          photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300',
+          phone: bt.phone || phone,
+          emergencyContact: bt.emergency_contact || `${emergencyContactName} (${emergencyRelation || 'Father'})`,
+          emergencyRelation: emergencyRelation || 'Father',
+          hotel: 'Solang Resort & Spa, Manali',
+          currentLocation: {
+            lat: 32.2432,
+            lng: 77.1892,
+            address: currentAddress
+          },
+          batteryLevel: 88,
+          safetyStatus: 'Safe',
+          lastSeenTime: 'Just now',
+          digitalBandId: bt.digital_id || bt.tourist_id,
+          pastSOSHistory: [],
+          email: bt.email || email,
+          digiLockerVerified: digiLockerVerified,
+          locationConsent: 'granted',
+          tourist_id: bt.tourist_id,
+          digital_id: bt.digital_id,
+          full_name: bt.full_name,
+          kyc_verified: bt.kyc_verified,
+          emergency_contact: bt.emergency_contact,
+          preferred_language: bt.preferred_language,
+          created_at: bt.created_at
+        };
 
-      setShowDigitalPassModal(true);
+        setAuthenticatedUser(newProfile);
+        setLocationConsent('granted');
+        if (onRegisterTourist) {
+          onRegisterTourist(newProfile);
+        }
+
+        setShowOtpModal(false);
+        setShowDigitalPassModal(true);
+      } catch (err: any) {
+        console.error('Tourist registration failed:', err);
+        setOtpError(err?.message || 'Registration failed. Please check your details and try again.');
+        // Keep the OTP modal open so the user stays on the auth screen.
+        return;
+      }
 
     } else {
-      const found = existingTourists.find(
-        (t) => t.id.toLowerCase() === signinTouristId.trim().toLowerCase()
-      );
-
-      const userProfile: TouristProfile = found || {
-        id: signinTouristId.trim().toUpperCase(),
-        name: 'Elena Rostova',
-        nationality: 'Spain',
-        passportHash: 'ESP-9874****',
-        photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300',
-        phone: signinPhone,
-        emergencyContact: '+34 612 001 223 (Father - Carlos)',
-        emergencyRelation: 'Father',
-        hotel: 'The Grand Himalayan Resort, Old Manali',
-        currentLocation: {
-          lat: 32.2432,
-          lng: 77.1892,
-          address: currentAddress
-        },
-        batteryLevel: 84,
-        safetyStatus: 'Safe',
-        lastSeenTime: 'Just now',
-        digitalBandId: 'BAND-3301',
-        pastSOSHistory: []
-      };
-
       // Re-authenticate against the real backend using the same derived
       // credentials established at sign-up (see lib/api.ts
-      // loginTouristByPhone). Only succeeds for a phone that registered
-      // through this app in the current backend session; otherwise this is a
-      // no-op and the existing local demo lookup above is used unchanged.
+      // loginTouristByPhone). If the backend call fails or does not
+      // resolve a tourist record, the sign-in is aborted — the user stays
+      // on the auth screen and sees the error instead of being logged in
+      // with a mock local-only profile.
       try {
         const backendResult = await loginTouristByPhone(signinPhone);
-        if (backendResult?.tourist) {
-          userProfile.tourist_id = backendResult.tourist.tourist_id;
-          userProfile.digital_id = backendResult.tourist.digital_id;
-        }
-      } catch (err) {
-        console.warn('Backend sign-in failed; continuing with local demo profile:', err);
-      }
 
-      setAuthenticatedUser(userProfile);
-      setShowConsentModal(true);
+        if (!backendResult || !backendResult.tourist || !backendResult.tourist.tourist_id) {
+          throw new Error('Sign-in failed. Please check your Tourist ID and phone number.');
+        }
+
+        const bt = backendResult.tourist;
+        const userProfile: TouristProfile = {
+          id: bt.tourist_id,
+          name: bt.full_name || 'Tourist',
+          nationality: 'India',
+          passportHash: 'VERIFIED',
+          photoUrl: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300',
+          phone: bt.phone || signinPhone,
+          emergencyContact: bt.emergency_contact || '',
+          emergencyRelation: '',
+          hotel: '',
+          currentLocation: {
+            lat: 32.2432,
+            lng: 77.1892,
+            address: currentAddress
+          },
+          batteryLevel: 84,
+          safetyStatus: 'Safe',
+          lastSeenTime: 'Just now',
+          digitalBandId: bt.digital_id || bt.tourist_id,
+          pastSOSHistory: [],
+          email: bt.email,
+          locationConsent: 'granted',
+          tourist_id: bt.tourist_id,
+          digital_id: bt.digital_id,
+          full_name: bt.full_name,
+          kyc_verified: bt.kyc_verified,
+          emergency_contact: bt.emergency_contact,
+          preferred_language: bt.preferred_language,
+          created_at: bt.created_at
+        };
+
+        setAuthenticatedUser(userProfile);
+        setShowOtpModal(false);
+        setShowConsentModal(true);
+      } catch (err: any) {
+        console.error('Tourist sign-in failed:', err);
+        setOtpError(err?.message || 'Sign-in failed. Please check your Tourist ID and phone number.');
+        // Keep the OTP modal open so the user stays on the auth screen.
+        return;
+      }
     }
   };
 
@@ -523,7 +549,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
   };
 
   // Add Item to Itinerary
-  const handleAddItinerary = (e: React.FormEvent) => {
+  const handleAddItinerary = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newDest.trim()) return;
 
@@ -549,11 +575,40 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
     setNewHotel('');
     setNewActivities('');
     setShowAddItineraryModal(false);
+
+    // Persist to the backend (public.itinerary_entries) when signed in. This
+    // is best-effort: the entry stays visible locally either way, but a
+    // successful save lets it be deleted from the backend too.
+    if (authenticatedUser?.tourist_id) {
+      try {
+        const plannedArrival = newDate ? new Date(newDate).toISOString() : undefined;
+        const saved = await createItineraryEntry({
+          destination_name: newItem.destination,
+          latitude: newItem.coordinates?.lat,
+          longitude: newItem.coordinates?.lng,
+          planned_arrival: plannedArrival
+        });
+        if (saved?.itinerary_id) {
+          setItinerary((prev) =>
+            prev.map((it) => (it.id === newItem.id ? { ...it, backendItineraryId: saved.itinerary_id } : it))
+          );
+        }
+      } catch (err) {
+        console.warn('Failed to persist itinerary entry to backend:', err);
+      }
+    }
   };
 
   // Delete Itinerary Item
   const handleDeleteItinerary = (id: string) => {
+    const target = itinerary.find((item) => item.id === id);
     setItinerary(itinerary.filter((item) => item.id !== id));
+
+    if (target?.backendItineraryId) {
+      deleteItineraryEntry(target.backendItineraryId).catch((err) =>
+        console.warn('Failed to delete itinerary entry from backend:', err)
+      );
+    }
   };
 
   // Chatbot Send Message Handler
@@ -792,7 +847,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
               </div>
 
               <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 font-medium">
-                💡 <strong>Demo Quick Sign-In:</strong> Pre-filled with demo registered tourist ID (<code>TR-88219</code>).
+                💡 Enter the Tourist ID and phone number you used when you registered.
               </div>
 
               <button
@@ -2084,7 +2139,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
                     <div className="px-2 py-0.5 rounded bg-[#138808] text-white text-[10px] font-black inline-block mb-1">
                       DIGILOCKER VERIFIED E-KYC
                     </div>
-                    <div className="text-sm font-extrabold text-slate-900">{fullName || 'Elena Rostova'}</div>
+                    <div className="text-sm font-extrabold text-slate-900">{fullName || 'Tourist'}</div>
                     <div className="text-xs text-slate-600 font-mono">Aadhaar No: XXXX-XXXX-4912</div>
                   </div>
                 </div>

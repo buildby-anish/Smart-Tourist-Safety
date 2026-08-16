@@ -36,9 +36,14 @@ import {
   getAuthorityTourist,
   getAuthorityIncidentLocation,
   updateIncidentStatus,
+  createIncidentResponse,
   createAlert,
   clearSession,
-  logoutUser
+  logoutUser,
+  getAuthorityId,
+  getUsername,
+  createAuditLog,
+  listAuditLogs
 } from './lib/api';
 
 export default function App() {
@@ -72,25 +77,77 @@ export default function App() {
     }
   }, []);
 
-  // Audit Logging helper
+  // Audit Logging helper — persists to public.audit_logs on the backend
+  // (see lib/api.ts createAuditLog) while also updating local state
+  // immediately so the UI doesn't wait on the network round-trip. Uses the
+  // actual signed-in authority's identity instead of a hardcoded officer.
   const handleLogAudit = (
     actionType: 'TOURIST_LOOKUP' | 'DISPATCH_UNIT' | 'BROADCAST_SENT' | 'TICKET_STATUS_CHANGE' | 'AUTHORITY_LOGIN',
     targetId: string,
     reason: string,
     details: string
   ) => {
+    const officerBadge = getUsername() || 'Unknown Officer';
+    const localId = `AUD-${Math.floor(1000 + Math.random() * 9000)}`;
     const newLog: AuditLog = {
-      id: `AUD-${Math.floor(1000 + Math.random() * 9000)}`,
+      id: localId,
       timestamp: new Date().toISOString().replace('T', ' ').substring(0, 19),
-      officerName: 'Rajesh Kumar, IPS',
-      officerBadge: 'IPS-7742',
+      officerName: officerBadge,
+      officerBadge,
       actionType,
       targetId,
       reason,
       details,
-      ipAddress: '10.142.0.88 (NIC Secure Gateway)'
+      ipAddress: 'Client-reported (see server audit log for source IP)'
     };
     setAuditLogs((prev) => [newLog, ...prev]);
+
+    createAuditLog({
+      action_type: actionType,
+      target_id: targetId,
+      reason,
+      details
+    })
+      .then((saved) => {
+        if (saved?.audit_id) {
+          setAuditLogs((prev) =>
+            prev.map((l) => (l.id === localId ? { ...l, backendAuditId: saved.audit_id } : l))
+          );
+        }
+      })
+      .catch((err) => {
+        console.warn('Failed to persist audit log to backend:', err);
+      });
+  };
+
+  // Pull persisted audit log entries from the backend and merge them with
+  // any local-only entries not yet confirmed as saved.
+  const refreshAuditLogsFromBackend = async () => {
+    try {
+      const backendLogs = await listAuditLogs();
+      const mapped: AuditLog[] = backendLogs.map((log: any) => ({
+        id: `BE-${log.audit_id}`,
+        backendAuditId: log.audit_id,
+        timestamp: log.created_at
+          ? new Date(log.created_at).toISOString().replace('T', ' ').substring(0, 19)
+          : new Date().toISOString().replace('T', ' ').substring(0, 19),
+        officerName: getUsername() || 'Officer',
+        officerBadge: getUsername() || 'Officer',
+        actionType: log.action_type,
+        targetId: log.target_id,
+        reason: log.reason,
+        details: log.details || '',
+        ipAddress: log.ip_address || 'Server-recorded'
+      }));
+
+      setAuditLogs((prev) => {
+        const backendIds = new Set(mapped.map((m) => m.backendAuditId));
+        const localOnly = prev.filter((p) => !p.backendAuditId || !backendIds.has(p.backendAuditId));
+        return [...mapped, ...localOnly];
+      });
+    } catch (err) {
+      console.warn('Failed to refresh audit logs from backend:', err);
+    }
   };
 
   // Map a backend incident status onto the existing local SOSStatus enum.
@@ -174,9 +231,10 @@ export default function App() {
     }
   };
 
-  // Authority MFA Authenticate — now backed by the real /authority/login
-  // endpoint (see lib/api.ts authenticateAuthority for the credential mapping
-  // and auto-registration-on-first-use behavior).
+  // Authority MFA Authenticate — backed by the real /authority/login
+  // endpoint (see lib/api.ts authenticateAuthority for the credential
+  // mapping). Login fails outright for a badge that isn't registered —
+  // there is no auto-registration fallback.
   const handleAuthenticateAuthority = async (badgeId: string, otp: string): Promise<boolean> => {
     setAuthorityAuthError('');
     const result = await authenticateAuthority(badgeId, otp);
@@ -197,6 +255,7 @@ export default function App() {
     // Populate the dashboard with real backend incidents (in addition to the
     // existing local demo data) now that we have an authenticated session.
     refreshIncidentsFromBackend();
+    refreshAuditLogsFromBackend();
 
     return true;
   };
@@ -209,12 +268,13 @@ export default function App() {
   };
 
   // Trigger SOS from Tourist Portal
-  const handleTouristTriggerSos = (touristName: string, locationStr: string) => {
+  const handleTouristTriggerSos = (touristName: string, locationStr: string, touristId?: string, touristPhone?: string) => {
+    const resolvedTouristId = touristId || 'UNKNOWN';
     const newIncident: SOSIncident = {
       id: `SOS-${Math.floor(9000 + Math.random() * 999)}`,
-      touristId: 'TR-88219',
+      touristId: resolvedTouristId,
       touristName,
-      touristPhone: '+34 612 884 902',
+      touristPhone: touristPhone || '',
       location: {
         lat: 32.2432,
         lng: 77.1892,
@@ -232,7 +292,7 @@ export default function App() {
     // Update tourist safety status
     setTourists((prev) =>
       prev.map((t) =>
-        t.id === 'TR-88219' ? { ...t, safetyStatus: 'SOS Active' } : t
+        t.id === resolvedTouristId ? { ...t, safetyStatus: 'SOS Active' } : t
       )
     );
 
@@ -270,12 +330,28 @@ export default function App() {
     }
 
     // If this incident has a real backend counterpart, persist the status
-    // change via PATCH /api/v1/incidents/{incident_id}.
+    // change via PATCH /api/v1/incidents/{incident_id}, including the
+    // dispatching authority's own authority_id so the backend can link the
+    // incident to this authority at the moment of dispatch. Also log the
+    // dispatch action itself to public.responses.
     if (targetIncident.backendIncidentId) {
+      const authorityId = getAuthorityId();
       try {
-        await updateIncidentStatus(targetIncident.backendIncidentId, { status: 'RESPONDING' });
+        await updateIncidentStatus(targetIncident.backendIncidentId, {
+          status: 'RESPONDING',
+          ...(authorityId ? { authority_id: authorityId } : {})
+        });
       } catch (err) {
         console.warn('Failed to persist dispatch status to backend:', err);
+      }
+      try {
+        await createIncidentResponse(targetIncident.backendIncidentId, {
+          responder_unit: targetUnit?.unitName || unitId,
+          action_taken: `Unit ${targetUnit?.unitName || unitId} dispatched to incident.`,
+          ...(authorityId ? { authority_id: authorityId } : {})
+        });
+      } catch (err) {
+        console.warn('Failed to log dispatch response to backend:', err);
       }
     }
 
