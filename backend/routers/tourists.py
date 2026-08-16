@@ -26,14 +26,35 @@ def _get_tourist_or_404(tourist_id: UUID, current_user: SessionResponse | None =
         return tourist
 
     # 2. Database Mode
-    # If a current user is present, use their authenticated cursor (RLS policy applies).
-    # Otherwise, fallback to system db cursor (e.g. for registration or system actions).
-    try:
-        if current_user and current_user.user_type == "tourist":
+    # If a current user is present, use their authenticated cursor so RLS
+    # policy applies. Otherwise, fall back to the system db cursor (e.g. for
+    # registration or other trusted system actions with no request-scoped user).
+    #
+    # SECURITY: this endpoint (GET /tourists/{tourist_id}) is tourist-facing
+    # ("get my own profile"). It previously fell back to the RLS-bypassing
+    # get_db_cursor() for ANY non-tourist caller, which let any authenticated
+    # authority account fetch any tourist's full PII (name, phone, email,
+    # KYC info) by guessing/enumerating tourist_id, with no authorization
+    # check at all. Authorities have a dedicated, properly-scoped endpoint
+    # for this (GET /authority/tourists/{tourist_id}), so here we require
+    # tourists to be fetching their own profile and reject other callers.
+    if current_user is not None:
+        if current_user.user_type == "tourist":
+            if current_user.tourist_id is not None and current_user.tourist_id != tourist_id:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Tourists may only access their own profile.",
+                )
             cursor_ctx = get_authenticated_cursor(current_user.auth_user_id)
         else:
-            cursor_ctx = get_db_cursor()
-            
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Use /authority/tourists/{tourist_id} for authority access to tourist profiles.",
+            )
+    else:
+        cursor_ctx = get_db_cursor()
+
+    try:
         with cursor_ctx as cur:
             cur.execute("""
                 SELECT tourist_id, digital_id, full_name, kyc_document_type, kyc_verified, phone, email, emergency_contact, preferred_language, created_at

@@ -112,15 +112,23 @@ def get_current_user(
 
     # 2. Database Mode: JWT Session Decoding
     try:
-        if Config.JWT_SECRET:
-            claims = jwt.decode(
-                token,
-                Config.JWT_SECRET,
-                algorithms=["HS256"],
-                options={"verify_aud": False}
+        if not Config.JWT_SECRET:
+            # JWT_SECRET must be the Supabase project's JWT secret. Without
+            # it we cannot verify the token signature; decoding unsigned
+            # (verify_signature=False) would let anyone forge a token with
+            # an arbitrary "sub" claim and authenticate as any user. Fail
+            # closed instead of silently accepting unverified tokens.
+            logger.error("JWT_SECRET is not configured; refusing to accept unverified tokens.")
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Authentication is not correctly configured on the server.",
             )
-        else:
-            claims = jwt.decode(token, options={"verify_signature": False})
+        claims = jwt.decode(
+            token,
+            Config.JWT_SECRET,
+            algorithms=["HS256"],
+            options={"verify_aud": False}
+        )
         
         auth_user_id = claims.get("sub")
         if not auth_user_id:

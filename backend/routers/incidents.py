@@ -101,6 +101,18 @@ def create_incident(
         return incident
 
     # 2. Database Mode
+    # SECURITY: force a tourist caller's incidents to their own tourist_id
+    # (payload.tourist_id was previously trusted verbatim, letting a tourist
+    # file an incident "as" another tourist_id). Authority callers may still
+    # file an incident on behalf of a tourist (e.g. intake at a police desk).
+    if current_user.user_type == "tourist":
+        if current_user.tourist_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No tourist profile is associated with this account.",
+            )
+        payload.tourist_id = current_user.tourist_id
+
     now = datetime.now(timezone.utc)
     incident_id = uuid4()
     

@@ -73,6 +73,22 @@ def create_sos(
         return sos
 
     # 2. Database Mode
+    # SECURITY: a tourist caller must only ever raise an SOS for themselves.
+    # payload.tourist_id is client-supplied and was previously trusted as-is,
+    # which would let one tourist's session trigger an SOS "for" another
+    # tourist_id. Force it to the caller's own tourist_id when the caller is
+    # a tourist (DATABASE.md section 21: "Do not let a tourist submit
+    # another tourist's tourist_id"). Non-tourist callers (e.g. AI/system
+    # triggered SOS submitted by an authority/system account) keep the
+    # explicit payload value.
+    if current_user.user_type == "tourist":
+        if current_user.tourist_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No tourist profile is associated with this account.",
+            )
+        payload.tourist_id = current_user.tourist_id
+
     now = datetime.now(timezone.utc)
     location_id = uuid4()
     incident_id = uuid4()
