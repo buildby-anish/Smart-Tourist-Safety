@@ -23,6 +23,7 @@ interface HeaderProps {
   onToggleDarkMode: () => void;
   userRole: UserRole;
   onLogout: () => void;
+  onLogoClick: () => void;
   activeModule: ActiveModule;
   onSelectModule: (mod: ActiveModule) => void;
   globalSearchQuery: string;
@@ -38,6 +39,7 @@ export const Header: React.FC<HeaderProps> = ({
   onToggleDarkMode,
   userRole,
   onLogout,
+  onLogoClick,
   activeModule,
   onSelectModule,
   globalSearchQuery,
@@ -103,7 +105,10 @@ export const Header: React.FC<HeaderProps> = ({
           {/* Brand Logo & Emblem */}
           <div
             className="flex items-center space-x-3 cursor-pointer group flex-shrink-0"
-            onClick={() => userRole === 'authority' && onSelectModule('ai_hub')}
+            onClick={() => {
+              onLogoClick();
+              if (userRole === 'authority') onSelectModule('ai_hub');
+            }}
           >
             {/* Round White Wheel Emblem */}
             <div className="w-9 h-9 rounded-full bg-white text-[#0C2340] flex items-center justify-center font-bold shadow-sm border border-slate-200 group-hover:scale-105 transition-transform">
@@ -274,14 +279,16 @@ export const Header: React.FC<HeaderProps> = ({
                   {darkMode ? <Sun className="w-3.5 h-3.5 text-amber-500" /> : <Moon className="w-3.5 h-3.5 text-slate-700 dark:text-slate-400" />}
                 </button>
 
-                {/* Logout / Switch Gateway */}
-                <button
-                  onClick={onLogout}
-                  className="p-1.5 rounded-lg bg-red-100 hover:bg-red-200 border border-red-300 text-red-800 dark:bg-red-950/40 dark:hover:bg-red-950/60 dark:border-red-900 dark:text-red-300 transition-all duration-200 hover:scale-105 active:scale-95"
-                  title={t.logoutBtn}
-                >
-                  <LogOut className="w-3.5 h-3.5" />
-                </button>
+                {/* Logout — only shown for authority users */}
+                {userRole === 'authority' && (
+                  <button
+                    onClick={onLogout}
+                    className="p-1.5 rounded-lg bg-red-100 hover:bg-red-200 border border-red-300 text-red-800 dark:bg-red-950/40 dark:hover:bg-red-950/60 dark:border-red-900 dark:text-red-300 transition-all duration-200 hover:scale-105 active:scale-95"
+                    title={t.logoutBtn}
+                  >
+                    <LogOut className="w-3.5 h-3.5" />
+                  </button>
+                )}
 
               </div>
 

@@ -515,8 +515,9 @@ export default function App() {
         userRole={userRole}
         onLogout={() => {
           logoutUser().finally(() => clearSession());
-          setUserRole('gateway');
+          setUserRole('tourist');
         }}
+        onLogoClick={() => setUserRole('tourist')}
         activeModule={activeModule}
         onSelectModule={setActiveModule}
         globalSearchQuery={globalSearchQuery}

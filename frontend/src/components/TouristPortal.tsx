@@ -21,6 +21,7 @@ import {
   X,
   Smartphone,
   LogOut,
+  LogIn,
   RefreshCw,
   Radio,
   Clock,
@@ -89,6 +90,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
   const [showDigiLockerModal, setShowDigiLockerModal] = useState(false);
   const [showContactsDrawer, setShowContactsDrawer] = useState(false);
   const [showAddItineraryModal, setShowAddItineraryModal] = useState(false);
+  const [showAuthModal, setShowAuthModal] = useState(false);
 
   // Real-time Geofenced Broadcast Alert Modal State
   const [activeBroadcastModal, setActiveBroadcastModal] = useState<BroadcastAlert | null>(null);
@@ -495,6 +497,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
         }
 
         setShowOtpModal(false);
+        setShowAuthModal(false);
         setShowDigitalPassModal(true);
       } catch (err: any) {
         console.error('Tourist registration failed:', err);
@@ -551,6 +554,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
 
         setAuthenticatedUser(userProfile);
         setShowOtpModal(false);
+        setShowAuthModal(false);
         setShowConsentModal(true);
       } catch (err: any) {
         console.error('Tourist sign-in failed:', err);
@@ -762,24 +766,28 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
     }
   };
 
-  // SOS FAB: unauthenticated users are taken to the existing sign-in sheet
+  // SOS FAB: unauthenticated users are shown the login modal
   // (SOS creation requires a token at the API level regardless — see
   // backend/routers/sos.py) instead of a confusing dead click. Authenticated
   // users go straight into the existing confirmation step.
   const handleSosFabClick = () => {
-    setSheetExpanded(true);
     if (authenticatedUser) {
+      setSheetExpanded(true);
       handleStartSosConfirmation();
+    } else {
+      setShowAuthModal(true);
     }
   };
 
   // Shared guard for bottom-nav / quick-action taps that need an account:
-  // opens the existing onboarding/login sheet if signed out, otherwise runs
+  // opens the auth login modal if signed out, otherwise runs
   // the requested existing action (tab switch, modal, etc).
   const handleProtectedAction = (action: () => void) => {
-    setSheetExpanded(true);
     if (authenticatedUser) {
+      setSheetExpanded(true);
       action();
+    } else {
+      setShowAuthModal(true);
     }
   };
 
@@ -969,242 +977,31 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
       </div>
 
       {/* ========================================================= */}
-      {/* CONDITION 1: UNAUTHENTICATED - ONBOARDING & AUTHENTICATION */}
+      {/* CONDITION 1: UNAUTHENTICATED — COMPACT CTA CARD */}
+      {/* (Full auth form now lives in the showAuthModal overlay)   */}
       {/* ========================================================= */}
       {!authenticatedUser ? (
-        <div className="bg-white border-2 border-slate-200 rounded-3xl p-6 sm:p-8 shadow-lg">
-          
-          {/* Header Description */}
-          <div className="text-center max-w-lg mx-auto mb-8">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-300 text-[#138808] text-xs font-bold mb-3">
-              <Shield className="w-3.5 h-3.5" />
-              <span>Official Tourist Onboarding & e-KYC</span>
+        <div className="bg-white border-2 border-slate-200 rounded-3xl p-5 sm:p-6 shadow-lg dark:bg-slate-900 dark:border-slate-800 transition-colors duration-200">
+          <div className="flex flex-col items-center text-center gap-4">
+            <div className="w-14 h-14 rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-[#138808] flex items-center justify-center shadow-sm">
+              <Shield className="w-8 h-8 text-[#138808]" />
             </div>
-            <h3 className="text-2xl sm:text-3xl font-black text-[#0B2447]">
-              {authTab === 'signup' ? t.signUpTitle : t.signInTitle}
-            </h3>
-            <p className="mt-2 text-xs sm:text-sm text-slate-600 font-medium leading-relaxed">
-              {authTab === 'signup' ? t.signUpSub : t.signInSub}
-            </p>
-          </div>
-
-          {/* AUTH CHOICE TABS */}
-          <div className="flex rounded-xl bg-slate-100 p-1.5 border border-slate-200 max-w-md mx-auto mb-8">
+            <div>
+              <h3 className="text-lg font-black text-[#0B2447] dark:text-white">
+                Sign in for full safety tools
+              </h3>
+              <p className="mt-1 text-xs text-slate-500 dark:text-slate-400 font-medium max-w-xs mx-auto">
+                Access SOS panic triggers, itinerary planning, route finder, and AI safety features.
+              </p>
+            </div>
             <button
-              type="button"
-              onClick={() => setAuthTab('signin')}
-              className={`flex-1 py-2.5 px-4 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-2 ${
-                authTab === 'signin'
-                  ? 'bg-white text-[#0B2447] shadow-md border border-slate-200'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
+              onClick={() => setShowAuthModal(true)}
+              className="w-full max-w-xs py-3.5 rounded-xl bg-[#0B2447] hover:bg-[#071933] text-white font-black text-sm transition shadow-lg flex items-center justify-center gap-2 cursor-pointer dark:bg-slate-800 dark:hover:bg-slate-700"
             >
-              <KeyRound className="w-4 h-4 text-[#FF9933]" />
-              <span>{t.authSignInTab}</span>
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setAuthTab('signup')}
-              className={`flex-1 py-2.5 px-4 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-2 ${
-                authTab === 'signup'
-                  ? 'bg-white text-[#0B2447] shadow-md border border-slate-200'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <User className="w-4 h-4 text-[#138808]" />
-              <span>{t.authSignUpTab}</span>
+              <LogIn className="w-5 h-5 text-[#FF9933]" />
+              <span>Sign In or Register</span>
             </button>
           </div>
-
-          {/* TAB 1: SIGN IN FORM */}
-          {authTab === 'signin' ? (
-            <form onSubmit={handleSignInSubmit} className="space-y-5 max-w-md mx-auto text-left">
-              <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                  Existing Tourist ID <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={signinTouristId}
-                  onChange={(e) => setSigninTouristId(e.target.value)}
-                  placeholder="TR-88219 or TR-2026-8942"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 font-mono text-sm uppercase focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#FF9933]"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                  Registered Mobile Phone Number <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="tel"
-                  required
-                  value={signinPhone}
-                  onChange={(e) => setSigninPhone(e.target.value)}
-                  placeholder="+34 612 884 902"
-                  className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#FF9933]"
-                />
-              </div>
-
-              <div className="p-3 bg-amber-50 rounded-xl border border-amber-200 text-xs text-amber-900 font-medium">
-                💡 Enter the Tourist ID and phone number you used when you registered.
-              </div>
-
-              <button
-                type="submit"
-                className="w-full py-3.5 rounded-xl bg-[#0B2447] hover:bg-[#071933] text-white font-black text-sm transition shadow-lg flex items-center justify-center gap-2"
-              >
-                <KeyRound className="w-5 h-5 text-[#FF9933]" />
-                <span>Send OTP & Activate Trip</span>
-              </button>
-            </form>
-          ) : (
-            /* TAB 2: SIGN UP FORM */
-            <form onSubmit={handleSignUpSubmit} className="space-y-5">
-              
-              {/* DigiLocker Section */}
-              <div className="p-4 bg-emerald-50/80 rounded-2xl border-2 border-emerald-300/80 flex flex-col sm:flex-row items-center justify-between gap-4">
-                <div className="flex items-center space-x-3">
-                  <div className="w-12 h-12 rounded-xl bg-white border border-emerald-300 flex items-center justify-center text-[#138808] shadow-sm flex-shrink-0">
-                    <FileCheck className="w-6 h-6 text-[#138808]" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-black text-slate-900">
-                        Government DigiLocker e-KYC Integration
-                      </span>
-                      {digiLockerVerified && (
-                        <span className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-extrabold flex items-center gap-1">
-                          <Check className="w-3 h-3" /> VERIFIED
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-[11px] text-slate-600 font-medium mt-0.5">
-                      Skip manual uploads. Auto-retrieve Aadhaar / Passport verified credentials & photo.
-                    </p>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => setShowDigiLockerModal(true)}
-                  className={`px-4 py-2.5 rounded-xl text-xs font-extrabold transition shadow flex items-center gap-2 whitespace-nowrap ${
-                    digiLockerVerified
-                      ? 'bg-emerald-100 text-emerald-900 border border-emerald-300 hover:bg-emerald-200'
-                      : 'bg-[#138808] hover:bg-emerald-800 text-white'
-                  }`}
-                >
-                  <ExternalLink className="w-4 h-4" />
-                  <span>{digiLockerVerified ? 'DigiLocker Verified ✅' : t.connectDigiLockerBtn}</span>
-                </button>
-              </div>
-
-              {/* User Details Grid */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-left">
-                <div>
-                  <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                    {t.fullNameLabel} <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={fullName}
-                    onChange={(e) => setFullName(e.target.value)}
-                    placeholder="Elena Rostova"
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#138808]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                    {t.phoneLabel} <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="tel"
-                    required
-                    value={phone}
-                    onChange={(e) => setPhone(e.target.value)}
-                    placeholder="+91 98765 43210"
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#138808]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                    {t.emailLabel}
-                  </label>
-                  <input
-                    type="email"
-                    value={email}
-                    onChange={(e) => setEmail(e.target.value)}
-                    placeholder="elena.r@example.com"
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#138808]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                    {t.emergencyContactLabel} <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={emergencyContactName}
-                    onChange={(e) => setEmergencyContactName(e.target.value)}
-                    placeholder="Carlos Rostova"
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#138808]"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                    {t.emergencyRelationLabel}
-                  </label>
-                  <select
-                    value={emergencyRelation}
-                    onChange={(e) => setEmergencyRelation(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#138808]"
-                  >
-                    <option value="Father">Father</option>
-                    <option value="Mother">Mother</option>
-                    <option value="Spouse">Spouse</option>
-                    <option value="Sibling">Sibling</option>
-                    <option value="Friend">Friend</option>
-                    <option value="Relative">Relative</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-extrabold text-slate-700 mb-1">
-                    {t.emergencyPhoneLabel} <span className="text-red-500">*</span>
-                  </label>
-                  <input
-                    type="tel"
-                    required
-                    value={emergencyContactPhone}
-                    onChange={(e) => setEmergencyContactPhone(e.target.value)}
-                    placeholder="+91 98765 00000"
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#138808]"
-                  />
-                </div>
-              </div>
-
-              {/* Submit Button */}
-              <div className="pt-4">
-                <button
-                  type="submit"
-                  className="w-full py-3.5 rounded-xl bg-[#0B2447] hover:bg-[#071933] text-white font-black text-sm transition shadow-lg flex items-center justify-center gap-2"
-                >
-                  <Smartphone className="w-5 h-5 text-[#FF9933]" />
-                  <span>Proceed to Mobile OTP Verification</span>
-                </button>
-              </div>
-
-            </form>
-          )}
-
         </div>
       ) : (
         /* ========================================================= */
@@ -1690,9 +1487,6 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
           {/* ========================================================= */}
           {/* TAB 2: ITINERARY PLANNER */}
           {/* ========================================================= */}
-          {/* ========================================================= */}
-          {/* TAB 2: ITINERARY PLANNER */}
-          {/* ========================================================= */}
           {activeTab === 'itinerary' && (
             <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-6 text-left dark:bg-slate-900 dark:border-slate-800 transition-colors duration-200">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
@@ -1915,9 +1709,6 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
             </div>
           )}
 
-          {/* ========================================================= */}
-          {/* TAB 4: ROUTE FINDER MAP */}
-          {/* ========================================================= */}
           {/* ========================================================= */}
           {/* TAB 4: ROUTE FINDER MAP */}
           {/* ========================================================= */}
@@ -2223,23 +2014,23 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
       {/* MODAL: ADD ITINERARY ITEM */}
       {/* ========================================================= */}
       {showAddItineraryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white border-2 border-[#0B2447] rounded-3xl max-w-md w-full p-6 shadow-2xl relative text-left">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border-t-2 sm:border-2 border-[#0B2447] dark:border-slate-700 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto p-5 sm:p-6 shadow-2xl relative text-left transition-colors duration-200">
             <button
               onClick={() => setShowAddItineraryModal(false)}
-              className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 text-slate-500"
+              className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
 
-            <h3 className="text-lg font-black text-[#0B2447] mb-4 flex items-center gap-2">
+            <h3 className="text-lg font-black text-[#0B2447] dark:text-white mb-4 flex items-center gap-2">
               <Plus className="w-5 h-5 text-[#FF9933]" />
               <span>Add Destination to Itinerary</span>
             </h3>
 
             <form onSubmit={handleAddItinerary} className="space-y-4">
               <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-300 mb-1">
                   Destination Name <span className="text-red-500">*</span>
                 </label>
                 <input
@@ -2248,24 +2039,25 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
                   value={newDest}
                   onChange={(e) => setNewDest(e.target.value)}
                   placeholder="e.g. Rohtang Glacier Pass or Dharamshala"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold"
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#FF9933] min-h-[44px]"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-300 mb-1">
                   Travel Date
                 </label>
                 <input
                   type="date"
                   value={newDate}
                   onChange={(e) => setNewDate(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold"
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#FF9933] min-h-[44px] appearance-none"
+                  style={{ colorScheme: 'auto' }}
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-300 mb-1">
                   Hotel / Accommodation
                 </label>
                 <input
@@ -2273,12 +2065,12 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
                   value={newHotel}
                   onChange={(e) => setNewHotel(e.target.value)}
                   placeholder="e.g. Grand Himalayan Lodge"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold"
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#FF9933] min-h-[44px]"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-300 mb-1">
                   Activities & Travel Notes
                 </label>
                 <input
@@ -2286,19 +2078,236 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
                   value={newActivities}
                   onChange={(e) => setNewActivities(e.target.value)}
                   placeholder="e.g. Hiking, Cable car ride"
-                  className="w-full px-3 py-2 rounded-xl bg-slate-50 border border-slate-300 text-slate-900 text-xs font-bold"
+                  className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#FF9933] min-h-[44px]"
                 />
               </div>
 
               <div className="pt-2">
                 <button
                   type="submit"
-                  className="w-full py-3 rounded-xl bg-[#0B2447] hover:bg-[#071933] text-white font-black text-xs shadow-md"
+                  className="w-full py-3 rounded-xl bg-[#0B2447] hover:bg-[#071933] dark:bg-slate-800 dark:hover:bg-slate-700 text-white font-black text-xs shadow-md min-h-[48px] cursor-pointer transition"
                 >
                   Save & AI Safety Check
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* AUTH MODAL OVERLAY — Sign In / Sign Up over the map       */}
+      {/* ========================================================= */}
+      {showAuthModal && !authenticatedUser && (
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border-t-2 sm:border-2 border-[#0B2447] dark:border-slate-700 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-lg max-h-[90vh] overflow-y-auto p-5 sm:p-7 shadow-2xl relative text-left animate-scale-in transition-colors duration-200">
+            
+            {/* Close Button */}
+            <button
+              onClick={() => setShowAuthModal(false)}
+              className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition z-10 cursor-pointer"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Header */}
+            <div className="text-center max-w-sm mx-auto mb-6">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-300 dark:border-emerald-800 text-[#138808] dark:text-emerald-400 text-xs font-bold mb-3">
+                <Shield className="w-3.5 h-3.5" />
+                <span>Official Tourist Onboarding & e-KYC</span>
+              </div>
+              <h3 className="text-xl sm:text-2xl font-black text-[#0B2447] dark:text-white">
+                {authTab === 'signup' ? t.signUpTitle : t.signInTitle}
+              </h3>
+              <p className="mt-1.5 text-xs text-slate-500 dark:text-slate-400 font-medium leading-relaxed">
+                {authTab === 'signup' ? t.signUpSub : t.signInSub}
+              </p>
+            </div>
+
+            {/* Auth Choice Tabs */}
+            <div className="flex rounded-xl bg-slate-100 dark:bg-slate-800 p-1.5 border border-slate-200 dark:border-slate-700 max-w-sm mx-auto mb-6">
+              <button
+                type="button"
+                onClick={() => setAuthTab('signin')}
+                className={`flex-1 py-2.5 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                  authTab === 'signin'
+                    ? 'bg-white dark:bg-slate-900 text-[#0B2447] dark:text-white shadow-md border border-slate-200 dark:border-slate-700'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <KeyRound className="w-3.5 h-3.5 text-[#FF9933]" />
+                <span>{t.authSignInTab}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setAuthTab('signup')}
+                className={`flex-1 py-2.5 px-3 rounded-lg text-xs font-black transition-all flex items-center justify-center gap-1.5 ${
+                  authTab === 'signup'
+                    ? 'bg-white dark:bg-slate-900 text-[#0B2447] dark:text-white shadow-md border border-slate-200 dark:border-slate-700'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                }`}
+              >
+                <User className="w-3.5 h-3.5 text-[#138808]" />
+                <span>{t.authSignUpTab}</span>
+              </button>
+            </div>
+
+            {/* Sign In Form */}
+            {authTab === 'signin' ? (
+              <form onSubmit={handleSignInSubmit} className="space-y-4 max-w-sm mx-auto">
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-300 mb-1">
+                    Existing Tourist ID <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={signinTouristId}
+                    onChange={(e) => setSigninTouristId(e.target.value)}
+                    placeholder="TR-88219 or TR-2026-8942"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white font-mono text-sm uppercase focus:outline-none focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-[#FF9933] min-h-[44px]"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-300 mb-1">
+                    Registered Mobile Phone <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    value={signinPhone}
+                    onChange={(e) => setSigninPhone(e.target.value)}
+                    placeholder="+34 612 884 902"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold focus:outline-none focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-[#FF9933] min-h-[44px]"
+                  />
+                </div>
+
+                <div className="p-2.5 bg-amber-50 dark:bg-amber-950/20 rounded-xl border border-amber-200 dark:border-amber-900/40 text-xs text-amber-900 dark:text-amber-300 font-medium">
+                  💡 Enter the Tourist ID and phone number you used when you registered.
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full py-3 rounded-xl bg-[#0B2447] hover:bg-[#071933] dark:bg-slate-800 dark:hover:bg-slate-700 text-white font-black text-sm transition shadow-lg flex items-center justify-center gap-2 min-h-[48px] cursor-pointer"
+                >
+                  <KeyRound className="w-5 h-5 text-[#FF9933]" />
+                  <span>Send OTP & Activate Trip</span>
+                </button>
+              </form>
+            ) : (
+              /* Sign Up Form */
+              <form onSubmit={handleSignUpSubmit} className="space-y-4">
+                {/* DigiLocker */}
+                <div className="p-3 bg-emerald-50/80 dark:bg-emerald-950/20 rounded-2xl border border-emerald-300/80 dark:border-emerald-900/50 flex flex-col sm:flex-row items-center justify-between gap-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-10 h-10 rounded-xl bg-white dark:bg-slate-800 border border-emerald-300 dark:border-emerald-800 flex items-center justify-center text-[#138808] shadow-sm flex-shrink-0">
+                      <FileCheck className="w-5 h-5 text-[#138808]" />
+                    </div>
+                    <div>
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-black text-slate-900 dark:text-white">DigiLocker e-KYC</span>
+                        {digiLockerVerified && (
+                          <span className="px-2 py-0.5 rounded bg-emerald-600 text-white text-[10px] font-extrabold flex items-center gap-1">
+                            <Check className="w-3 h-3" /> VERIFIED
+                          </span>
+                        )}
+                      </div>
+                      <p className="text-[10px] text-slate-500 dark:text-slate-400 font-medium mt-0.5">
+                        Auto-retrieve Aadhaar / Passport credentials.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowDigiLockerModal(true)}
+                    className={`px-3 py-2 rounded-xl text-xs font-extrabold transition shadow flex items-center gap-1.5 whitespace-nowrap flex-shrink-0 cursor-pointer ${
+                      digiLockerVerified
+                        ? 'bg-emerald-100 text-emerald-900 border border-emerald-300 hover:bg-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-800'
+                        : 'bg-[#138808] hover:bg-emerald-800 text-white'
+                    }`}
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                    <span>{digiLockerVerified ? 'Verified ✅' : 'Connect'}</span>
+                  </button>
+                </div>
+
+                {/* User Details Grid */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-left">
+                  <div>
+                    <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-300 mb-1">
+                      {t.fullNameLabel} <span className="text-red-500">*</span>
+                    </label>
+                    <input type="text" required value={fullName} onChange={(e) => setFullName(e.target.value)}
+                      placeholder="Elena Rostova"
+                      className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#138808] min-h-[44px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-300 mb-1">
+                      {t.phoneLabel} <span className="text-red-500">*</span>
+                    </label>
+                    <input type="tel" required value={phone} onChange={(e) => setPhone(e.target.value)}
+                      placeholder="+91 98765 43210"
+                      className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#138808] min-h-[44px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-300 mb-1">
+                      {t.emailLabel}
+                    </label>
+                    <input type="email" value={email} onChange={(e) => setEmail(e.target.value)}
+                      placeholder="elena.r@example.com"
+                      className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#138808] min-h-[44px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-300 mb-1">
+                      {t.emergencyContactLabel} <span className="text-red-500">*</span>
+                    </label>
+                    <input type="text" required value={emergencyContactName} onChange={(e) => setEmergencyContactName(e.target.value)}
+                      placeholder="Carlos Rostova"
+                      className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#138808] min-h-[44px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-300 mb-1">
+                      {t.emergencyRelationLabel}
+                    </label>
+                    <select value={emergencyRelation} onChange={(e) => setEmergencyRelation(e.target.value)}
+                      className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#138808] min-h-[44px]"
+                    >
+                      <option value="Father">Father</option>
+                      <option value="Mother">Mother</option>
+                      <option value="Spouse">Spouse</option>
+                      <option value="Sibling">Sibling</option>
+                      <option value="Friend">Friend</option>
+                      <option value="Relative">Relative</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-300 mb-1">
+                      {t.emergencyPhoneLabel} <span className="text-red-500">*</span>
+                    </label>
+                    <input type="tel" required value={emergencyContactPhone} onChange={(e) => setEmergencyContactPhone(e.target.value)}
+                      placeholder="+91 98765 00000"
+                      className="w-full px-3 py-2.5 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-slate-900 dark:text-white text-xs font-bold focus:outline-none focus:ring-2 focus:ring-[#138808] min-h-[44px]"
+                    />
+                  </div>
+                </div>
+
+                {/* Submit */}
+                <button
+                  type="submit"
+                  className="w-full py-3 rounded-xl bg-[#0B2447] hover:bg-[#071933] dark:bg-slate-800 dark:hover:bg-slate-700 text-white font-black text-sm transition shadow-lg flex items-center justify-center gap-2 min-h-[48px] cursor-pointer"
+                >
+                  <Smartphone className="w-5 h-5 text-[#FF9933]" />
+                  <span>Proceed to OTP Verification</span>
+                </button>
+              </form>
+            )}
+
           </div>
         </div>
       )}
@@ -2402,36 +2411,36 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
 
       {/* MODAL 2: OTP MODAL */}
       {showOtpModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white border-2 border-[#0B2447] rounded-3xl max-w-md w-full p-6 sm:p-8 shadow-2xl relative text-left animate-scale-in">
+        <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center sm:p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
+          <div className="bg-white dark:bg-slate-900 border-t-2 sm:border-2 border-[#0B2447] dark:border-slate-700 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-md max-h-[90vh] overflow-y-auto p-5 sm:p-7 shadow-2xl relative text-left animate-scale-in transition-colors duration-200">
             <button
               onClick={() => setShowOtpModal(false)}
-              className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 text-slate-500"
+              className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400 transition cursor-pointer"
             >
               <X className="w-5 h-5" />
             </button>
 
             <div className="flex items-center space-x-3 mb-6">
-              <div className="w-12 h-12 rounded-2xl bg-amber-100 border border-[#FF9933] flex items-center justify-center text-[#0B2447]">
-                <Smartphone className="w-7 h-7 text-[#0B2447]" />
+              <div className="w-12 h-12 rounded-2xl bg-amber-100 dark:bg-amber-950/30 border border-[#FF9933] dark:border-amber-800 flex items-center justify-center text-[#0B2447]">
+                <Smartphone className="w-7 h-7 text-[#0B2447] dark:text-[#FF9933]" />
               </div>
               <div>
-                <h3 className="text-xl font-black text-slate-900">{t.otpModalTitle}</h3>
-                <p className="text-xs text-slate-500 font-medium">
-                  {t.otpModalSub} <strong className="text-slate-900">{otpPendingAction === 'signup' ? phone : signinPhone}</strong>
+                <h3 className="text-xl font-black text-slate-900 dark:text-white">{t.otpModalTitle}</h3>
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
+                  {t.otpModalSub} <strong className="text-slate-900 dark:text-white">{otpPendingAction === 'signup' ? phone : signinPhone}</strong>
                 </p>
               </div>
             </div>
 
             <form onSubmit={handleVerifyOtp} className="space-y-5">
               {otpError && (
-                <div className="p-3 bg-red-50 border border-red-300 text-red-800 text-xs rounded-xl font-bold">
+                <div className="p-3 bg-red-50 dark:bg-red-950/20 border border-red-300 dark:border-red-900 text-red-800 dark:text-red-300 text-xs rounded-xl font-bold">
                   {otpError}
                 </div>
               )}
 
               <div>
-                <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-300 mb-1">
                   6-Digit Verification Code
                 </label>
                 <input
@@ -2440,13 +2449,13 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
                   value={otpValue}
                   onChange={(e) => setOtpValue(e.target.value)}
                   placeholder="654321"
-                  className="w-full px-4 py-3 rounded-xl bg-slate-50 border border-slate-300 text-center font-mono text-2xl tracking-[0.4em] font-black focus:outline-none focus:bg-white focus:ring-2 focus:ring-[#138808]"
+                  className="w-full px-4 py-3 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-300 dark:border-slate-700 text-center font-mono text-2xl tracking-[0.4em] font-black text-slate-900 dark:text-white focus:outline-none focus:bg-white dark:focus:bg-slate-800 focus:ring-2 focus:ring-[#138808] min-h-[52px]"
                 />
               </div>
 
               <button
                 type="submit"
-                className="w-full py-3.5 rounded-xl bg-[#0B2447] hover:bg-[#071933] text-white font-black text-sm transition shadow-lg flex items-center justify-center gap-2"
+                className="w-full py-3.5 rounded-xl bg-[#0B2447] hover:bg-[#071933] dark:bg-slate-800 dark:hover:bg-slate-700 text-white font-black text-sm transition shadow-lg flex items-center justify-center gap-2 min-h-[48px] cursor-pointer"
               >
                 <CheckCircle2 className="w-5 h-5 text-[#FF9933]" />
                 <span>{t.verifyOtpBtn}</span>
