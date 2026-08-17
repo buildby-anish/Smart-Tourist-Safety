@@ -49,7 +49,13 @@ import {
 export default function App() {
   const [language, setLanguage] = useState<Language>('en');
   const [darkMode, setDarkMode] = useState<boolean>(false);
-  const [userRole, setUserRole] = useState<UserRole>('gateway');
+  // Map-first landing: open straight into the Tourist Portal (map home
+  // screen) instead of the old Gateway role-picker/login screen. Gateway
+  // (including the real authority MFA login) is still fully intact and
+  // reachable via the existing "Gateway" button inside the Tourist Portal
+  // panel (onReturnToGateway below) — this only changes what the very
+  // first screen is.
+  const [userRole, setUserRole] = useState<UserRole>('tourist');
   const [activeModule, setActiveModule] = useState<ActiveModule>('ai_hub');
 
   // Master Data State
