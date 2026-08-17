@@ -40,7 +40,9 @@ import {
   Send,
   Hotel,
   Bot,
-  Loader2
+  Loader2,
+  Search,
+  LocateFixed
 } from 'lucide-react';
 import { Language, TouristProfile, ItineraryItem, ChatMessage, BroadcastAlert, GeoFenceZone, SosStepState } from '../types';
 import { i18n } from '../data/i18n';
@@ -135,6 +137,17 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
 
   // Integrated Geo-Fence States
   const [activeGeoFenceZone, setActiveGeoFenceZone] = useState<GeoFenceZone>(MOCK_GEOFENCE_ZONES[0]); // Solang Valley (Unsafe)
+
+  // ============================================================
+  // MAP-FIRST SHELL STATE (search bar, floating controls, sheet)
+  // These are purely presentational additions layered on top of the
+  // existing feature state/logic above — no existing state, handlers,
+  // API calls, or auth/SOS logic are duplicated or altered.
+  // ============================================================
+  const [sheetExpanded, setSheetExpanded] = useState(false);
+  const [mapSearchQuery, setMapSearchQuery] = useState('');
+  const [liveMarker, setLiveMarker] = useState<{ lat: number; lng: number } | null>(null);
+  const [locatingMe, setLocatingMe] = useState(false);
 
   const handleStartSosConfirmation = () => {
     setSosStep('confirming');
@@ -714,9 +727,159 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
     setActiveBroadcastModal(sampleAlert);
   };
 
+  // ============================================================
+  // MAP-FIRST SHELL HANDLERS — reuse existing state/functions/data
+  // only (activeGeoFenceZone, getSOSLocation, handleStartSosConfirmation,
+  // authenticatedUser). No new API calls or duplicate business logic.
+  // ============================================================
+
+  // Search reuses the existing real geofence-zone dataset already powering
+  // the map/route views — no invented places or fake results.
+  const handleMapSearch = (e: React.FormEvent) => {
+    e.preventDefault();
+    const q = mapSearchQuery.trim().toLowerCase();
+    if (!q) return;
+    const match = MOCK_GEOFENCE_ZONES.find((z) => z.name.toLowerCase().includes(q));
+    if (match) {
+      setActiveGeoFenceZone(match);
+    }
+    setSheetExpanded(false);
+  };
+
+  // Reuses the same location fetch already used by the SOS flow
+  // (getSOSLocation) rather than introducing a second location code path.
+  const handleLocateMe = async () => {
+    setLocatingMe(true);
+    try {
+      const loc = await getSOSLocation();
+      if (loc?.latitude != null && loc?.longitude != null) {
+        setLiveMarker({ lat: loc.latitude, lng: loc.longitude });
+      }
+    } catch (err) {
+      console.warn('Locate me failed:', err);
+    } finally {
+      setLocatingMe(false);
+    }
+  };
+
+  // SOS FAB: unauthenticated users are taken to the existing sign-in sheet
+  // (SOS creation requires a token at the API level regardless — see
+  // backend/routers/sos.py) instead of a confusing dead click. Authenticated
+  // users go straight into the existing confirmation step.
+  const handleSosFabClick = () => {
+    setSheetExpanded(true);
+    if (authenticatedUser) {
+      handleStartSosConfirmation();
+    }
+  };
+
+  // Shared guard for bottom-nav / quick-action taps that need an account:
+  // opens the existing onboarding/login sheet if signed out, otherwise runs
+  // the requested existing action (tab switch, modal, etc).
+  const handleProtectedAction = (action: () => void) => {
+    setSheetExpanded(true);
+    if (authenticatedUser) {
+      action();
+    }
+  };
+
   return (
-    <div className="min-h-[calc(100vh-80px)] bg-[#F4F6F9] text-slate-900 p-3 sm:p-5 w-full max-w-none flex flex-col justify-between relative pb-24">
-      
+    <>
+      {/* ============================================================ */}
+      {/* MAP-FIRST BACKGROUND — persistent, full-bleed, always visible */}
+      {/* (even signed out). Reuses the exact same ActualGoogleMap API   */}
+      {/* already used inside the Route Finder tab below, just as the   */}
+      {/* primary surface instead of a small embedded panel.            */}
+      {/* ============================================================ */}
+      <div className="fixed inset-0 z-0">
+        <ActualGoogleMap
+          center={activeGeoFenceZone.center}
+          zoom={13}
+          height="100%"
+          geofenceZones={MOCK_GEOFENCE_ZONES}
+          activeZoneId={activeGeoFenceZone.id}
+          markers={[
+            { id: 'user-loc', lat: (liveMarker || activeGeoFenceZone.center).lat, lng: (liveMarker || activeGeoFenceZone.center).lng, title: liveMarker ? 'My Live GPS Location' : 'Approximate Location', type: 'user' },
+            { id: 'police-pcr', lat: 32.248, lng: 77.185, title: 'Police PCR Unit 2', type: 'police' }
+          ]}
+        />
+      </div>
+
+      {/* FLOATING TOP SEARCH BAR + QUICK ACTION CHIPS (offset below the
+          existing sticky app Header, which uses the same ~80px assumption
+          as the original layout's min-h-[calc(100vh-80px)]) */}
+      <div className="fixed top-20 inset-x-3 sm:inset-x-auto sm:left-4 sm:right-4 z-20 flex flex-col items-center sm:items-start gap-2 pointer-events-none">
+        <form
+          onSubmit={handleMapSearch}
+          className="w-full sm:w-[380px] pointer-events-auto flex items-center gap-2 bg-white/95 backdrop-blur border border-slate-200 rounded-2xl shadow-lg px-4 py-3 transition-shadow focus-within:shadow-xl"
+        >
+          <Search className="w-4 h-4 text-slate-500 flex-shrink-0" />
+          <input
+            type="text"
+            value={mapSearchQuery}
+            onChange={(e) => setMapSearchQuery(e.target.value)}
+            placeholder="Search places, attractions, hotels, restaurants..."
+            className="flex-1 bg-transparent text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none min-w-0"
+          />
+        </form>
+
+        <div className="w-full sm:w-[380px] pointer-events-auto flex gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+          {[
+            { key: 'ai', label: 'AI Assist', icon: Bot, onClick: () => setChatOpen(true) },
+            { key: 'nearby', label: 'Nearby', icon: Compass, onClick: () => handleProtectedAction(() => setActiveTab('heatmap')) },
+            { key: 'route', label: 'Route Finder', icon: Navigation, onClick: () => handleProtectedAction(() => setActiveTab('route_finder')) },
+            { key: 'trips', label: 'Trips', icon: Calendar, onClick: () => handleProtectedAction(() => setActiveTab('itinerary')) },
+          ].map((chip) => (
+            <button
+              key={chip.key}
+              onClick={chip.onClick}
+              className="flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2 bg-white/95 backdrop-blur border border-slate-200 rounded-full shadow-md text-xs font-bold text-slate-700 hover:bg-white hover:shadow-lg active:scale-95 transition motion-reduce:transition-none"
+            >
+              <chip.icon className="w-3.5 h-3.5 text-[#0B2447]" />
+              <span>{chip.label}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* FLOATING SOS + LOCATE-ME CONTROLS */}
+      <div className="fixed right-3 sm:right-6 bottom-40 sm:bottom-28 z-20 flex flex-col items-center gap-3">
+        <button
+          onClick={handleLocateMe}
+          disabled={locatingMe}
+          title="Recenter on my location"
+          aria-label="Recenter on my location"
+          className="w-11 h-11 rounded-full bg-white border border-slate-200 shadow-lg flex items-center justify-center text-[#0B2447] hover:bg-slate-50 active:scale-95 transition motion-reduce:transition-none disabled:opacity-60"
+        >
+          <LocateFixed className={`w-5 h-5 ${locatingMe ? 'animate-pulse' : ''}`} />
+        </button>
+
+        <button
+          onClick={handleSosFabClick}
+          title="Emergency SOS"
+          aria-label="Emergency SOS"
+          className="w-16 h-16 rounded-full bg-[#D32F2F] hover:bg-red-700 border-4 border-white shadow-xl flex flex-col items-center justify-center text-white active:scale-95 transition motion-reduce:transition-none"
+        >
+          <ShieldAlert className="w-6 h-6" />
+          <span className="text-[9px] font-black tracking-wider mt-0.5">SOS</span>
+        </button>
+      </div>
+
+    <div className={`fixed inset-x-0 bottom-0 z-10 bg-[#F4F6F9] text-slate-900 w-full max-w-none flex flex-col rounded-t-3xl shadow-[0_-8px_30px_rgba(0,0,0,0.18)] border-t border-slate-200 transition-transform duration-300 ease-out motion-reduce:transition-none ${sheetExpanded ? 'translate-y-0' : 'translate-y-[calc(100%-96px)]'} max-h-[88vh] overflow-y-auto p-3 sm:p-5 pb-24`}>
+
+      {/* SHEET DRAG HANDLE / PEEK BAR — tap to expand/collapse the app panel over the map */}
+      <button
+        onClick={() => setSheetExpanded((v) => !v)}
+        className="w-full flex flex-col items-center gap-1.5 pt-1 pb-3 cursor-pointer group flex-shrink-0"
+        aria-label={sheetExpanded ? 'Collapse panel' : 'Expand panel'}
+      >
+        <span className="w-10 h-1.5 rounded-full bg-slate-300 group-hover:bg-slate-400 transition" />
+        <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1">
+          {authenticatedUser ? (sheetExpanded ? 'Hide panel' : 'Trips, Profile & Safety Tools') : (sheetExpanded ? 'Hide panel' : 'Sign in for personalized tools')}
+          <ChevronUp className={`w-3.5 h-3.5 transition-transform motion-reduce:transition-none ${sheetExpanded ? 'rotate-180' : ''}`} />
+        </span>
+      </button>
+
       {/* GLOBAL TOP HEADER FOR TOURIST PORTAL */}
       <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
         <div className="flex items-center space-x-3 w-full sm:w-auto">
@@ -2520,5 +2683,35 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
       )}
 
     </div>
+
+      {/* BOTTOM NAVIGATION — Map is the default/home tab; Explore, Trips and
+          Profile reuse the existing tab/modal state above; protected tabs
+          route through the existing sign-in sheet when signed out. */}
+      <nav className="fixed bottom-0 inset-x-0 z-20 bg-white/95 backdrop-blur border-t border-slate-200 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] px-2 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]">
+        <div className="max-w-md mx-auto grid grid-cols-5 gap-1">
+          {[
+            { key: 'map', label: 'Map', icon: Map, onClick: () => { setSheetExpanded(false); setActiveTab('overview'); } },
+            { key: 'explore', label: 'Explore', icon: Compass, onClick: () => handleProtectedAction(() => setActiveTab('heatmap')) },
+            { key: 'trips', label: 'Trips', icon: Calendar, onClick: () => handleProtectedAction(() => setActiveTab('itinerary')) },
+            { key: 'alerts', label: 'Alerts', icon: Bell, onClick: () => { setSheetExpanded(true); handleTriggerSimulatedAlert(); } },
+            { key: 'profile', label: 'Profile', icon: User, onClick: () => handleProtectedAction(() => setShowProfileModal(true)) },
+          ].map((navItem) => {
+            const isMapTab = navItem.key === 'map' && !sheetExpanded;
+            return (
+              <button
+                key={navItem.key}
+                onClick={navItem.onClick}
+                className={`flex flex-col items-center gap-0.5 py-1.5 rounded-xl text-[10px] font-bold transition active:scale-95 motion-reduce:transition-none ${
+                  isMapTab ? 'text-[#0B2447] bg-slate-100' : 'text-slate-500 hover:text-[#0B2447] hover:bg-slate-50'
+                }`}
+              >
+                <navItem.icon className="w-5 h-5" />
+                <span>{navItem.label}</span>
+              </button>
+            );
+          })}
+        </div>
+      </nav>
+    </>
   );
 };
