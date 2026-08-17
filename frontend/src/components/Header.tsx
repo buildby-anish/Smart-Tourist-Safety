@@ -167,16 +167,16 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* ROW 2: LIGHT SUB-BAR WITH PAGE TITLE, SEARCH & OFFICER PROFILE */}
-      <div className="bg-[#F8FAFC] text-slate-900 border-t border-slate-700/50 border-b border-slate-200 py-2.5">
+      <div className="bg-[#F8FAFC] text-slate-900 border-t border-slate-700/50 border-b border-slate-200 dark:bg-slate-900 dark:text-slate-100 dark:border-slate-800 py-2.5 transition-colors duration-200">
         <div className="max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col md:flex-row items-center justify-between gap-3">
             
             {/* Title & Subtitle */}
             <div className="flex flex-col">
-              <h1 className="text-lg sm:text-xl font-black text-[#0C2340] tracking-tight whitespace-nowrap uppercase">
+              <h1 className="text-lg sm:text-xl font-black text-[#0C2340] dark:text-slate-200 tracking-tight whitespace-nowrap uppercase">
                 {t.nationalPortalName}
               </h1>
-              <p className="text-xs text-slate-600 font-semibold mt-0.5 whitespace-nowrap">
+              <p className="text-xs text-slate-600 dark:text-slate-400 font-semibold mt-0.5 whitespace-nowrap">
                 {t.nationalPortalName} • {language === 'hi' ? 'हिमाचल प्रदेश राज्य' : 'Himachal Pradesh State'}
               </p>
             </div>
@@ -193,13 +193,13 @@ export const Header: React.FC<HeaderProps> = ({
                     value={globalSearchQuery}
                     onChange={(e) => onGlobalSearchChange(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && onExecuteGlobalSearch()}
-                    className="w-full md:w-72 lg:w-80 pl-9 pr-8 py-1.5 text-xs rounded-full bg-white border border-slate-300 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-[#0C2340] focus:ring-1 focus:ring-[#0C2340] shadow-sm font-medium transition-all"
+                    className="w-full md:w-72 lg:w-80 pl-9 pr-8 py-1.5 text-xs rounded-full bg-white border border-slate-300 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-[#0C2340] focus:ring-1 focus:ring-[#0C2340] dark:bg-slate-950 dark:border-slate-800 dark:text-slate-100 dark:placeholder-slate-500 dark:focus:border-slate-700 dark:focus:ring-slate-700 shadow-sm font-medium transition-all"
                   />
                   <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
                   {globalSearchQuery && (
                     <button
                       onClick={onExecuteGlobalSearch}
-                      className="absolute right-2 top-1.5 px-2 py-0.5 bg-[#0C2340] text-white text-[10px] font-bold rounded-full hover:bg-slate-800"
+                      className="absolute right-2 top-1.5 px-2 py-0.5 bg-[#0C2340] text-white text-[10px] font-bold rounded-full hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700"
                     >
                       GO
                     </button>
@@ -220,17 +220,17 @@ export const Header: React.FC<HeaderProps> = ({
 
               {/* Officer Profile Badge */}
               {userRole === 'authority' ? (
-                <div className="flex items-center space-x-2.5 border-l border-slate-300 pl-3">
+                <div className="flex items-center space-x-2.5 border-l border-slate-300 dark:border-slate-800 pl-3">
                   <img
                     src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80"
                     alt="Rajesh Kumar, IAS"
-                    className="w-8 h-8 rounded-full border border-slate-300 object-cover shadow-xs flex-shrink-0"
+                    className="w-8 h-8 rounded-full border border-slate-300 dark:border-slate-800 object-cover shadow-xs flex-shrink-0"
                   />
                   <div className="flex flex-col leading-tight">
-                    <span className="text-xs font-extrabold text-[#0C2340] whitespace-nowrap">
+                    <span className="text-xs font-extrabold text-[#0C2340] dark:text-slate-200 whitespace-nowrap">
                       Rajesh Kumar, IAS
                     </span>
-                    <span className="text-[10px] text-slate-500 font-medium whitespace-nowrap">
+                    <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium whitespace-nowrap">
                       State Chief Administrator
                     </span>
                   </div>
@@ -238,17 +238,17 @@ export const Header: React.FC<HeaderProps> = ({
               ) : null}
 
               {/* Utilities: Language, Theme & Logout */}
-              <div className="flex items-center space-x-1.5 border-l border-slate-300 pl-2">
+              <div className="flex items-center space-x-1.5 border-l border-slate-300 dark:border-slate-800 pl-2">
                 
                 {/* Language Switcher */}
-                <div className="flex items-center bg-slate-200/80 border border-slate-300 rounded-lg p-0.5 gap-0.5">
-                  <Globe className="w-3 h-3 text-slate-600 ml-1" />
+                <div className="flex items-center bg-slate-200/80 border border-slate-300 dark:bg-slate-850 dark:border-slate-800 rounded-lg p-0.5 gap-0.5">
+                  <Globe className="w-3 h-3 text-slate-600 dark:text-slate-400 ml-1" />
                   <button
                     onClick={() => onLanguageChange('en')}
                     className={`px-1.5 py-0.5 text-[10px] font-extrabold rounded ${
                       language === 'en'
-                        ? 'bg-[#0C2340] text-white shadow-xs'
-                        : 'text-slate-700 hover:text-slate-900'
+                        ? 'bg-[#0C2340] text-white dark:bg-slate-950 shadow-xs'
+                        : 'text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
                     }`}
                   >
                     EN
@@ -257,8 +257,8 @@ export const Header: React.FC<HeaderProps> = ({
                     onClick={() => onLanguageChange('hi')}
                     className={`px-1.5 py-0.5 text-[10px] font-extrabold rounded ${
                       language === 'hi'
-                        ? 'bg-[#0C2340] text-white shadow-xs'
-                        : 'text-slate-700 hover:text-slate-900'
+                        ? 'bg-[#0C2340] text-white dark:bg-slate-950 shadow-xs'
+                        : 'text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
                     }`}
                   >
                     हिंदी
@@ -268,16 +268,16 @@ export const Header: React.FC<HeaderProps> = ({
                 {/* Theme Toggle */}
                 <button
                   onClick={onToggleDarkMode}
-                  className="p-1.5 rounded-lg bg-slate-200/80 border border-slate-300 text-slate-700 hover:bg-slate-300 transition-all duration-200 hover:scale-105 active:scale-95"
+                  className="p-1.5 rounded-lg bg-slate-200/80 border border-slate-300 text-slate-700 hover:bg-slate-300 dark:bg-slate-850 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900 transition-all duration-200 hover:scale-105 active:scale-95"
                   title="Toggle High-Contrast Theme"
                 >
-                  {darkMode ? <Sun className="w-3.5 h-3.5 text-amber-500" /> : <Moon className="w-3.5 h-3.5 text-slate-700" />}
+                  {darkMode ? <Sun className="w-3.5 h-3.5 text-amber-500" /> : <Moon className="w-3.5 h-3.5 text-slate-700 dark:text-slate-400" />}
                 </button>
 
                 {/* Logout / Switch Gateway */}
                 <button
                   onClick={onLogout}
-                  className="p-1.5 rounded-lg bg-red-100 hover:bg-red-200 border border-red-300 text-red-800 transition-all duration-200 hover:scale-105 active:scale-95"
+                  className="p-1.5 rounded-lg bg-red-100 hover:bg-red-200 border border-red-300 text-red-800 dark:bg-red-950/40 dark:hover:bg-red-950/60 dark:border-red-900 dark:text-red-300 transition-all duration-200 hover:scale-105 active:scale-95"
                   title={t.logoutBtn}
                 >
                   <LogOut className="w-3.5 h-3.5" />

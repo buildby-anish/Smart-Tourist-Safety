@@ -811,15 +811,15 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
       <div className="fixed top-20 inset-x-3 sm:inset-x-auto sm:left-4 sm:right-4 z-20 flex flex-col items-center sm:items-start gap-2 pointer-events-none">
         <form
           onSubmit={handleMapSearch}
-          className="w-full sm:w-[380px] pointer-events-auto flex items-center gap-2 bg-white/95 backdrop-blur border border-slate-200 rounded-2xl shadow-lg px-4 py-3 transition-shadow focus-within:shadow-xl"
+          className="w-full sm:w-[380px] pointer-events-auto flex items-center gap-2 bg-white/95 border border-slate-200 rounded-2xl shadow-lg px-4 py-3 focus-within:shadow-xl dark:bg-slate-900/95 dark:border-slate-800 dark:shadow-[0_8px_30px_rgba(0,0,0,0.3)] backdrop-blur transition-all duration-200"
         >
-          <Search className="w-4 h-4 text-slate-500 flex-shrink-0" />
+          <Search className="w-4 h-4 text-slate-500 dark:text-slate-400 flex-shrink-0" />
           <input
             type="text"
             value={mapSearchQuery}
             onChange={(e) => setMapSearchQuery(e.target.value)}
             placeholder="Search places, attractions, hotels, restaurants..."
-            className="flex-1 bg-transparent text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none min-w-0"
+            className="flex-1 bg-transparent text-sm font-medium text-slate-800 dark:text-slate-100 placeholder:text-slate-400 dark:placeholder:text-slate-500 focus:outline-none min-w-0"
           />
         </form>
 
@@ -833,9 +833,9 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
             <button
               key={chip.key}
               onClick={chip.onClick}
-              className="flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2 bg-white/95 backdrop-blur border border-slate-200 rounded-full shadow-md text-xs font-bold text-slate-700 hover:bg-white hover:shadow-lg active:scale-95 transition motion-reduce:transition-none"
+              className="flex-shrink-0 flex items-center gap-1.5 px-3.5 py-2 bg-white/95 border border-slate-200 rounded-full shadow-md text-xs font-bold text-slate-700 hover:bg-white hover:shadow-lg dark:bg-slate-900/95 dark:border-slate-800 dark:text-slate-250 dark:hover:bg-slate-800 active:scale-95 transition backdrop-blur motion-reduce:transition-none cursor-pointer"
             >
-              <chip.icon className="w-3.5 h-3.5 text-[#0B2447]" />
+              <chip.icon className="w-3.5 h-3.5 text-[#0B2447] dark:text-amber-500" />
               <span>{chip.label}</span>
             </button>
           ))}
@@ -849,7 +849,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
           disabled={locatingMe}
           title="Recenter on my location"
           aria-label="Recenter on my location"
-          className="w-11 h-11 rounded-full bg-white border border-slate-200 shadow-lg flex items-center justify-center text-[#0B2447] hover:bg-slate-50 active:scale-95 transition motion-reduce:transition-none disabled:opacity-60"
+          className="w-11 h-11 rounded-full bg-white border border-slate-200 shadow-lg flex items-center justify-center text-[#0B2447] hover:bg-slate-50 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800 active:scale-95 transition motion-reduce:transition-none disabled:opacity-60 cursor-pointer"
         >
           <LocateFixed className={`w-5 h-5 ${locatingMe ? 'animate-pulse' : ''}`} />
         </button>
@@ -858,14 +858,14 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
           onClick={handleSosFabClick}
           title="Emergency SOS"
           aria-label="Emergency SOS"
-          className="w-16 h-16 rounded-full bg-[#D32F2F] hover:bg-red-700 border-4 border-white shadow-xl flex flex-col items-center justify-center text-white active:scale-95 transition motion-reduce:transition-none"
+          className="w-16 h-16 rounded-full bg-[#D32F2F] hover:bg-red-700 border-4 border-white dark:border-slate-900 shadow-xl flex flex-col items-center justify-center text-white active:scale-95 transition motion-reduce:transition-none cursor-pointer"
         >
           <ShieldAlert className="w-6 h-6" />
           <span className="text-[9px] font-black tracking-wider mt-0.5">SOS</span>
         </button>
       </div>
 
-    <div className={`fixed inset-x-0 bottom-0 z-10 bg-[#F4F6F9] text-slate-900 w-full max-w-none flex flex-col rounded-t-3xl shadow-[0_-8px_30px_rgba(0,0,0,0.18)] border-t border-slate-200 transition-transform duration-300 ease-out motion-reduce:transition-none ${sheetExpanded ? 'translate-y-0' : 'translate-y-[calc(100%-96px)]'} max-h-[88vh] overflow-y-auto p-3 sm:p-5 pb-24`}>
+    <div className={`fixed inset-x-0 bottom-0 z-10 bg-[#F4F6F9] text-slate-900 w-full max-w-none flex flex-col rounded-t-3xl shadow-[0_-8px_30px_rgba(0,0,0,0.18)] border-t border-slate-200 transition-transform duration-300 ease-out motion-reduce:transition-none dark:bg-slate-950 dark:text-slate-100 dark:border-slate-900 dark:shadow-[0_-8px_30px_rgba(0,0,0,0.4)] ${sheetExpanded ? 'translate-y-0' : 'translate-y-[calc(100%-96px)]'} max-h-[88vh] overflow-y-auto p-3 sm:p-5 pb-24 transition-colors duration-200`}>
 
       {/* SHEET DRAG HANDLE / PEEK BAR — tap to expand/collapse the app panel over the map */}
       <button
@@ -873,21 +873,21 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
         className="w-full flex flex-col items-center gap-1.5 pt-1 pb-3 cursor-pointer group flex-shrink-0"
         aria-label={sheetExpanded ? 'Collapse panel' : 'Expand panel'}
       >
-        <span className="w-10 h-1.5 rounded-full bg-slate-300 group-hover:bg-slate-400 transition" />
-        <span className="text-[11px] font-bold text-slate-500 flex items-center gap-1">
+        <span className="w-10 h-1.5 rounded-full bg-slate-300 dark:bg-slate-800 group-hover:bg-slate-400 transition" />
+        <span className="text-[11px] font-bold text-slate-500 dark:text-slate-400 flex items-center gap-1">
           {authenticatedUser ? (sheetExpanded ? 'Hide panel' : 'Trips, Profile & Safety Tools') : (sheetExpanded ? 'Hide panel' : 'Sign in for personalized tools')}
           <ChevronUp className={`w-3.5 h-3.5 transition-transform motion-reduce:transition-none ${sheetExpanded ? 'rotate-180' : ''}`} />
         </span>
       </button>
 
       {/* GLOBAL TOP HEADER FOR TOURIST PORTAL */}
-      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm mb-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div className="bg-white border border-slate-200 rounded-2xl p-4 shadow-sm mb-6 flex flex-col sm:flex-row items-center justify-between gap-4 dark:bg-slate-900 dark:border-slate-800 transition-colors duration-200">
         <div className="flex items-center space-x-3 w-full sm:w-auto">
           {/* TOP LEFT PROFILE BUTTON (If Authenticated) */}
           {authenticatedUser && (
             <button
               onClick={() => setShowProfileModal(true)}
-              className="px-3 py-2 bg-[#0B2447] hover:bg-[#071933] text-white text-xs font-black rounded-2xl border-2 border-[#FF9933]/50 shadow-md transition flex items-center gap-2 cursor-pointer flex-shrink-0"
+              className="px-3 py-2 bg-[#0B2447] hover:bg-[#071933] text-white text-xs font-black rounded-2xl border-2 border-[#FF9933]/50 shadow-md transition flex items-center gap-2 cursor-pointer flex-shrink-0 dark:bg-slate-950 dark:border-slate-800"
               title="Click to view full Tourist Profile"
             >
               <img
@@ -903,19 +903,19 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
             </button>
           )}
 
-          <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-[#138808] flex items-center justify-center text-[#138808] flex-shrink-0 shadow-sm">
+          <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-[#138808] flex items-center justify-center text-[#138808] flex-shrink-0 shadow-sm dark:bg-emerald-950/20 dark:border-emerald-800">
             <ShieldCheck className="w-6 h-6" />
           </div>
           <div>
             <div className="flex items-center gap-2">
-              <h2 className="text-lg font-black text-[#0B2447]">
+              <h2 className="text-lg font-black text-[#0B2447] dark:text-white">
                 {t.touristPortalTitle}
               </h2>
-              <span className="px-2 py-0.5 rounded bg-emerald-100 text-[#138808] font-mono text-[10px] font-black border border-emerald-200">
+              <span className="px-2 py-0.5 rounded bg-emerald-100 text-[#138808] font-mono text-[10px] font-black border border-emerald-200 dark:bg-emerald-950/30 dark:text-emerald-400 dark:border-emerald-900/60">
                 OFFICIAL MOBILE
               </span>
             </div>
-            <p className="text-xs text-slate-500 font-medium">
+            <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
               Suraksha Setu • Government of India Tourist Safety App
             </p>
           </div>
@@ -928,7 +928,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
           {authenticatedUser && (
             <button
               onClick={() => setShowProfileModal(true)}
-              className="sm:hidden px-3 py-2 bg-[#0B2447] text-white text-xs font-black rounded-xl border border-slate-700 transition flex items-center gap-1.5"
+              className="sm:hidden px-3 py-2 bg-[#0B2447] text-white text-xs font-black rounded-xl border border-slate-700 transition flex items-center gap-1.5 dark:bg-slate-950 dark:border-slate-800 cursor-pointer"
             >
               <User className="w-4 h-4 text-[#FF9933]" />
               <span>Profile</span>
@@ -939,7 +939,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
           {onLanguageChange && (
             <button
               onClick={() => onLanguageChange(language === 'en' ? 'hi' : 'en')}
-              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl border border-slate-300 transition flex items-center gap-1.5"
+              className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl border border-slate-300 transition flex items-center gap-1.5 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 dark:border-slate-700 cursor-pointer"
             >
               <Globe className="w-4 h-4 text-[#FF9933]" />
               <span>{language === 'en' ? 'हिंदी (HI)' : 'English (EN)'}</span>
@@ -949,9 +949,9 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
           {/* Gateway Return Button */}
           <button
             onClick={onReturnToGateway}
-            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl border border-slate-300 transition flex items-center gap-1.5"
+            className="px-3 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 text-xs font-bold rounded-xl border border-slate-300 transition flex items-center gap-1.5 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-200 dark:border-slate-700 cursor-pointer"
           >
-            <ArrowLeft className="w-4 h-4 text-slate-600" />
+            <ArrowLeft className="w-4 h-4 text-slate-600 dark:text-slate-400" />
             <span>Gateway</span>
           </button>
 
@@ -959,9 +959,9 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
           {authenticatedUser && (
             <button
               onClick={handleSignOut}
-              className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-800 text-xs font-bold rounded-xl border border-red-200 transition flex items-center gap-1.5"
+              className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-800 text-xs font-bold rounded-xl border border-red-200 transition flex items-center gap-1.5 dark:bg-red-950/20 dark:hover:bg-red-950/40 dark:border-red-900/60 dark:text-red-300 cursor-pointer"
             >
-              <LogOut className="w-4 h-4 text-red-600" />
+              <LogOut className="w-4 h-4 text-red-600 dark:text-red-400" />
               <span>Logout</span>
             </button>
           )}
@@ -1690,22 +1690,25 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
           {/* ========================================================= */}
           {/* TAB 2: ITINERARY PLANNER */}
           {/* ========================================================= */}
+          {/* ========================================================= */}
+          {/* TAB 2: ITINERARY PLANNER */}
+          {/* ========================================================= */}
           {activeTab === 'itinerary' && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-6 text-left">
-              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-200">
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-6 text-left dark:bg-slate-900 dark:border-slate-800 transition-colors duration-200">
+              <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 pb-4 border-b border-slate-200 dark:border-slate-800">
                 <div>
-                  <h3 className="text-lg font-black text-[#0B2447] flex items-center gap-2">
+                  <h3 className="text-lg font-black text-[#0B2447] dark:text-slate-100 flex items-center gap-2">
                     <Calendar className="w-5 h-5 text-[#138808]" />
                     <span>Interactive Itinerary & Safety Checker</span>
                   </h3>
-                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                  <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
                     Manage trip destinations and hotel stays with AI-powered hazard evaluation.
                   </p>
                 </div>
 
                 <button
                   onClick={() => setShowAddItineraryModal(true)}
-                  className="px-4 py-2.5 bg-[#0B2447] hover:bg-[#071933] text-white text-xs font-extrabold rounded-xl shadow transition flex items-center gap-1.5"
+                  className="px-4 py-2.5 bg-[#0B2447] hover:bg-[#071933] text-white text-xs font-extrabold rounded-xl shadow transition flex items-center gap-1.5 dark:bg-slate-950 dark:hover:bg-slate-900 cursor-pointer"
                 >
                   <Plus className="w-4 h-4 text-[#FF9933]" />
                   <span>Add New Destination</span>
@@ -1717,43 +1720,43 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
                 {itinerary.map((item, idx) => (
                   <div
                     key={item.id}
-                    className="p-4 rounded-2xl border-2 border-slate-200 bg-slate-50 hover:bg-white hover:border-slate-300 transition shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4"
+                    className="p-4 rounded-2xl border-2 border-slate-200 bg-slate-50 hover:bg-white hover:border-slate-300 dark:border-slate-800 dark:bg-slate-950 dark:hover:bg-slate-900 dark:hover:border-slate-700 transition shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4"
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2 flex-wrap">
                         <span className="w-6 h-6 rounded-full bg-[#0B2447] text-white text-[11px] font-black flex items-center justify-center">
                           {idx + 1}
                         </span>
-                        <h4 className="text-sm font-black text-slate-900">{item.destination}</h4>
+                        <h4 className="text-sm font-black text-slate-900 dark:text-white">{item.destination}</h4>
                         
                         {/* Status Badge */}
                         {item.safetyStatus === 'Safe Corridor' && (
-                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-[#138808] border border-emerald-300 text-[10px] font-black flex items-center gap-1">
+                          <span className="px-2.5 py-0.5 rounded-full bg-emerald-100 text-[#138808] border border-emerald-300 dark:bg-emerald-950/40 dark:text-emerald-400 dark:border-emerald-900/50 text-[10px] font-black flex items-center gap-1">
                             <ShieldCheck className="w-3 h-3 text-[#138808]" /> Safe Corridor
                           </span>
                         )}
                         {item.safetyStatus === 'Weather Advisory' && (
-                          <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 text-[10px] font-black flex items-center gap-1">
+                          <span className="px-2.5 py-0.5 rounded-full bg-amber-100 text-amber-900 border border-amber-300 dark:bg-amber-950/40 dark:text-amber-400 dark:border-amber-900/50 text-[10px] font-black flex items-center gap-1">
                             <AlertTriangle className="w-3 h-3 text-amber-600" /> Weather Advisory
                           </span>
                         )}
                         {item.safetyStatus === 'High Risk Zone' && (
-                          <span className="px-2.5 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-300 text-[10px] font-black flex items-center gap-1">
+                          <span className="px-2.5 py-0.5 rounded-full bg-red-100 text-red-800 border border-red-300 dark:bg-red-950/40 dark:text-red-400 dark:border-red-900/50 text-[10px] font-black flex items-center gap-1">
                             <ShieldAlert className="w-3 h-3 text-red-600" /> High Risk Pass
                           </span>
                         )}
                       </div>
 
-                      <div className="text-xs text-slate-600 font-medium flex flex-wrap gap-x-4 gap-y-1 pt-1">
+                      <div className="text-xs text-slate-600 dark:text-slate-400 font-medium flex flex-wrap gap-x-4 gap-y-1 pt-1">
                         <span className="flex items-center gap-1">
-                          <Clock className="w-3.5 h-3.5 text-slate-400" /> Date: <strong>{item.date}</strong>
+                          <Clock className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" /> Date: <strong className="text-slate-800 dark:text-slate-200">{item.date}</strong>
                         </span>
                         <span className="flex items-center gap-1">
-                          <Hotel className="w-3.5 h-3.5 text-slate-400" /> Hotel: <strong>{item.hotel}</strong>
+                          <Hotel className="w-3.5 h-3.5 text-slate-400 dark:text-slate-500" /> Hotel: <strong className="text-slate-800 dark:text-slate-200">{item.hotel}</strong>
                         </span>
                       </div>
 
-                      <p className="text-xs text-slate-500 italic pt-0.5">
+                      <p className="text-xs text-slate-500 dark:text-slate-400 italic pt-0.5">
                         Activities: {item.activities}
                       </p>
                     </div>
@@ -1761,7 +1764,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
                     <div className="flex items-center gap-2 self-end md:self-center">
                       <button
                         onClick={() => handleDeleteItinerary(item.id)}
-                        className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs transition"
+                        className="p-2 rounded-lg bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 text-xs transition dark:bg-red-950/20 dark:hover:bg-red-950/40 dark:border-red-900 dark:text-red-400 cursor-pointer"
                         title="Delete destination"
                       >
                         <X className="w-4 h-4" />
@@ -1915,28 +1918,31 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
           {/* ========================================================= */}
           {/* TAB 4: ROUTE FINDER MAP */}
           {/* ========================================================= */}
+          {/* ========================================================= */}
+          {/* TAB 4: ROUTE FINDER MAP */}
+          {/* ========================================================= */}
           {activeTab === 'route_finder' && (
-            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-6 text-left">
+            <div className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm space-y-6 text-left dark:bg-slate-900 dark:border-slate-800 transition-colors duration-200">
               <div>
-                <h3 className="text-lg font-black text-[#0B2447] flex items-center gap-2">
-                  <Navigation className="w-5 h-5 text-blue-600" />
+                <h3 className="text-lg font-black text-[#0B2447] dark:text-slate-100 flex items-center gap-2">
+                  <Navigation className="w-5 h-5 text-blue-600 dark:text-blue-400" />
                   <span>Interactive Safe Route Finder & Hazard Avoidance</span>
                 </h3>
-                <p className="text-xs text-slate-500 font-medium mt-0.5">
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium mt-0.5">
                   Calculate safest mountain transit corridors with real-time landslide & black ice warnings.
                 </p>
               </div>
 
               {/* Route Search Controls */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 bg-slate-50 p-4 rounded-2xl border border-slate-200 dark:bg-slate-950 dark:border-slate-850">
                 <div>
-                  <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                  <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-350 mb-1">
                     Starting Origin
                   </label>
                   <select
                     value={routeOrigin}
                     onChange={(e) => setRouteOrigin(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-300 text-slate-900 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-300 text-slate-900 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-100"
                   >
                     <option value="Manali Town">Manali Town Center</option>
                     <option value="Solang Valley">Solang Valley Base</option>
@@ -1945,13 +1951,13 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
                 </div>
 
                 <div>
-                  <label className="block text-xs font-extrabold text-slate-700 mb-1">
+                  <label className="block text-xs font-extrabold text-slate-700 dark:text-slate-350 mb-1">
                     Target Destination
                   </label>
                   <select
                     value={routeDest}
                     onChange={(e) => setRouteDest(e.target.value)}
-                    className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-300 text-slate-900 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    className="w-full px-3.5 py-2.5 rounded-xl bg-white border border-slate-300 text-slate-900 text-xs font-bold focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-slate-900 dark:border-slate-800 dark:text-slate-100"
                   >
                     <option value="Sissu / Lahaul Valley">Sissu / Lahaul Valley (via Atal Tunnel)</option>
                     <option value="Kasol / Parvati Valley">Kasol / Parvati Valley</option>
@@ -1961,51 +1967,51 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
               </div>
 
               {/* Route Result Card */}
-              <div className="space-y-4">
-                <div className="p-5 rounded-2xl bg-blue-50/80 border-2 border-blue-300 space-y-4">
-                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-blue-200 pb-3">
+              <div className="space-y-4 font-sans">
+                <div className="p-5 rounded-2xl bg-blue-50/80 border-2 border-blue-300 space-y-4 dark:bg-blue-950/20 dark:border-blue-900/60">
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 border-b border-blue-200 dark:border-blue-900/40 pb-3">
                     <div>
                       <span className="px-2.5 py-0.5 rounded bg-blue-600 text-white text-[10px] font-black uppercase">
                         RECOMMENDED SAFE CORRIDOR
                       </span>
-                      <h4 className="text-base font-black text-slate-900 mt-1">
+                      <h4 className="text-base font-black text-slate-900 dark:text-white mt-1">
                         {routeOrigin} ➔ {routeDest}
                       </h4>
                     </div>
 
                     <div className="text-right">
-                      <div className="text-sm font-black text-[#0B2447]">Distance: 28.4 km</div>
-                      <div className="text-xs text-blue-800 font-bold">Est. Travel Time: 45 mins</div>
+                      <div className="text-sm font-black text-[#0B2447] dark:text-slate-100">Distance: 28.4 km</div>
+                      <div className="text-xs text-blue-800 dark:text-blue-300 font-bold">Est. Travel Time: 45 mins</div>
                     </div>
                   </div>
 
                   {/* Route Safety Milestones */}
                   <div className="space-y-2 text-xs">
-                    <div className="font-extrabold text-slate-800 uppercase tracking-wider text-[11px]">
+                    <div className="font-extrabold text-slate-800 dark:text-slate-200 uppercase tracking-wider text-[11px]">
                       Turn-by-Turn Police & Emergency Milestones:
                     </div>
 
-                    <div className="flex items-center space-x-3 p-2.5 bg-white rounded-xl border border-blue-200">
+                    <div className="flex items-center space-x-3 p-2.5 bg-white border border-blue-200 rounded-xl dark:bg-slate-900 dark:border-blue-900/40 transition-colors duration-200">
                       <ShieldCheck className="w-4 h-4 text-[#138808] flex-shrink-0" />
                       <div>
-                        <div className="font-bold text-slate-900">Km 0.0 — Manali Police Post Checkpoint</div>
-                        <div className="text-[11px] text-slate-600">Verification & e-Pass Scanner station</div>
+                        <div className="font-bold text-slate-900 dark:text-white">Km 0.0 — Manali Police Post Checkpoint</div>
+                        <div className="text-[11px] text-slate-600 dark:text-slate-400">Verification & e-Pass Scanner station</div>
                       </div>
                     </div>
 
-                    <div className="flex items-center space-x-3 p-2.5 bg-white rounded-xl border border-blue-200">
+                    <div className="flex items-center space-x-3 p-2.5 bg-white border border-blue-200 rounded-xl dark:bg-slate-900 dark:border-blue-900/40 transition-colors duration-200">
                       <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0" />
                       <div>
-                        <div className="font-bold text-slate-900">Km 14.2 — Solang Nullah Bypass (Black Ice Warning)</div>
-                        <div className="text-[11px] text-amber-800">Drive at max 30 km/h due to morning frost on asphalt</div>
+                        <div className="font-bold text-slate-900 dark:text-white">Km 14.2 — Solang Nullah Bypass (Black Ice Warning)</div>
+                        <div className="text-[11px] text-amber-800 dark:text-amber-300">Drive at max 30 km/h due to morning frost on asphalt</div>
                       </div>
                     </div>
 
-                    <div className="flex items-center space-x-3 p-2.5 bg-white rounded-xl border border-blue-200">
+                    <div className="flex items-center space-x-3 p-2.5 bg-white border border-blue-200 rounded-xl dark:bg-slate-900 dark:border-blue-900/40 transition-colors duration-200">
                       <ShieldCheck className="w-4 h-4 text-blue-600 flex-shrink-0" />
                       <div>
-                        <div className="font-bold text-slate-900">Km 28.4 — Atal Tunnel South Portal PCR Van Unit 2</div>
-                        <div className="text-[11px] text-slate-600">24/7 Patrol Unit stationed with Medical First Aid</div>
+                        <div className="font-bold text-slate-900 dark:text-white">Km 28.4 — Atal Tunnel South Portal PCR Van Unit 2</div>
+                        <div className="text-[11px] text-slate-600 dark:text-slate-400">24/7 Patrol Unit stationed with Medical First Aid</div>
                       </div>
                     </div>
                   </div>
@@ -2041,39 +2047,39 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
 
       {/* EMERGENCY CONTACTS SLIDE-UP DRAWER */}
       {showContactsDrawer && (
-        <div className="fixed bottom-20 left-4 right-4 sm:left-6 sm:right-auto sm:w-96 z-40 bg-white border-2 border-[#0B2447] rounded-3xl p-5 shadow-2xl space-y-4 text-left animate-fade-in">
-          <div className="flex items-center justify-between pb-2 border-b border-slate-200">
-            <h4 className="text-sm font-black text-[#0B2447] flex items-center gap-2">
-              <PhoneCall className="w-4 h-4 text-red-600" />
+        <div className="fixed bottom-20 left-4 right-4 sm:left-6 sm:right-auto sm:w-96 z-40 bg-white border-2 border-[#0B2447] rounded-3xl p-5 shadow-2xl space-y-4 text-left animate-fade-in dark:bg-slate-900 dark:border-slate-800 text-slate-900 dark:text-white transition-colors duration-200">
+          <div className="flex items-center justify-between pb-2 border-b border-slate-200 dark:border-slate-800">
+            <h4 className="text-sm font-black text-[#0B2447] dark:text-slate-100 flex items-center gap-2">
+              <PhoneCall className="w-4 h-4 text-red-600 dark:text-red-400" />
               <span>Government Emergency Hotlines</span>
             </h4>
-            <button onClick={() => setShowContactsDrawer(false)} className="p-1 rounded hover:bg-slate-100">
-              <X className="w-4 h-4 text-slate-500" />
+            <button onClick={() => setShowContactsDrawer(false)} className="p-1 rounded hover:bg-slate-100 dark:hover:bg-slate-850">
+              <X className="w-4 h-4 text-slate-500 dark:text-slate-400" />
             </button>
           </div>
 
           <div className="grid grid-cols-2 gap-2 text-xs font-bold">
-            <a href="tel:112" className="p-2.5 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl flex items-center space-x-2 text-red-900 transition">
+            <a href="tel:112" className="p-2.5 bg-red-50 hover:bg-red-100 border border-red-200 rounded-xl flex items-center space-x-2 text-red-900 transition dark:bg-red-950/20 dark:hover:bg-red-950/40 dark:border-red-900/60 dark:text-red-300">
               <span className="w-6 h-6 rounded bg-red-600 text-white font-black flex items-center justify-center text-[10px]">112</span>
               <span>National Emergency</span>
             </a>
-            <a href="tel:100" className="p-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl flex items-center space-x-2 text-blue-900 transition">
+            <a href="tel:100" className="p-2.5 bg-blue-50 hover:bg-blue-100 border border-blue-200 rounded-xl flex items-center space-x-2 text-blue-900 transition dark:bg-blue-950/20 dark:hover:bg-blue-950/40 dark:border-blue-900/60 dark:text-blue-300">
               <span className="w-6 h-6 rounded bg-blue-600 text-white font-black flex items-center justify-center text-[10px]">100</span>
               <span>Police Control</span>
             </a>
-            <a href="tel:108" className="p-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl flex items-center space-x-2 text-emerald-900 transition">
+            <a href="tel:108" className="p-2.5 bg-emerald-50 hover:bg-emerald-100 border border-emerald-200 rounded-xl flex items-center space-x-2 text-emerald-900 transition dark:bg-emerald-950/20 dark:hover:bg-emerald-950/40 dark:border-emerald-900/60 dark:text-emerald-300">
               <span className="w-6 h-6 rounded bg-emerald-600 text-white font-black flex items-center justify-center text-[10px]">108</span>
               <span>Ambulance</span>
             </a>
-            <a href="tel:1363" className="p-2.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl flex items-center space-x-2 text-amber-900 transition">
+            <a href="tel:1363" className="p-2.5 bg-amber-50 hover:bg-amber-100 border border-amber-200 rounded-xl flex items-center space-x-2 text-amber-900 transition dark:bg-amber-950/20 dark:hover:bg-amber-950/40 dark:border-amber-900/60 dark:text-amber-300">
               <span className="w-6 h-6 rounded bg-[#FF9933] text-white font-black flex items-center justify-center text-[10px]">1363</span>
               <span>Tourist Helpline</span>
             </a>
-            <a href="tel:1091" className="p-2.5 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl flex items-center space-x-2 text-purple-900 transition">
+            <a href="tel:1091" className="p-2.5 bg-purple-50 hover:bg-purple-100 border border-purple-200 rounded-xl flex items-center space-x-2 text-purple-900 transition dark:bg-purple-950/20 dark:hover:bg-purple-950/40 dark:border-purple-900/60 dark:text-purple-300">
               <span className="w-6 h-6 rounded bg-purple-600 text-white font-black flex items-center justify-center text-[10px]">1091</span>
               <span>Women Helpline</span>
             </a>
-            <a href="tel:1070" className="p-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl flex items-center space-x-2 text-slate-900 transition">
+            <a href="tel:1070" className="p-2.5 bg-slate-100 hover:bg-slate-200 border border-slate-300 rounded-xl flex items-center space-x-2 text-slate-900 transition dark:bg-slate-850 dark:hover:bg-slate-800 dark:border-slate-800 dark:text-slate-200">
               <span className="w-6 h-6 rounded bg-slate-800 text-white font-black flex items-center justify-center text-[10px]">1070</span>
               <span>Disaster Control</span>
             </a>
@@ -2300,37 +2306,37 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
       {/* MODAL 1: DIGILOCKER E-KYC CONNECT MODAL */}
       {showDigiLockerModal && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-fade-in">
-          <div className="bg-white border-2 border-[#138808] rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative text-left animate-scale-in">
+          <div className="bg-white dark:bg-slate-900 border-2 border-[#138808] rounded-3xl max-w-lg w-full p-6 sm:p-8 shadow-2xl relative text-left animate-scale-in transition-colors duration-200">
             <button
               onClick={() => setShowDigiLockerModal(false)}
-              className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 text-slate-500"
+              className="absolute top-4 right-4 p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-500 dark:text-slate-400"
             >
               <X className="w-5 h-5" />
             </button>
 
             <div className="flex items-center space-x-3 mb-6">
-              <div className="w-12 h-12 rounded-2xl bg-emerald-50 border border-[#138808] flex items-center justify-center text-[#138808] shadow-sm">
+              <div className="w-12 h-12 rounded-2xl bg-emerald-50 dark:bg-emerald-950/20 border border-[#138808] flex items-center justify-center text-[#138808] shadow-sm">
                 <FileCheck className="w-7 h-7 text-[#138808]" />
               </div>
               <div>
-                <h3 className="text-xl font-black text-slate-900">
+                <h3 className="text-xl font-black text-slate-900 dark:text-white">
                   DigiLocker Identity OAuth
                 </h3>
-                <p className="text-xs text-slate-500 font-medium">
+                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">
                   Government of India National e-Governance Division (NeGD)
                 </p>
               </div>
             </div>
 
             {digiLockerStep === 'connect' && (
-              <div className="space-y-4">
-                <p className="text-xs text-slate-600 leading-relaxed font-medium">
+              <div className="space-y-4 font-sans">
+                <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed font-medium">
                   By clicking below, you grant Suraksha Setu one-time OAuth consent to retrieve your verified e-KYC credentials.
                 </p>
 
                 <button
                   onClick={handleConnectDigiLocker}
-                  className="w-full py-3.5 rounded-xl bg-[#138808] hover:bg-emerald-800 text-white font-black text-sm transition shadow-lg flex items-center justify-center gap-2"
+                  className="w-full py-3.5 rounded-xl bg-[#138808] hover:bg-emerald-800 text-white font-black text-sm transition shadow-lg flex items-center justify-center gap-2 cursor-pointer"
                 >
                   <ExternalLink className="w-4 h-4" />
                   <span>Authenticate & Fetch DigiLocker Records</span>
@@ -2339,17 +2345,35 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
             )}
 
             {digiLockerStep === 'loading' && (
-              <div className="py-12 text-center space-y-4">
-                <RefreshCw className="w-10 h-10 text-[#138808] animate-spin mx-auto" />
-                <p className="text-sm font-bold text-slate-800">
-                  Connecting to Government DigiLocker Identity Vault...
-                </p>
+              <div className="py-2 space-y-4 animate-pulse">
+                {/* Skeleton Card mimicking final layout dimensions */}
+                <div className="p-4 bg-slate-100 dark:bg-slate-800/60 rounded-2xl border border-slate-200 dark:border-slate-800 flex items-center space-x-4">
+                  {/* Photo Placeholder */}
+                  <div className="w-16 h-16 rounded-2xl bg-slate-200 dark:bg-slate-700 flex-shrink-0"></div>
+                  {/* Text details placeholder */}
+                  <div className="flex-1 space-y-2">
+                    <div className="h-3 w-28 bg-slate-200 dark:bg-slate-700 rounded-md"></div>
+                    <div className="h-4.5 w-36 bg-slate-200 dark:bg-slate-700 rounded-md"></div>
+                    <div className="h-3 w-44 bg-slate-200 dark:bg-slate-700 rounded-md"></div>
+                  </div>
+                </div>
+
+                {/* Fetching Telemetry status */}
+                <div className="flex items-center justify-center space-x-2 py-2">
+                  <RefreshCw className="w-4 h-4 text-[#138808] animate-spin" />
+                  <span className="text-xs font-bold text-slate-600 dark:text-slate-400">
+                    Retrieving credentials from National e-KYC Vault...
+                  </span>
+                </div>
+
+                {/* Button Placeholder */}
+                <div className="h-12 w-full bg-slate-200 dark:bg-slate-800 rounded-xl"></div>
               </div>
             )}
 
             {digiLockerStep === 'fetched' && (
               <div className="space-y-5 animate-fade-in">
-                <div className="p-4 bg-emerald-50 rounded-2xl border border-emerald-300 flex items-center space-x-4">
+                <div className="p-4 bg-emerald-50 dark:bg-emerald-950/20 rounded-2xl border border-emerald-300 dark:border-emerald-900/60 flex items-center space-x-4">
                   <img
                     src="https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&q=80&w=300"
                     alt="Verified Photo"
@@ -2359,14 +2383,14 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
                     <div className="px-2 py-0.5 rounded bg-[#138808] text-white text-[10px] font-black inline-block mb-1">
                       DIGILOCKER VERIFIED E-KYC
                     </div>
-                    <div className="text-sm font-extrabold text-slate-900">{fullName || 'Tourist'}</div>
-                    <div className="text-xs text-slate-600 font-mono">Aadhaar No: XXXX-XXXX-4912</div>
+                    <div className="text-sm font-extrabold text-slate-900 dark:text-white">{fullName || 'Tourist'}</div>
+                    <div className="text-xs text-slate-600 dark:text-slate-400 font-mono">Aadhaar No: XXXX-XXXX-4912</div>
                   </div>
                 </div>
 
                 <button
                   onClick={handleConfirmDigiLocker}
-                  className="w-full py-3.5 rounded-xl bg-[#0B2447] hover:bg-[#071933] text-white font-black text-sm transition shadow-lg"
+                  className="w-full py-3.5 rounded-xl bg-[#0B2447] hover:bg-[#071933] text-white font-black text-sm transition shadow-lg cursor-pointer"
                 >
                   Attach Verified DigiLocker Badge
                 </button>
@@ -2687,7 +2711,7 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
       {/* BOTTOM NAVIGATION — Map is the default/home tab; Explore, Trips and
           Profile reuse the existing tab/modal state above; protected tabs
           route through the existing sign-in sheet when signed out. */}
-      <nav className="fixed bottom-0 inset-x-0 z-20 bg-white/95 backdrop-blur border-t border-slate-200 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] px-2 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))]">
+      <nav className="fixed bottom-0 inset-x-0 z-20 bg-white/95 border-t border-slate-200 shadow-[0_-4px_20px_rgba(0,0,0,0.08)] px-2 pt-1.5 pb-[max(0.375rem,env(safe-area-inset-bottom))] dark:bg-slate-950/95 dark:border-slate-900 dark:shadow-[0_-4px_20px_rgba(0,0,0,0.4)] backdrop-blur transition-colors duration-200">
         <div className="max-w-md mx-auto grid grid-cols-5 gap-1">
           {[
             { key: 'map', label: 'Map', icon: Map, onClick: () => { setSheetExpanded(false); setActiveTab('overview'); } },
@@ -2696,13 +2720,21 @@ export const TouristPortal: React.FC<TouristPortalProps> = ({
             { key: 'alerts', label: 'Alerts', icon: Bell, onClick: () => { setSheetExpanded(true); handleTriggerSimulatedAlert(); } },
             { key: 'profile', label: 'Profile', icon: User, onClick: () => handleProtectedAction(() => setShowProfileModal(true)) },
           ].map((navItem) => {
-            const isMapTab = navItem.key === 'map' && !sheetExpanded;
+            const isActive =
+              (navItem.key === 'map' && !sheetExpanded) ||
+              (navItem.key === 'explore' && activeTab === 'heatmap' && sheetExpanded) ||
+              (navItem.key === 'trips' && activeTab === 'itinerary' && sheetExpanded) ||
+              (navItem.key === 'alerts' && activeBroadcastModal !== null) ||
+              (navItem.key === 'profile' && showProfileModal);
+
             return (
               <button
                 key={navItem.key}
                 onClick={navItem.onClick}
                 className={`flex flex-col items-center gap-0.5 py-1.5 rounded-xl text-[10px] font-bold transition active:scale-95 motion-reduce:transition-none ${
-                  isMapTab ? 'text-[#0B2447] bg-slate-100' : 'text-slate-500 hover:text-[#0B2447] hover:bg-slate-50'
+                  isActive
+                    ? 'text-[#0B2447] bg-slate-100 dark:text-[#FF9933] dark:bg-slate-900'
+                    : 'text-slate-500 hover:text-[#0B2447] hover:bg-slate-50 dark:text-slate-400 dark:hover:text-slate-200 dark:hover:bg-slate-900/50'
                 }`}
               >
                 <navItem.icon className="w-5 h-5" />

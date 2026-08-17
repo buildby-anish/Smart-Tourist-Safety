@@ -49,6 +49,15 @@ import {
 export default function App() {
   const [language, setLanguage] = useState<Language>('en');
   const [darkMode, setDarkMode] = useState<boolean>(false);
+
+  // Sync dark mode class to root HTML element for Tailwind CSS v4 class-based selector
+  useEffect(() => {
+    if (darkMode) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [darkMode]);
   // Map-first landing: open straight into the Tourist Portal (map home
   // screen) instead of the old Gateway role-picker/login screen. Gateway
   // (including the real authority MFA login) is still fully intact and
