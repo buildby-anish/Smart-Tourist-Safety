@@ -180,6 +180,7 @@ export default function ProfilePanel({ darkMode: dm, toggleDark, isAuthenticated
             >
               Sign in
             </button>
+          </div>
         )}
       </div>
 
