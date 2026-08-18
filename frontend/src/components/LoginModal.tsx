@@ -4,6 +4,7 @@ import {
   Loader2, Phone, Hash, ArrowLeft, Wifi, WifiOff,
   Shield,
 } from 'lucide-react'
+import { api } from '../lib/api'
 
 type Step = 'credentials' | 'otp' | 'verifying' | 'success' | 'error'
 type FieldErrors = { touristId?: string; phone?: string; otp?: string }
@@ -59,19 +60,16 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm }: P
   const handleContinue = async () => {
     if (!validate()) return
     setLoading(true); setGenErr('')
-    await new Promise((r) => setTimeout(r, 1100))
-    setLoading(false)
-    if (touristId.trim().toUpperCase() === 'INVALID') {
-      setGenErr('Tourist ID not registered. Please check your ID or contact the tourism office.')
-      return
+    try {
+      await api.sendOtp(phone.trim())
+      setStep('otp')
+      startResend()
+      setTimeout(() => otpRefs.current[0]?.focus(), 80)
+    } catch (err: any) {
+      setGenErr(err.message || 'Failed to send OTP. Please try again.')
+    } finally {
+      setLoading(false)
     }
-    if (touristId.trim().toUpperCase() === 'NETERR') {
-      setGenErr('Network error. Check your connection and try again.')
-      return
-    }
-    setStep('otp')
-    startResend()
-    setTimeout(() => otpRefs.current[0]?.focus(), 80)
   }
 
   const handleOtp = (i: number, val: string) => {
@@ -91,14 +89,52 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm }: P
     const code = otp.join('')
     if (code.length < 6) { setErrs({ otp: 'Enter all 6 digits' }); return }
     setStep('verifying')
-    await new Promise((r) => setTimeout(r, 1600))
-    if (code === '000000') {
+    try {
+      await api.verifyOtp(phone.trim(), code)
+      
+      // Attempt login
+      let loginRes;
+      try {
+        loginRes = await api.login(touristId.trim(), phone.trim())
+      } catch (loginErr: any) {
+        // If profile not found, register new tourist
+        if (
+          loginErr.message.includes('not found') || 
+          loginErr.message.includes('Linked profile not found') || 
+          loginErr.message.includes('401') || 
+          loginErr.message.includes('Invalid username')
+        ) {
+          try {
+            await api.register(touristId.trim(), phone.trim())
+            loginRes = await api.login(touristId.trim(), phone.trim())
+          } catch (regErr: any) {
+            throw new Error(`Registration failed: ${regErr.message}`)
+          }
+        } else {
+          throw loginErr;
+        }
+      }
+      
+      if (loginRes && loginRes.access_token) {
+        localStorage.setItem('suraksha_setu_token', loginRes.access_token)
+        if (loginRes.tourist_id) {
+          localStorage.setItem('suraksha_setu_tourist_id', loginRes.tourist_id)
+          // Update phone number on backend profile
+          try {
+            await api.updateProfile(loginRes.tourist_id, { phone: phone.trim() })
+          } catch (e) {
+            console.error("Failed to update profile phone:", e)
+          }
+        }
+        setStep('success')
+        setTimeout(() => onAuthenticated(loginRes.tourist_id || touristId.trim()), 1000)
+      } else {
+        throw new Error('Failed to retrieve authentication token.')
+      }
+    } catch (err: any) {
       setStep('otp')
-      setErrs({ otp: 'Invalid verification code. Please try again.' })
-      return
+      setErrs({ otp: err.message || 'Verification failed. Please try again.' })
     }
-    setStep('success')
-    setTimeout(() => onAuthenticated(touristId.trim()), 1000)
   }
 
   const handleResend = () => {

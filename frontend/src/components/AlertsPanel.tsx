@@ -1,5 +1,6 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { AlertTriangle, Users, Shield, Bell, ChevronRight, X, CheckCircle2, Clock, MapPin } from 'lucide-react'
+import { api } from '../lib/api'
 
 type Severity = 'high' | 'medium' | 'low' | 'info'
 
@@ -89,11 +90,38 @@ const TYPE_ICON: Record<Alert['type'], typeof AlertTriangle> = {
 
 interface Props {
   darkMode: boolean
+  isAuthenticated: boolean
 }
 
-export default function AlertsPanel({ darkMode: dm }: Props) {
-  const [alerts, setAlerts] = useState(ALERTS)
+export default function AlertsPanel({ darkMode: dm, isAuthenticated }: Props) {
+  const [alerts, setAlerts] = useState<Alert[]>(ALERTS)
   const [filter, setFilter] = useState<Severity | 'all'>('all')
+
+  useEffect(() => {
+    const fetchDbAlerts = async () => {
+      if (!isAuthenticated) return
+      try {
+        const dbAlerts = await api.getAlerts()
+        if (dbAlerts && dbAlerts.length > 0) {
+          const mapped: Alert[] = dbAlerts.map((da: any) => ({
+            id: da.alert_id,
+            title: `Alert dispatched via ${da.channel}`,
+            body: `An emergency notification was successfully sent to contact: ${da.recipient || 'N/A'}. Linked incident ID: ${da.incident_id}`,
+            location: 'System Dispatch',
+            dist: '—',
+            time: new Date(da.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            severity: 'high',
+            read: false,
+            type: 'safety',
+          }))
+          setAlerts([...mapped, ...ALERTS])
+        }
+      } catch (e) {
+        console.warn("Failed to fetch alerts from DB, showing defaults:", e)
+      }
+    }
+    fetchDbAlerts()
+  }, [isAuthenticated])
 
   const markRead = (id: string) =>
     setAlerts((a) => a.map((x) => (x.id === id ? { ...x, read: true } : x)))

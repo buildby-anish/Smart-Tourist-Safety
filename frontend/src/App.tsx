@@ -13,12 +13,22 @@ import BottomNav from './components/BottomNav'
 import ExplorePanel from './components/ExplorePanel'
 import AlertsPanel from './components/AlertsPanel'
 import ProfilePanel from './components/ProfilePanel'
+import TripsPanel from './components/TripsPanel'
 import MapLegend from './components/MapLegend'
 import SafetyBanner from './components/SafetyBanner'
 import { SkeletonMap } from './components/SkeletonLoader'
+import { api } from './lib/api'
 
 type Tab = 'map' | 'explore' | 'trips' | 'alerts' | 'profile'
-interface AuthUser { id: string }
+interface AuthUser {
+  id: string;
+  fullName?: string;
+  phone?: string;
+  email?: string;
+  preferredLanguage?: string;
+  emergencyContact?: string;
+  kycVerified?: boolean;
+}
 
 // ─── Toast ──────────────────────────────────────────────────────────────────
 function Toast({ msg, color }: { msg: string; color?: string }) {
@@ -142,7 +152,37 @@ export default function App() {
   const [toast, setToast]             = useState<{ msg: string; color?: string } | null>(null)
   const [zoom, setZoom]               = useState(14)
 
-  useEffect(() => { const t = setTimeout(() => setBooting(false), 1500); return () => clearTimeout(t) }, [])
+  const [activeIncidentId, setActiveIncidentId] = useState<string | null>(null)
+
+  useEffect(() => {
+    const initSession = async () => {
+      const token = localStorage.getItem('suraksha_setu_token')
+      if (token) {
+        try {
+          const session = await api.getSession()
+          if (session && session.tourist_id) {
+            const profile = await api.getProfile(session.tourist_id)
+            setUser({
+              id: session.tourist_id,
+              fullName: profile.full_name,
+              phone: profile.phone || undefined,
+              email: profile.email || undefined,
+              preferredLanguage: profile.preferred_language || undefined,
+              emergencyContact: profile.emergency_contact || undefined,
+              kycVerified: profile.kyc_verified,
+            })
+            setAuth(true)
+          }
+        } catch (e) {
+          console.error("Session restoration failed:", e)
+          localStorage.removeItem('suraksha_setu_token')
+          localStorage.removeItem('suraksha_setu_tourist_id')
+        }
+      }
+      setBooting(false)
+    }
+    initSession()
+  }, [])
 
   useEffect(() => {
     const check = () => setIsMobile(window.innerWidth < 768)
@@ -156,16 +196,40 @@ export default function App() {
     setTimeout(() => setToast(null), ms)
   }
 
-  const handleAuth = (id: string) => {
-    setUser({ id })
-    setAuth(true)
-    setShowLogin(false)
-    showToast('✓ Signed in successfully', '#138808')
+  const handleAuth = async (id: string) => {
+    try {
+      const profile = await api.getProfile(id)
+      setUser({
+        id: profile.tourist_id,
+        fullName: profile.full_name,
+        phone: profile.phone || undefined,
+        email: profile.email || undefined,
+        preferredLanguage: profile.preferred_language || undefined,
+        emergencyContact: profile.emergency_contact || undefined,
+        kycVerified: profile.kyc_verified,
+      })
+      setAuth(true)
+      setShowLogin(false)
+      showToast('✓ Signed in successfully', '#138808')
+    } catch (e) {
+      console.error("Failed to load profile:", e)
+      setUser({ id })
+      setAuth(true)
+      setShowLogin(false)
+      showToast('✓ Signed in successfully', '#138808')
+    }
   }
 
   const handleLogout = () => {
+    localStorage.removeItem('suraksha_setu_token')
+    localStorage.removeItem('suraksha_setu_tourist_id')
     setAuth(false); setUser(null); setProfileOpen(false); setTab('map')
     showToast('Signed out')
+  }
+
+  const handleProfileUpdate = (updatedUser: Partial<AuthUser>) => {
+    setUser((prev) => prev ? { ...prev, ...updatedUser } : null)
+    showToast('✓ Profile updated', '#138808')
   }
 
   const handleProtected = useCallback((t: string) => {
@@ -173,7 +237,43 @@ export default function App() {
     setTab(t as Tab)
   }, [auth])
 
-  const handleSOS     = () => showToast('🚨 SOS sent — Emergency services alerted', '#dc2626', 5000)
+  const handleSOS = async () => {
+    if (!auth || !user) {
+      showToast('⚠️ Please sign in to trigger SOS', '#d97706')
+      setShowLogin(true)
+      return
+    }
+    showToast('🚨 Triggering SOS...', '#dc2626', 1500)
+    let lat = 18.9220
+    let lon = 72.8347
+    if (navigator.geolocation) {
+      try {
+        const pos = await new Promise<GeolocationPosition>((resolve, reject) => {
+          navigator.geolocation.getCurrentPosition(resolve, reject, { timeout: 4000 })
+        })
+        lat = pos.coords.latitude
+        lon = pos.coords.longitude
+      } catch (err) {
+        console.warn("Geolocation failed, using fallback:", err)
+      }
+    }
+    try {
+      const res = await api.triggerSOS({
+        tourist_id: user.id,
+        latitude: lat,
+        longitude: lon,
+        description: 'SOS active from tourist mobile portal',
+      })
+      if (res && res.incident_id) {
+        setActiveIncidentId(res.incident_id)
+        showToast('🚨 EMERGENCY SOS ACTIVE — Responders Alerted', '#dc2626', 5000)
+      }
+    } catch (e: any) {
+      console.error("SOS failed:", e)
+      showToast(`❌ SOS Alert Failed: ${e.message}`, '#dc2626', 4000)
+    }
+  }
+
   const handleLocate  = () => { setRecenter((n) => n + 1); showToast('📍 Centring on your location') }
   const handleZoomIn  = () => setZoom((z) => Math.min(z + 1, 18))
   const handleZoomOut = () => setZoom((z) => Math.max(z - 1, 8))
@@ -375,6 +475,41 @@ export default function App() {
             </div>
           )}
 
+          {/* Active SOS Banner */}
+          {activeIncidentId && (
+            <div 
+              className="absolute left-4 right-4 md:left-5 md:right-80 px-4 py-3 rounded-xl flex items-center justify-between shadow-lg z-30 transition-all duration-300"
+              style={{
+                top: isMapTab ? (isMobile ? '70px' : '90px') : '16px',
+                background: 'rgba(220,38,38,0.95)',
+                border: '1px solid rgba(255,255,255,0.2)',
+                backdropFilter: 'blur(8px)',
+              }}
+            >
+              <div className="flex items-center gap-2.5">
+                <span className="relative flex h-2 w-2">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-white opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-white"></span>
+                </span>
+                <span className="text-xs font-extrabold uppercase tracking-wider text-white">Emergency SOS Active</span>
+              </div>
+              <button
+                onClick={async () => {
+                  try {
+                    await api.resolveIncident(activeIncidentId)
+                    setActiveIncidentId(null)
+                    showToast('✓ Emergency SOS resolved', '#138808')
+                  } catch (e: any) {
+                    showToast(`Error: ${e.message}`, '#dc2626')
+                  }
+                }}
+                className="px-3 py-1 bg-white text-red-600 rounded-lg text-xs font-bold transition-all hover:bg-red-50 active:scale-95 shadow-sm"
+              >
+                Resolve
+              </button>
+            </div>
+          )}
+
           {/* Desktop: right-side controls column */}
           <div className="hidden md:flex absolute right-5 top-4 bottom-4 flex-col items-end justify-between z-10">
             {/* Top: SOS */}
@@ -427,12 +562,12 @@ export default function App() {
 
         {/* ── Alerts panel ── */}
         <SlidePanel visible={tab === 'alerts'} surface={panelBg}>
-          <AlertsPanel darkMode={dm} />
+          <AlertsPanel darkMode={dm} isAuthenticated={auth} />
         </SlidePanel>
 
-        {/* ── Trips panel (auth-gated placeholder) ── */}
+        {/* ── Trips panel ── */}
         <SlidePanel visible={tab === 'trips'} surface={panelBg}>
-          <TripsPlaceholder darkMode={dm} onLogin={() => setShowLogin(true)} isAuth={auth} />
+          <TripsPanel darkMode={dm} isAuthenticated={auth} onLogin={() => setShowLogin(true)} />
         </SlidePanel>
 
         {/* ── Profile panel ── */}
@@ -444,6 +579,7 @@ export default function App() {
             user={user}
             onLogin={() => setShowLogin(true)}
             onLogout={handleLogout}
+            onProfileUpdate={handleProfileUpdate}
           />
         </SlidePanel>
       </div>

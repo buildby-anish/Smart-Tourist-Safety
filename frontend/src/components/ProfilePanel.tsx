@@ -2,10 +2,19 @@ import { useState } from 'react'
 import {
   User, MapPin, Bell, Shield, ChevronRight,
   Moon, LogOut, Phone, Hash, Globe, HelpCircle,
-  Star, Bookmark, Lock, Wifi,
+  Star, Bookmark, Lock, Wifi, Edit3, Check, X as CloseIcon,
 } from 'lucide-react'
+import { api } from '../lib/api'
 
-interface AuthUser { id: string }
+interface AuthUser {
+  id: string;
+  fullName?: string;
+  phone?: string;
+  email?: string;
+  preferredLanguage?: string;
+  emergencyContact?: string;
+  kycVerified?: boolean;
+}
 
 interface Props {
   darkMode: boolean
@@ -14,6 +23,7 @@ interface Props {
   user: AuthUser | null
   onLogin: () => void
   onLogout: () => void
+  onProfileUpdate: (updatedUser: Partial<AuthUser>) => void
 }
 
 const SAVED = [
@@ -22,9 +32,74 @@ const SAVED = [
   { name: 'Marine Drive',        sub: 'Promenade · 3.6 km',          img: 'https://images.unsplash.com/photo-1567157577867-05ccb1388e66?w=96&h=64&fit=crop&q=75' },
 ]
 
-export default function ProfilePanel({ darkMode: dm, toggleDark, isAuthenticated, user, onLogin, onLogout }: Props) {
+import { useEffect } from 'react'
+
+export default function ProfilePanel({ darkMode: dm, toggleDark, isAuthenticated, user, onLogin, onLogout, onProfileUpdate }: Props) {
   const [notifs, setNotifs] = useState(true)
   const [locShare, setLocShare] = useState(false)
+
+  const [isEditing, setIsEditing] = useState(false)
+  const [fullName, setFullName] = useState('')
+  const [email, setEmail] = useState('')
+  const [emergencyContact, setEmergencyContact] = useState('')
+  const [prefLanguage, setPrefLanguage] = useState('EN')
+  const [kycLoading, setKycLoading] = useState(false)
+  const [saveLoading, setSaveLoading] = useState(false)
+
+  useEffect(() => {
+    if (user) {
+      setFullName(user.fullName || '')
+      setEmail(user.email || '')
+      setEmergencyContact(user.emergencyContact || '')
+      setPrefLanguage(user.preferredLanguage || 'EN')
+    }
+  }, [user])
+
+  const handleSaveProfile = async () => {
+    if (!user) return
+    setSaveLoading(true)
+    try {
+      const updated = await api.updateProfile(user.id, {
+        full_name: fullName,
+        email: email || null,
+        emergency_contact: emergencyContact || null,
+        preferred_language: prefLanguage,
+      })
+      onProfileUpdate({
+        fullName: updated.full_name,
+        email: updated.email || undefined,
+        emergencyContact: updated.emergency_contact || undefined,
+        preferredLanguage: updated.preferred_language || undefined,
+      })
+      setIsEditing(false)
+    } catch (e) {
+      console.error("Failed to save profile:", e)
+      alert("Failed to save profile changes. Please try again.")
+    } finally {
+      setSaveLoading(false)
+    }
+  }
+
+  const handleVerifyKyc = async () => {
+    if (!user) return
+    setKycLoading(true)
+    try {
+      // Simulate DigiLocker redirect / document check delay
+      await new Promise(resolve => setTimeout(resolve, 1500))
+      const updated = await api.updateProfile(user.id, {
+        kyc_document_type: 'PASSPORT',
+        kyc_verified: true,
+      })
+      onProfileUpdate({
+        kycVerified: updated.kyc_verified,
+      })
+    } catch (e) {
+      console.error("KYC verification failed:", e)
+      alert("DigiLocker KYC verification failed. Please try again.")
+    } finally {
+      setKycLoading(false)
+    }
+  }
 
   const surface   = dm ? '#091222' : '#f4f6f9'
   const card      = dm ? '#0c1d33' : '#ffffff'
@@ -39,24 +114,52 @@ export default function ProfilePanel({ darkMode: dm, toggleDark, isAuthenticated
       {/* ── Profile hero ── */}
       <div className="px-5 pt-6 pb-5" style={{ borderBottom: `1px solid ${dm ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}` }}>
         {isAuthenticated && user ? (
-          <div className="flex items-center gap-4">
-            <div
-              className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold text-white flex-shrink-0"
-              style={{ background: 'linear-gradient(135deg, #FF9933, #e67a0f)', boxShadow: '0 4px 16px rgba(255,153,51,0.35)' }}
-            >
-              T
-            </div>
-            <div>
-              <p className="text-lg font-bold" style={{ color: text, fontFamily: 'Outfit, sans-serif' }}>Traveller</p>
-              <div className="flex items-center gap-2 mt-1">
-                <Hash size={12} style={{ color: subtle }} />
-                <span className="text-xs font-mono" style={{ color: subtle }}>Tourist ID: {user.id}</span>
+          <div className="space-y-4">
+            <div className="flex items-center gap-4">
+              <div
+                className="w-16 h-16 rounded-2xl flex items-center justify-center text-2xl font-bold text-white flex-shrink-0"
+                style={{ background: 'linear-gradient(135deg, #FF9933, #e67a0f)', boxShadow: '0 4px 16px rgba(255,153,51,0.35)' }}
+              >
+                {fullName ? fullName.charAt(0).toUpperCase() : 'T'}
               </div>
-              <div className="flex items-center gap-1.5 mt-1.5">
-                <div className="w-2 h-2 rounded-full bg-[#138808]" />
-                <span className="text-xs font-medium" style={{ color: '#138808' }}>Verified tourist</span>
+              <div className="flex-1 min-w-0">
+                <p className="text-lg font-bold truncate" style={{ color: text, fontFamily: 'Outfit, sans-serif' }}>
+                  {fullName || 'Traveller'}
+                </p>
+                <div className="flex items-center gap-2 mt-1">
+                  <Hash size={12} style={{ color: subtle }} />
+                  <span className="text-xs font-mono truncate" style={{ color: subtle }}>Tourist ID: {user.id}</span>
+                </div>
+                <div className="flex items-center gap-1.5 mt-1.5">
+                  <div className={`w-2 h-2 rounded-full ${user.kycVerified ? 'bg-[#138808]' : 'bg-[#d97706]'}`} />
+                  <span className="text-xs font-medium" style={{ color: user.kycVerified ? '#138808' : '#d97706' }}>
+                    {user.kycVerified ? 'Verified tourist' : 'KYC Pending'}
+                  </span>
+                </div>
               </div>
             </div>
+
+            {/* KYC Callout if not verified */}
+            {!user.kycVerified && (
+              <div 
+                className="p-3.5 rounded-xl flex flex-col gap-2.5" 
+                style={{ 
+                  background: dm ? 'rgba(217,119,6,0.08)' : 'rgba(217,119,6,0.05)',
+                  border: dm ? '1px solid rgba(217,119,6,0.2)' : '1px solid rgba(217,119,6,0.15)' 
+                }}
+              >
+                <p className="text-xs leading-relaxed" style={{ color: dm ? '#fbbf24' : '#b45309' }}>
+                  Complete identity verification to obtain your digital safety pass and unlock fast emergency clearance.
+                </p>
+                <button
+                  onClick={handleVerifyKyc}
+                  disabled={kycLoading}
+                  className="w-full h-9 rounded-lg text-xs font-bold text-white flex items-center justify-center gap-2 bg-[#d97706] hover:bg-[#b45309] transition-all disabled:opacity-50"
+                >
+                  {kycLoading ? 'Verifying with DigiLocker...' : 'Verify with DigiLocker'}
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="flex flex-col items-center py-4 gap-4">
@@ -77,7 +180,6 @@ export default function ProfilePanel({ darkMode: dm, toggleDark, isAuthenticated
             >
               Sign in
             </button>
-          </div>
         )}
       </div>
 
@@ -109,6 +211,128 @@ export default function ProfilePanel({ darkMode: dm, toggleDark, isAuthenticated
                 <span className="text-[10px] text-center" style={{ color: subtle }}>Add place</span>
               </div>
             </div>
+          </section>
+        )}
+
+        {/* ── Profile Details ── */}
+        {isAuthenticated && user && (
+          <section>
+            <div className="flex items-center justify-between mb-2 px-1">
+              <SectionLabel text={text} label="Profile details" />
+              <button
+                onClick={() => {
+                  if (isEditing) {
+                    handleSaveProfile()
+                  } else {
+                    setIsEditing(true)
+                  }
+                }}
+                disabled={saveLoading}
+                className="text-xs font-bold flex items-center gap-1 text-[#FF9933] hover:opacity-85 transition-opacity"
+              >
+                {saveLoading ? (
+                  <span>Saving...</span>
+                ) : isEditing ? (
+                  <>
+                    <Check size={13} />
+                    <span>Save</span>
+                  </>
+                ) : (
+                  <>
+                    <Edit3 size={12} />
+                    <span>Edit</span>
+                  </>
+                )}
+              </button>
+            </div>
+            <div className="rounded-xl overflow-hidden" style={{ background: card, border: `1px solid ${border}`, boxShadow: shadow }}>
+              {/* Full Name */}
+              <div className="flex items-center justify-between px-4 py-3.5" style={{ borderBottom: `1px solid ${border}` }}>
+                <span className="text-sm font-medium" style={{ color: subtle }}>Full name</span>
+                {isEditing ? (
+                  <input
+                    type="text"
+                    value={fullName}
+                    onChange={(e) => setFullName(e.target.value)}
+                    className="text-sm text-right px-2 py-1 rounded border"
+                    style={{ background: surface, border: `1px solid ${border}`, color: text, width: '160px' }}
+                  />
+                ) : (
+                  <span className="text-sm font-semibold" style={{ color: text }}>{fullName || 'Not added'}</span>
+                )}
+              </div>
+
+              {/* Email */}
+              <div className="flex items-center justify-between px-4 py-3.5" style={{ borderBottom: `1px solid ${border}` }}>
+                <span className="text-sm font-medium" style={{ color: subtle }}>Email</span>
+                {isEditing ? (
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(e) => setEmail(e.target.value)}
+                    className="text-sm text-right px-2 py-1 rounded border"
+                    style={{ background: surface, border: `1px solid ${border}`, color: text, width: '160px' }}
+                  />
+                ) : (
+                  <span className="text-sm font-semibold" style={{ color: text }}>{email || 'Not added'}</span>
+                )}
+              </div>
+
+              {/* Phone */}
+              <div className="flex items-center justify-between px-4 py-3.5" style={{ borderBottom: `1px solid ${border}` }}>
+                <span className="text-sm font-medium" style={{ color: subtle }}>Phone</span>
+                <span className="text-sm font-semibold" style={{ color: text }}>{user.phone || 'Not added'}</span>
+              </div>
+
+              {/* Preferred Language */}
+              <div className="flex items-center justify-between px-4 py-3.5" style={{ borderBottom: `1px solid ${border}` }}>
+                <span className="text-sm font-medium" style={{ color: subtle }}>Preferred language</span>
+                {isEditing ? (
+                  <select
+                    value={prefLanguage}
+                    onChange={(e) => setPrefLanguage(e.target.value)}
+                    className="text-sm text-right px-2 py-1 rounded border"
+                    style={{ background: surface, border: `1px solid ${border}`, color: text, width: '160px' }}
+                  >
+                    <option value="EN">English</option>
+                    <option value="HI">Hindi (हिंदी)</option>
+                    <option value="ES">Spanish (Español)</option>
+                    <option value="FR">French (Français)</option>
+                  </select>
+                ) : (
+                  <span className="text-sm font-semibold" style={{ color: text }}>
+                    {prefLanguage === 'EN' ? 'English' : prefLanguage === 'HI' ? 'Hindi (हिंदी)' : prefLanguage === 'ES' ? 'Spanish (Español)' : prefLanguage === 'FR' ? 'French (Français)' : prefLanguage}
+                  </span>
+                )}
+              </div>
+
+              {/* Emergency Contact */}
+              <div className="flex items-center justify-between px-4 py-3.5">
+                <span className="text-sm font-medium" style={{ color: subtle }}>Emergency contact</span>
+                {isEditing ? (
+                  <input
+                    type="text"
+                    value={emergencyContact}
+                    onChange={(e) => setEmergencyContact(e.target.value)}
+                    className="text-sm text-right px-2 py-1 rounded border"
+                    style={{ background: surface, border: `1px solid ${border}`, color: text, width: '160px' }}
+                  />
+                ) : (
+                  <span className="text-sm font-semibold" style={{ color: text }}>{emergencyContact || 'Not added'}</span>
+                )}
+              </div>
+            </div>
+            {isEditing && (
+              <div className="flex justify-end gap-2 mt-2 px-1">
+                <button
+                  onClick={() => setIsEditing(false)}
+                  className="px-3 py-1 rounded text-xs font-semibold"
+                  style={{ background: 'transparent', color: subtle }}
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
           </section>
         )}
 
