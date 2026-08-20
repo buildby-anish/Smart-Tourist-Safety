@@ -172,12 +172,22 @@ export async function verifyOtp(phone: string, otp: string): Promise<{ verified:
  * phone number. This is a pragmatic integration bridge for this app, not a
  * production-grade auth scheme.
  */
-export function deriveTouristCredentials(phone: string): { username: string; password: string } {
-  const normalized = (phone || "").replace(/[^0-9]/g, "");
-  return {
-    username: `tourist-${normalized || "guest"}`,
-    password: `SurakshaSetu-${normalized || "guest"}-2026`,
-  };
+export function deriveTouristCredentials(phoneOrEmail: string): { username: string; password: string } {
+  const isEmail = (phoneOrEmail || "").includes("@");
+  if (isEmail) {
+    const cleanEmail = phoneOrEmail.trim().toLowerCase();
+    const hash = cleanEmail.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return {
+      username: cleanEmail,
+      password: `SurakshaSetu-${hash}-2026`,
+    };
+  } else {
+    const normalized = (phoneOrEmail || "").replace(/[^0-9]/g, "");
+    return {
+      username: `tourist-${normalized || "guest"}`,
+      password: `SurakshaSetu-${normalized || "guest"}-2026`,
+    };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -360,32 +370,23 @@ export async function authenticateAuthority(
  */
 export async function registerAndLoginTourist(details: {
   fullName: string;
-  phone: string;
+  phone?: string;
   email?: string;
   emergencyContact?: string;
 }): Promise<{ token: string; tourist: any } | null> {
-  const { username, password } = deriveTouristCredentials(details.phone);
+  const primaryIdentifier = details.email || details.phone || "guest";
+  const { username, password } = deriveTouristCredentials(primaryIdentifier);
   try {
     await registerUser(username, password, "tourist");
   } catch (err: any) {
     // If the derived account already exists (e.g. re-registering the same
-    // phone), fall through to login instead of failing the whole flow.
-    // Any other signup failure (weak password, Supabase misconfig, etc.) is
-    // a real error the caller needs to see, not a silent null that gets
-    // papered over with a generic "Registration failed" message.
+    // identifier), fall through to login instead of failing the whole flow.
     if (!(err instanceof ApiError && err.status === 409)) {
       console.error("Tourist registration failed:", err);
       throw err;
     }
   }
 
-  // NOTE: this call can legitimately fail even right after a successful
-  // signup — most commonly because the Supabase project requires email
-  // confirmation and the email used here (tourist-<phone>@...) is synthetic
-  // and can never be confirmed by the user. The backend now returns a
-  // distinct 403 with a specific message for that case (see
-  // backend/routers/auth.py login()); let it propagate instead of
-  // swallowing it to null.
   const loginResp = await loginUser(username, password);
   storeSession({
     access_token: loginResp.access_token,
@@ -396,15 +397,10 @@ export async function registerAndLoginTourist(details: {
 
   if (!loginResp.tourist_id) return null;
 
-  // Only include fields the caller actually collected — writing empty
-  // strings over unset profile fields would clobber real KYC/emergency
-  // contact data entered later, and callers (e.g. the OTP sign-in flow)
-  // that don't collect email/emergency contact up front shouldn't blank
-  // them out on the backend.
   const updatePayload: Record<string, any> = {
     full_name: details.fullName,
-    phone: details.phone,
   };
+  if (details.phone) updatePayload.phone = details.phone;
   if (details.email) updatePayload.email = details.email;
   if (details.emergencyContact) updatePayload.emergency_contact = details.emergencyContact;
 
@@ -414,15 +410,12 @@ export async function registerAndLoginTourist(details: {
 }
 
 /**
- * Connects the Tourist Portal's existing sign-in form (Tourist ID + Phone) to
+ * Connects the Tourist Portal's existing sign-in form (Tourist ID + Phone/Email) to
  * the real backend by attempting a re-login with the same derived credentials
- * used at sign-up time. There is no backend endpoint to look a tourist up by
- * phone number alone, so this only succeeds for a phone that previously
- * registered through this app in the current backend session; otherwise it
- * returns null and the caller falls back to its existing local demo lookup.
+ * used at sign-up time.
  */
-export async function loginTouristByPhone(phone: string): Promise<{ token: string; tourist: any } | null> {
-  const { username, password } = deriveTouristCredentials(phone);
+export async function loginTouristByPhone(phoneOrEmail: string): Promise<{ token: string; tourist: any } | null> {
+  const { username, password } = deriveTouristCredentials(phoneOrEmail);
   try {
     const loginResp = await loginUser(username, password);
     storeSession({
@@ -435,7 +428,7 @@ export async function loginTouristByPhone(phone: string): Promise<{ token: strin
     const tourist = await getTouristProfile(loginResp.tourist_id);
     return { token: loginResp.access_token, tourist };
   } catch (err) {
-    console.warn("Backend sign-in by phone did not match a registered account; using local demo lookup.", err);
+    console.warn("Backend sign-in by phone/email did not match a registered account:", err);
     return null;
   }
 }

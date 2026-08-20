@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { Loader2 } from 'lucide-react';
 import {
   Language,
   UserRole,
@@ -43,8 +44,13 @@ import {
   getAuthorityId,
   getUsername,
   createAuditLog,
-  listAuditLogs
+  listAuditLogs,
+  getAuthToken,
+  getUserType,
+  getTouristId,
+  getTouristProfile
 } from './lib/api';
+import LoginModal from './components/tourist/LoginModal';
 
 export default function App() {
   const [language, setLanguage] = useState<Language>('en');
@@ -66,6 +72,10 @@ export default function App() {
   // first screen is.
   const [userRole, setUserRole] = useState<UserRole>('tourist');
   const [activeModule, setActiveModule] = useState<ActiveModule>('ai_hub');
+  const [touristUser, setTouristUser] = useState<any | null>(null);
+  const [showLogin, setShowLogin] = useState<boolean>(false);
+  const [loginModalMode, setLoginModalMode] = useState<'login' | 'signup'>('login');
+  const [booting, setBooting] = useState<boolean>(true);
 
   // Master Data State
   const [tourists, setTourists] = useState<TouristProfile[]>(INITIAL_TOURISTS);
@@ -89,6 +99,44 @@ export default function App() {
           console.warn('Service worker registration failed:', err);
         });
       });
+    }
+  }, []);
+
+  // Restore session at boot time
+  useEffect(() => {
+    const token = getAuthToken();
+    const type = getUserType();
+
+    if (!token) {
+      setBooting(false);
+      return;
+    }
+
+    if (type === 'authority') {
+      const authId = getAuthorityId();
+      if (authId) {
+        setUserRole('authority');
+        refreshIncidentsFromBackend();
+        refreshAuditLogsFromBackend();
+      }
+      setBooting(false);
+    } else {
+      const touristId = getTouristId();
+      if (touristId) {
+        getTouristProfile(touristId)
+          .then((profile) => {
+            setTouristUser(profile);
+            setUserRole('tourist');
+            setBooting(false);
+          })
+          .catch((err) => {
+            console.warn('Session restoration failed:', err);
+            clearSession();
+            setBooting(false);
+          });
+      } else {
+        setBooting(false);
+      }
     }
   }, []);
 
@@ -273,6 +321,36 @@ export default function App() {
     refreshAuditLogsFromBackend();
 
     return true;
+  };
+
+  const handleLogout = async () => {
+    try {
+      await logoutUser();
+    } catch (err) {
+      console.warn('Backend logout failed:', err);
+    }
+    clearSession();
+    setTouristUser(null);
+    setUserRole('tourist');
+  };
+
+  const handleAuthenticated = (role: 'tourist' | 'authority', user: any) => {
+    setShowLogin(false);
+    if (role === 'authority') {
+      setUserRole('authority');
+      setActiveModule('ai_hub');
+      handleLogAudit(
+        'AUTHORITY_LOGIN',
+        `Officer ${user.username}`,
+        'MFA Verification',
+        'Successful 2FA login to National Command Center'
+      );
+      refreshIncidentsFromBackend();
+      refreshAuditLogsFromBackend();
+    } else {
+      setTouristUser(user);
+      setUserRole('tourist');
+    }
   };
 
   // Global search trigger
@@ -503,6 +581,17 @@ export default function App() {
 
   const activeSosCount = incidents.filter((i) => i.status !== 'Resolved').length;
 
+  if (booting) {
+    return (
+      <div className={`min-h-screen ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-[#F4F6F9] text-slate-900'} flex items-center justify-center`}>
+        <div className="flex flex-col items-center gap-3">
+          <Loader2 className="animate-spin text-[#FF9933]" size={36} />
+          <p className="text-sm font-semibold tracking-wide" style={{ fontFamily: 'Outfit, sans-serif' }}>Suraksha Setu</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-[#F4F6F9] text-slate-900'} flex flex-col font-sans transition-colors duration-200`}>
       
@@ -513,10 +602,7 @@ export default function App() {
         darkMode={darkMode}
         onToggleDarkMode={() => setDarkMode(!darkMode)}
         userRole={userRole}
-        onLogout={() => {
-          logoutUser().finally(() => clearSession());
-          setUserRole('tourist');
-        }}
+        onLogout={handleLogout}
         onLogoClick={() => setUserRole('tourist')}
         activeModule={activeModule}
         onSelectModule={setActiveModule}
@@ -524,6 +610,10 @@ export default function App() {
         onGlobalSearchChange={setGlobalSearchQuery}
         onExecuteGlobalSearch={handleExecuteGlobalSearch}
         activeSosCount={activeSosCount}
+        isAuthenticatedTourist={!!touristUser}
+        touristName={touristUser?.full_name || touristUser?.name || null}
+        onLoginClick={() => { setLoginModalMode('login'); setShowLogin(true); }}
+        onSignUpClick={() => { setLoginModalMode('signup'); setShowLogin(true); }}
       />
 
       {/* Main Content Area */}
@@ -539,6 +629,11 @@ export default function App() {
           onToggleDarkMode={() => setDarkMode(!darkMode)}
           onTriggerSos={handleTouristTriggerSos}
           onReturnToGateway={() => setUserRole('gateway')}
+          user={touristUser}
+          setUser={setTouristUser}
+          showLogin={showLogin}
+          setShowLogin={setShowLogin}
+          onLogout={handleLogout}
         />
       ) : (
         <div className="flex-1 flex flex-col max-w-[1700px] w-full mx-auto">
@@ -603,6 +698,15 @@ export default function App() {
           </main>
 
         </div>
+      )}
+
+      {showLogin && (
+        <LoginModal
+          darkMode={darkMode}
+          initialMode={loginModalMode}
+          onClose={() => setShowLogin(false)}
+          onAuthenticated={handleAuthenticated}
+        />
       )}
 
     </div>

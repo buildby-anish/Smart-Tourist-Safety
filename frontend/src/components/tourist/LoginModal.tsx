@@ -1,28 +1,56 @@
 import { useState, useRef, KeyboardEvent, useEffect } from 'react';
 import {
   X, ChevronRight, AlertCircle, CheckCircle2,
-  Loader2, ArrowLeft, WifiOff, Shield, User as UserIcon,
+  Loader2, ArrowLeft, WifiOff, Shield, User as UserIcon, Lock,
 } from 'lucide-react';
-import { sendOtp, verifyOtp, loginTouristByPhone, registerAndLoginTourist, ApiError } from '../../lib/api';
+import {
+  sendOtp,
+  verifyOtp,
+  loginTouristByPhone,
+  registerAndLoginTourist,
+  authenticateAuthority,
+  ApiError
+} from '../../lib/api';
 
-type Step = 'credentials' | 'otp' | 'name' | 'verifying' | 'success' | 'error';
-type FieldErrors = { fullName?: string; phone?: string; otp?: string };
+type Step =
+  | 'role_selection'
+  | 'tourist_credentials'
+  | 'otp'
+  | 'name'
+  | 'authority_credentials'
+  | 'verifying'
+  | 'success'
+  | 'error';
+
+type FieldErrors = { fullName?: string; phone?: string; otp?: string; badgeId?: string; authCode?: string };
 
 interface Props {
   onClose: () => void;
-  onAuthenticated: (tourist: any) => void;
+  onAuthenticated: (role: 'tourist' | 'authority', user: any) => void;
   darkMode: boolean;
+  initialMode?: 'login' | 'signup';
 }
 
-export default function LoginModal({ onClose, onAuthenticated, darkMode: dm }: Props) {
-  const [step, setStep] = useState<Step>('credentials');
+export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, initialMode = 'login' }: Props) {
+  const [step, setStep] = useState<Step>(
+    initialMode === 'signup' ? 'tourist_credentials' : 'role_selection'
+  );
+  const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
+  
+  // Tourist details
+  const [identifier, setIdentifier] = useState('');
   const [fullName, setFullName] = useState('');
-  const [phone, setPhone] = useState('');
   const [otp, setOtp] = useState<string[]>(Array(6).fill(''));
+  
+  // Authority details
+  const [badgeId, setBadgeId] = useState('');
+  const [authCode, setAuthCode] = useState('');
+
   const [errs, setErrs] = useState<FieldErrors>({});
   const [generalErr, setGenErr] = useState('');
   const [loading, setLoading] = useState(false);
   const [resend, setResend] = useState(0);
+  
   const otpRefs = useRef<(HTMLInputElement | null)[]>([]);
   const resendTimer = useRef<ReturnType<typeof setInterval> | null>(null);
 
@@ -46,28 +74,69 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm }: P
     }, 1000);
   };
 
-  const validatePhone = () => {
+  const validateIdentifier = () => {
     const e: FieldErrors = {};
-    if (!phone.trim()) e.phone = 'Phone number is required';
-    else if (!/^\+?[\d\s\-]{10,14}$/.test(phone)) e.phone = 'Enter a valid mobile number';
+    const val = identifier.trim();
+    if (!val) {
+      e.phone = 'Email or phone number is required';
+    } else if (val.includes('@')) {
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val)) {
+        e.phone = 'Enter a valid email address';
+      }
+    } else {
+      if (!/^\+?[\d\s\-]{10,14}$/.test(val)) {
+        e.phone = 'Enter a valid mobile number';
+      }
+    }
     setErrs(e);
     return !Object.keys(e).length;
   };
 
-  // Step 1: request a real OTP for this phone number from the backend
-  // (POST /auth/send-otp). No demo/local codes.
-  const handleContinue = async () => {
-    if (!validatePhone()) return;
+  const handleTouristContinue = async () => {
+    if (!validateIdentifier()) return;
     setLoading(true); setGenErr('');
-    try {
-      await sendOtp(phone.trim());
-      setLoading(false);
-      setStep('otp');
-      startResend();
-      setTimeout(() => otpRefs.current[0]?.focus(), 80);
-    } catch (err: any) {
-      setLoading(false);
-      setGenErr(err instanceof ApiError ? err.message : 'Network error. Check your connection and try again.');
+    const val = identifier.trim();
+    const isEmail = val.includes('@');
+
+    if (isEmail) {
+      try {
+        if (mode === 'login') {
+          // Email Login: try to sign in directly with derived credentials
+          const existing = await loginTouristByPhone(val);
+          setLoading(false);
+          if (existing) {
+            setStep('success');
+            setTimeout(() => onAuthenticated('tourist', existing.tourist), 900);
+          } else {
+            setGenErr('No account matches this email. Check the spelling or switch to Sign Up below.');
+          }
+        } else {
+          // Email Sign Up: check if account already exists
+          const existing = await loginTouristByPhone(val);
+          setLoading(false);
+          if (existing) {
+            setGenErr('This email is already registered. Please Sign In instead.');
+          } else {
+            // New email registration: collect full name
+            setStep('name');
+          }
+        }
+      } catch (err: any) {
+        setLoading(false);
+        setGenErr(err instanceof ApiError ? err.message : 'Authentication failed. Please try again.');
+      }
+    } else {
+      // Phone OTP flow
+      try {
+        await sendOtp(val);
+        setLoading(false);
+        setStep('otp');
+        startResend();
+        setTimeout(() => otpRefs.current[0]?.focus(), 80);
+      } catch (err: any) {
+        setLoading(false);
+        setGenErr(err instanceof ApiError ? err.message : 'Failed to send OTP. Please try again.');
+      }
     }
   };
 
@@ -84,47 +153,47 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm }: P
     if (e.key === 'ArrowRight' && i < 5) otpRefs.current[i + 1]?.focus();
   };
 
-  // Step 2: verify the code against the backend (POST /auth/verify-otp),
-  // then either sign the returning tourist in, or — if this phone has no
-  // account yet — ask for a name to create one. Never a fake success path.
   const handleVerify = async () => {
     const code = otp.join('');
     if (code.length < 6) { setErrs({ otp: 'Enter all 6 digits' }); return; }
     setStep('verifying'); setGenErr('');
     try {
-      const result = await verifyOtp(phone.trim(), code);
+      const result = await verifyOtp(identifier.trim(), code);
       if (!result.verified) {
         setStep('otp');
         setErrs({ otp: 'Invalid verification code. Please try again.' });
         return;
       }
 
-      const existing = await loginTouristByPhone(phone.trim());
+      const existing = await loginTouristByPhone(identifier.trim());
       if (existing) {
         setStep('success');
-        setTimeout(() => onAuthenticated(existing.tourist), 900);
+        setTimeout(() => onAuthenticated('tourist', existing.tourist), 900);
         return;
       }
 
-      // No account registered for this phone yet — collect a name to
-      // create one (backend requires full_name for a tourist profile).
+      // No profile found: proceed to name entry
       setStep('name');
     } catch (err: any) {
       setStep('otp');
-      setErrs({ otp: err instanceof ApiError ? err.message : 'Could not verify the code. Please try again.' });
+      setErrs({ otp: err instanceof ApiError ? err.message : 'Verification failed. Please try again.' });
     }
   };
 
-  // Step 3 (new tourists only): create the account for real via
-  // POST /auth/register + /auth/login + PATCH /tourists/{id}.
   const handleRegister = async () => {
     if (!fullName.trim()) { setErrs({ fullName: 'Full name is required' }); return; }
     setStep('verifying'); setGenErr('');
+    const val = identifier.trim();
+    const isEmail = val.includes('@');
     try {
-      const created = await registerAndLoginTourist({ fullName: fullName.trim(), phone: phone.trim() });
+      const created = await registerAndLoginTourist({
+        fullName: fullName.trim(),
+        phone: isEmail ? undefined : val,
+        email: isEmail ? val : undefined,
+      });
       if (!created) throw new Error('Registration did not return a tourist profile.');
       setStep('success');
-      setTimeout(() => onAuthenticated(created.tourist), 900);
+      setTimeout(() => onAuthenticated('tourist', created.tourist), 900);
     } catch (err: any) {
       setStep('error');
       setGenErr(err instanceof ApiError ? err.message : 'Could not create your account. Please try again.');
@@ -134,30 +203,51 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm }: P
   const handleResend = () => {
     setOtp(Array(6).fill(''));
     setErrs({});
-    sendOtp(phone.trim()).catch(() => { /* surfaced on next verify attempt */ });
+    sendOtp(identifier.trim()).catch(() => {});
     startResend();
     setTimeout(() => otpRefs.current[0]?.focus(), 80);
   };
 
+  const handleAuthorityLogin = async () => {
+    if (!badgeId.trim()) { setErrs({ badgeId: 'Badge ID is required' }); return; }
+    if (!authCode.trim()) { setErrs({ authCode: 'Auth Code is required' }); return; }
+    setLoading(true); setGenErr('');
+    try {
+      const success = await authenticateAuthority(badgeId.trim(), authCode.trim());
+      setLoading(false);
+      if (success) {
+        setStep('success');
+        setTimeout(() => onAuthenticated('authority', success), 900);
+      } else {
+        setGenErr('Invalid Official Badge ID or Auth Code.');
+      }
+    } catch (err: any) {
+      setLoading(false);
+      setGenErr(err instanceof ApiError ? err.message : 'Official login failed.');
+    }
+  };
+
   return (
     <>
+      {/* Modal backdrop */}
       <div
         className="fixed inset-0 z-[50] animate-fade-in"
         style={{ background: 'rgba(7,15,31,0.72)', backdropFilter: 'blur(10px)' }}
-        onClick={step === 'credentials' || step === 'otp' || step === 'name' ? onClose : undefined}
+        onClick={onClose}
       />
 
-      <div className="fixed inset-0 z-[51] flex items-end sm:items-center justify-center sm:p-5">
+      {/* Centered Modal container */}
+      <div className="fixed inset-0 z-[51] flex items-center justify-center p-4">
         <div
-          className="w-full sm:max-w-[400px] rounded-t-[24px] sm:rounded-2xl overflow-hidden animate-sheet-up sm:animate-modal-in"
-          style={{ background: surface, border: `1px solid ${border}`, boxShadow: `0 24px 80px rgba(0,0,0,${dm ? '0.6' : '0.25'})` }}
+          className="w-full max-w-[400px] rounded-2xl overflow-hidden animate-modal-in"
+          style={{
+            background: surface,
+            border: `1px solid ${border}`,
+            boxShadow: `0 24px 80px rgba(0,0,0,${dm ? '0.6' : '0.25'})`
+          }}
           onClick={(e) => e.stopPropagation()}
         >
-          <div className="sm:hidden flex justify-center pt-3 pb-0">
-            <div className="w-9 h-1 rounded-full" style={{ background: dm ? 'rgba(255,255,255,0.16)' : 'rgba(0,0,0,0.1)' }} />
-          </div>
-
-          <div className="px-6 pt-5 pb-6" style={{ paddingBottom: 'max(24px,env(safe-area-inset-bottom,24px))' }}>
+          <div className="px-6 py-6">
             <div className="flex items-center justify-between mb-6">
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: '#0c2340' }}>
@@ -165,37 +255,94 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm }: P
                 </div>
                 <div>
                   <p className="text-[15px] font-bold leading-none" style={{ color: text, fontFamily: 'Outfit, sans-serif' }}>
-                    {step === 'credentials' && 'Sign in'}
-                    {step === 'otp' && 'Verify identity'}
-                    {step === 'name' && 'Create your Tourist ID'}
+                    {step === 'role_selection' && 'Suraksha Setu'}
+                    {step === 'tourist_credentials' && (mode === 'login' ? 'Tourist Sign In' : 'Tourist Sign Up')}
+                    {step === 'otp' && 'Verify Identity'}
+                    {step === 'name' && 'Complete Profile'}
+                    {step === 'authority_credentials' && 'Official Sign In'}
                     {step === 'verifying' && 'Verifying...'}
                     {step === 'success' && 'Welcome'}
                     {step === 'error' && 'Something went wrong'}
                   </p>
-                  <p className="text-xs mt-0.5" style={{ color: subtle }}>
-                    {step === 'credentials' && 'Suraksha Setu Tourist Safety'}
-                    {step === 'otp' && `Code sent to ${phone}`}
-                    {step === 'name' && 'New number — tell us your name'}
+                  <p className="text-xs mt-1" style={{ color: subtle }}>
+                    {step === 'role_selection' && 'Choose account type to continue'}
+                    {step === 'tourist_credentials' && 'Access safety & tracking services'}
+                    {step === 'otp' && `Enter code sent to ${identifier}`}
+                    {step === 'name' && 'Tell us your name to generate your ID'}
+                    {step === 'authority_credentials' && 'Official access portal'}
                     {step === 'verifying' && 'Just a moment...'}
-                    {step === 'success' && 'Taking you back to the map'}
-                    {step === 'error' && 'Check your connection and try again'}
+                    {step === 'success' && 'Redirecting...'}
+                    {step === 'error' && 'Check your inputs and try again'}
                   </p>
                 </div>
               </div>
-              {(step === 'credentials' || step === 'otp' || step === 'name') && (
-                <button
-                  onClick={onClose}
-                  className="w-8 h-8 rounded-full flex items-center justify-center transition-opacity hover:opacity-70"
-                  style={{ background: dm ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }}
-                  aria-label="Close"
-                >
-                  <X size={15} style={{ color: subtle }} />
-                </button>
-              )}
+              <button
+                onClick={onClose}
+                className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:opacity-75"
+                style={{ background: dm ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }}
+                aria-label="Close"
+              >
+                <X size={15} style={{ color: subtle }} />
+              </button>
             </div>
 
-            {/* ── Phone entry ── */}
-            {step === 'credentials' && (
+            {/* ── step 1: Role Selection ── */}
+            {step === 'role_selection' && (
+              <div className="space-y-4">
+                <p className="text-xs font-semibold uppercase tracking-wider" style={{ color: labelC }}>
+                  Continue as
+                </p>
+
+                <div className="space-y-3">
+                  <button
+                    onClick={() => {
+                      setStep('tourist_credentials');
+                      setMode('login');
+                      setErrs({});
+                      setGenErr('');
+                    }}
+                    className="w-full text-left p-4 rounded-xl border transition-all hover:scale-[1.01] active:scale-[0.99] flex items-start gap-3.5"
+                    style={{
+                      background: fieldBg,
+                      borderColor: dm ? 'rgba(255,255,255,0.1)' : 'rgba(12,35,64,0.1)',
+                    }}
+                  >
+                    <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl flex-shrink-0" style={{ background: dm ? 'rgba(255,255,255,0.06)' : 'rgba(12,35,64,0.05)' }}>
+                      🧳
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm" style={{ color: text }}>Tourist</p>
+                      <p className="text-xs mt-0.5" style={{ color: subtle }}>Sign in / create account</p>
+                    </div>
+                  </button>
+
+                  <button
+                    onClick={() => {
+                      setStep('authority_credentials');
+                      setMode('login');
+                      setErrs({});
+                      setGenErr('');
+                    }}
+                    className="w-full text-left p-4 rounded-xl border transition-all hover:scale-[1.01] active:scale-[0.99] flex items-start gap-3.5"
+                    style={{
+                      background: fieldBg,
+                      borderColor: dm ? 'rgba(255,255,255,0.1)' : 'rgba(12,35,64,0.1)',
+                    }}
+                  >
+                    <div className="w-10 h-10 rounded-lg flex items-center justify-center text-xl flex-shrink-0" style={{ background: dm ? 'rgba(255,255,255,0.06)' : 'rgba(12,35,64,0.05)' }}>
+                      🛡️
+                    </div>
+                    <div>
+                      <p className="font-bold text-sm" style={{ color: text }}>Authority</p>
+                      <p className="text-xs mt-0.5" style={{ color: subtle }}>Official login only</p>
+                    </div>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ── step 2: Tourist Credentials ── */}
+            {step === 'tourist_credentials' && (
               <div className="space-y-4">
                 {generalErr && (
                   <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-xl animate-fade-in" style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.2)' }}>
@@ -205,23 +352,69 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm }: P
                 )}
 
                 <Field
-                  label="Phone number" placeholder="+91 98765 43210" value={phone}
-                  onChange={setPhone} error={errs.phone} type="tel"
-                  bg={fieldBg} bd={fieldBd} text={text} subtle={subtle} labelC={labelC}
+                  label="Email or Phone number"
+                  placeholder="Enter email or mobile number"
+                  value={identifier}
+                  onChange={setIdentifier}
+                  error={errs.phone}
+                  bg={fieldBg}
+                  bd={fieldBd}
+                  text={text}
+                  subtle={subtle}
+                  labelC={labelC}
                 />
 
                 <button
-                  onClick={handleContinue}
+                  onClick={handleTouristContinue}
                   disabled={loading}
                   className="w-full h-12 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2.5 transition-all hover:opacity-92 active:scale-[0.98] disabled:opacity-60"
                   style={{ background: '#FF9933', boxShadow: '0 4px 20px rgba(255,153,51,0.35)' }}
                 >
-                  {loading ? (<><Loader2 size={16} className="animate-spin" /> Sending OTP...</>) : (<>Continue <ChevronRight size={16} /></>)}
+                  {loading ? (
+                    <><Loader2 size={16} className="animate-spin" /> Continuing...</>
+                  ) : (
+                    <>Continue <ChevronRight size={16} /></>
+                  )}
                 </button>
+
+                <div className="flex items-center justify-between pt-2">
+                  <button
+                    onClick={() => {
+                      setStep('role_selection');
+                      setErrs({});
+                      setGenErr('');
+                    }}
+                    className="flex items-center gap-1.5 text-xs transition-opacity hover:opacity-70"
+                    style={{ color: subtle }}
+                  >
+                    <ArrowLeft size={13} /> Back
+                  </button>
+                  {mode === 'login' ? (
+                    <p className="text-xs" style={{ color: subtle }}>
+                      Don't have an account?{' '}
+                      <button
+                        onClick={() => { setMode('signup'); setErrs({}); setGenErr(''); }}
+                        className="font-bold text-[#FF9933] hover:underline"
+                      >
+                        Sign Up
+                      </button>
+                    </p>
+                  ) : (
+                    <p className="text-xs" style={{ color: subtle }}>
+                      Already have an account?{' '}
+                      <button
+                        onClick={() => { setMode('login'); setErrs({}); setGenErr(''); }}
+                        className="font-bold text-[#FF9933] hover:underline"
+                      >
+                        Sign In
+                      </button>
+                    </p>
+                  )}
+                </div>
               </div>
             )}
 
-            {/* ── OTP ── */}
+            {/* ── step 3: Phone OTP ── */}
             {step === 'otp' && (
               <div className="space-y-5">
                 <p className="text-sm leading-relaxed" style={{ color: subtle }}>
@@ -240,7 +433,7 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm }: P
                         value={d}
                         onChange={(e) => handleOtp(i, e.target.value)}
                         onKeyDown={(e) => handleOtpKey(i, e)}
-                        className="otp-box"
+                        className="otp-box animate-modal-in"
                         style={{
                           background: dm ? (d ? 'rgba(255,153,51,0.08)' : 'rgba(255,255,255,0.05)') : (d ? 'rgba(255,153,51,0.05)' : '#f8fafc'),
                           border: `1.5px solid ${errs.otp ? '#dc2626' : d ? 'rgba(255,153,51,0.45)' : (dm ? 'rgba(255,255,255,0.12)' : '#e2e8f0')}`,
@@ -268,7 +461,7 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm }: P
 
                 <div className="flex items-center justify-between">
                   <button
-                    onClick={() => { setStep('credentials'); setOtp(Array(6).fill('')); setErrs({}); setGenErr(''); }}
+                    onClick={() => { setStep('tourist_credentials'); setOtp(Array(6).fill('')); setErrs({}); setGenErr(''); }}
                     className="flex items-center gap-1.5 text-xs transition-opacity hover:opacity-70"
                     style={{ color: subtle }}
                   >
@@ -281,20 +474,28 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm }: P
               </div>
             )}
 
-            {/* ── New-tourist name capture ── */}
+            {/* ── step 4: Name Capture ── */}
             {step === 'name' && (
               <div className="space-y-4">
                 <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-xl" style={{ background: 'rgba(255,153,51,0.08)', border: '1px solid rgba(255,153,51,0.2)' }}>
                   <CheckCircle2 size={14} style={{ color: '#FF9933', flexShrink: 0, marginTop: 1 }} />
                   <p className="text-xs leading-relaxed" style={{ color: subtle }}>
-                    Phone verified. This number isn't registered yet — enter your name to create your Tourist Safety ID.
+                    Identifier verified! Enter your full name to generate your official Tourist Safety ID.
                   </p>
                 </div>
 
                 <Field
-                  label="Full name" placeholder="As per your ID document" value={fullName}
-                  onChange={setFullName} error={errs.fullName} type="text" icon={<UserIcon size={15} />}
-                  bg={fieldBg} bd={fieldBd} text={text} subtle={subtle} labelC={labelC}
+                  label="Full Name"
+                  placeholder="As per your identity document"
+                  value={fullName}
+                  onChange={setFullName}
+                  error={errs.fullName}
+                  icon={<UserIcon size={15} />}
+                  bg={fieldBg}
+                  bd={fieldBd}
+                  text={text}
+                  subtle={subtle}
+                  labelC={labelC}
                 />
 
                 <button
@@ -304,51 +505,125 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm }: P
                 >
                   Create Tourist ID <ChevronRight size={16} />
                 </button>
+
+                <button
+                  onClick={() => { setStep('tourist_credentials'); setErrs({}); setGenErr(''); }}
+                  className="flex items-center gap-1.5 text-xs transition-opacity hover:opacity-70"
+                  style={{ color: subtle }}
+                >
+                  <ArrowLeft size={13} /> Back
+                </button>
               </div>
             )}
 
-            {/* ── Verifying ── */}
+            {/* ── step 5: Authority Credentials ── */}
+            {step === 'authority_credentials' && (
+              <div className="space-y-4">
+                {generalErr && (
+                  <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-xl animate-fade-in" style={{ background: 'rgba(220,38,38,0.08)', border: '1px solid rgba(220,38,38,0.2)' }}>
+                    <AlertCircle size={14} style={{ color: '#ef4444', flexShrink: 0, marginTop: 1 }} />
+                    <p className="text-xs leading-relaxed" style={{ color: '#ef4444' }}>{generalErr}</p>
+                  </div>
+                )}
+
+                <Field
+                  label="Badge ID"
+                  placeholder="Official ID / Username"
+                  value={badgeId}
+                  onChange={setBadgeId}
+                  error={errs.badgeId}
+                  icon={<UserIcon size={15} />}
+                  bg={fieldBg}
+                  bd={fieldBd}
+                  text={text}
+                  subtle={subtle}
+                  labelC={labelC}
+                />
+
+                <Field
+                  label="Auth Code"
+                  placeholder="MFA OTP or Code"
+                  value={authCode}
+                  onChange={setAuthCode}
+                  error={errs.authCode}
+                  icon={<Lock size={15} />}
+                  type="password"
+                  bg={fieldBg}
+                  bd={fieldBd}
+                  text={text}
+                  subtle={subtle}
+                  labelC={labelC}
+                />
+
+                <button
+                  onClick={handleAuthorityLogin}
+                  disabled={loading}
+                  className="w-full h-12 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2.5 transition-all hover:opacity-92 active:scale-[0.98] disabled:opacity-60"
+                  style={{ background: '#0C2340', border: '1px solid rgba(255,255,255,0.1)' }}
+                >
+                  {loading ? (
+                    <><Loader2 size={16} className="animate-spin" /> Verifying...</>
+                  ) : (
+                    <>Sign In</>
+                  )}
+                </button>
+
+                <button
+                  onClick={() => {
+                    setStep('role_selection');
+                    setErrs({});
+                    setGenErr('');
+                  }}
+                  className="flex items-center gap-1.5 text-xs transition-opacity hover:opacity-70"
+                  style={{ color: subtle }}
+                >
+                  <ArrowLeft size={13} /> Back
+                </button>
+              </div>
+            )}
+
+            {/* ── step 6: Verifying ── */}
             {step === 'verifying' && (
-              <div className="flex flex-col items-center py-8 gap-4 animate-fade-in">
+              <div className="flex flex-col items-center py-8 gap-4 animate-fade-in text-center">
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(255,153,51,0.1)' }}>
                   <Loader2 size={30} style={{ color: '#FF9933' }} className="animate-spin" />
                 </div>
-                <div className="text-center">
-                  <p className="font-semibold text-[15px]" style={{ color: text }}>Verifying your identity</p>
-                  <p className="text-sm mt-1" style={{ color: subtle }}>Checking with the Tourism Authority...</p>
+                <div>
+                  <p className="font-semibold text-[15px]" style={{ color: text }}>Verifying Identity</p>
+                  <p className="text-xs mt-1" style={{ color: subtle }}>Accessing secure database...</p>
                 </div>
               </div>
             )}
 
-            {/* ── Success ── */}
+            {/* ── step 7: Success ── */}
             {step === 'success' && (
-              <div className="flex flex-col items-center py-8 gap-4 animate-fade-in">
+              <div className="flex flex-col items-center py-8 gap-4 animate-fade-in text-center">
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(19,136,8,0.1)' }}>
                   <CheckCircle2 size={30} style={{ color: '#138808' }} />
                 </div>
-                <div className="text-center">
-                  <p className="font-semibold text-[15px]" style={{ color: text }}>Identity verified</p>
-                  <p className="text-sm mt-1" style={{ color: subtle }}>Taking you back to the map...</p>
+                <div>
+                  <p className="font-semibold text-[15px]" style={{ color: text }}>Identity Verified</p>
+                  <p className="text-xs mt-1" style={{ color: subtle }}>Opening portal...</p>
                 </div>
               </div>
             )}
 
-            {/* ── Error ── */}
+            {/* ── step 8: Error ── */}
             {step === 'error' && (
-              <div className="flex flex-col items-center py-8 gap-4 animate-fade-in">
+              <div className="flex flex-col items-center py-8 gap-4 animate-fade-in text-center">
                 <div className="w-16 h-16 rounded-2xl flex items-center justify-center" style={{ background: 'rgba(220,38,38,0.08)' }}>
                   <WifiOff size={30} style={{ color: '#dc2626' }} />
                 </div>
-                <div className="text-center">
-                  <p className="font-semibold text-[15px]" style={{ color: text }}>Connection error</p>
-                  <p className="text-sm mt-1 max-w-[240px]" style={{ color: subtle }}>{generalErr || 'Check your network connection and try again.'}</p>
+                <div>
+                  <p className="font-semibold text-[15px]" style={{ color: text }}>Connection Issue</p>
+                  <p className="text-xs mt-1 max-w-[240px]" style={{ color: subtle }}>{generalErr || 'Please check your connection and try again.'}</p>
                 </div>
                 <button
-                  onClick={() => { setStep('credentials'); setGenErr(''); }}
+                  onClick={() => { setStep('role_selection'); setGenErr(''); setErrs({}); }}
                   className="mt-2 h-11 px-6 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-92 active:scale-95"
                   style={{ background: '#FF9933' }}
                 >
-                  Try again
+                  Try Again
                 </button>
               </div>
             )}

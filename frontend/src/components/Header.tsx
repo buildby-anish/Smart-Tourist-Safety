@@ -30,6 +30,10 @@ interface HeaderProps {
   onGlobalSearchChange: (q: string) => void;
   onExecuteGlobalSearch: () => void;
   activeSosCount: number;
+  isAuthenticatedTourist?: boolean;
+  touristName?: string | null;
+  onLoginClick?: () => void;
+  onSignUpClick?: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -45,7 +49,11 @@ export const Header: React.FC<HeaderProps> = ({
   globalSearchQuery,
   onGlobalSearchChange,
   onExecuteGlobalSearch,
-  activeSosCount
+  activeSosCount,
+  isAuthenticatedTourist = false,
+  touristName = null,
+  onLoginClick = () => {},
+  onSignUpClick = () => {}
 }) => {
   const t = i18n[language];
 
@@ -223,7 +231,7 @@ export const Header: React.FC<HeaderProps> = ({
                 </button>
               )}
 
-              {/* Officer Profile Badge */}
+              {/* Profile Badge */}
               {userRole === 'authority' ? (
                 <div className="flex items-center space-x-2.5 border-l border-slate-300 dark:border-slate-800 pl-3">
                   <img
@@ -240,11 +248,43 @@ export const Header: React.FC<HeaderProps> = ({
                     </span>
                   </div>
                 </div>
+              ) : userRole === 'tourist' && isAuthenticatedTourist ? (
+                <div className="flex items-center space-x-2.5 border-l border-slate-300 dark:border-slate-800 pl-3">
+                  <div className="w-8 h-8 rounded-full border border-[#FF9933]/50 bg-[#0C2340] flex items-center justify-center shadow-xs flex-shrink-0 text-white font-black text-xs">
+                    {(touristName || 'T').substring(0, 1).toUpperCase()}
+                  </div>
+                  <div className="flex flex-col leading-tight">
+                    <span className="text-xs font-extrabold text-[#0C2340] dark:text-slate-200 whitespace-nowrap">
+                      {touristName || 'Tourist'}
+                    </span>
+                    <span className="text-[10px] font-bold whitespace-nowrap uppercase tracking-wider text-[#FF9933]">
+                      Active Safe
+                    </span>
+                  </div>
+                </div>
               ) : null}
 
               {/* Utilities: Language, Theme & Logout */}
               <div className="flex items-center space-x-1.5 border-l border-slate-300 dark:border-slate-800 pl-2">
                 
+                {/* Login / Sign Up buttons for unauthenticated tourist */}
+                {userRole === 'tourist' && !isAuthenticatedTourist && (
+                  <div className="flex items-center space-x-2 mr-1">
+                    <button
+                      onClick={onLoginClick}
+                      className="px-3 py-1.5 text-xs font-bold rounded-lg border border-[#0C2340]/20 hover:border-[#0C2340]/40 text-[#0C2340] dark:border-slate-700 dark:text-slate-300 dark:hover:text-white transition-all cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800"
+                    >
+                      Login
+                    </button>
+                    <button
+                      onClick={onSignUpClick}
+                      className="px-3 py-1.5 text-xs font-bold rounded-lg bg-[#FF9933] text-white hover:bg-[#e68a2e] shadow-sm transition-all cursor-pointer"
+                    >
+                      Sign Up
+                    </button>
+                  </div>
+                )}
+
                 {/* Language Switcher */}
                 <div className="flex items-center bg-slate-200/80 border border-slate-300 dark:bg-slate-850 dark:border-slate-800 rounded-lg p-0.5 gap-0.5">
                   <Globe className="w-3 h-3 text-slate-600 dark:text-slate-400 ml-1" />
@@ -279,8 +319,8 @@ export const Header: React.FC<HeaderProps> = ({
                   {darkMode ? <Sun className="w-3.5 h-3.5 text-amber-500" /> : <Moon className="w-3.5 h-3.5 text-slate-700 dark:text-slate-400" />}
                 </button>
 
-                {/* Logout — only shown for authority users */}
-                {userRole === 'authority' && (
+                {/* Logout — shown for authenticated users */}
+                {(userRole === 'authority' || (userRole === 'tourist' && isAuthenticatedTourist)) && (
                   <button
                     onClick={onLogout}
                     className="p-1.5 rounded-lg bg-red-100 hover:bg-red-200 border border-red-300 text-red-800 dark:bg-red-950/40 dark:hover:bg-red-950/60 dark:border-red-900 dark:text-red-300 transition-all duration-200 hover:scale-105 active:scale-95"

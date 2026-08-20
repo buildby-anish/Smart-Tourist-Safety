@@ -6,7 +6,6 @@ import SearchBar from './SearchBar';
 import QuickActions from './QuickActions';
 import SOSButton from './SOSButton';
 import PlaceCard from './PlaceCard';
-import LoginModal from './LoginModal';
 import BottomNav from './BottomNav';
 import ExplorePanel from './ExplorePanel';
 import AlertsPanel from './AlertsPanel';
@@ -44,36 +43,33 @@ interface Props {
    * triggers an SOS in the same browser session. */
   onTriggerSos: (touristName: string, locationStr: string, touristId?: string, touristPhone?: string) => void;
   onReturnToGateway: () => void;
+  user: TouristUser | null;
+  setUser: React.Dispatch<React.SetStateAction<TouristUser | null>>;
+  showLogin: boolean;
+  setShowLogin: (show: boolean) => void;
+  onLogout: () => void;
 }
 
-export default function TouristApp({ darkMode: dm, onToggleDarkMode, onTriggerSos, onReturnToGateway }: Props) {
-  const [booting, setBooting] = useState(true);
+export default function TouristApp({
+  darkMode: dm,
+  onToggleDarkMode,
+  onTriggerSos,
+  onReturnToGateway,
+  user,
+  setUser,
+  showLogin,
+  setShowLogin,
+  onLogout
+}: Props) {
   const [tab, setTab] = useState<Tab>('map');
-  const [user, setUser] = useState<TouristUser | null>(null);
   const isAuthenticated = !!user;
 
-  const [showLogin, setShowLogin] = useState(false);
   const [selectedPlace, setSelectedPlace] = useState<string | null>(null);
   const [mapFilter, setMapFilter] = useState<string | null>(null);
   const [recenterTrigger, setRecenterTrigger] = useState(0);
   const [zoomAction, setZoomAction] = useState<{ type: 'in' | 'out'; ts: number } | undefined>(undefined);
 
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
-
-  // ── Session restore (real) ──────────────────────────────────────────────
-  // No fake auto-login: only restores a session if a real token + tourist id
-  // were previously stored (from a prior real sign-in), by re-fetching the
-  // live profile. Any failure (expired token, network) just clears the
-  // stale session and leaves the user logged out — never a fabricated user.
-  useEffect(() => {
-    const token = getAuthToken();
-    const touristId = getTouristId();
-    if (!token || !touristId) { setBooting(false); return; }
-
-    getTouristProfile(touristId)
-      .then((profile) => { setUser(profile); setBooting(false); })
-      .catch(() => { clearSession(); setBooting(false); });
-  }, []);
 
   // ── Offline SOS queue auto-sync ─────────────────────────────────────────
   useEffect(() => {
@@ -83,19 +79,7 @@ export default function TouristApp({ darkMode: dm, onToggleDarkMode, onTriggerSo
     return () => window.removeEventListener('online', trySync);
   }, []);
 
-  const handleAuthenticated = useCallback((tourist: any) => {
-    setUser(tourist);
-    setShowLogin(false);
-  }, []);
-
-  const handleLogout = useCallback(async () => {
-    try { await logoutUser(); } catch { /* best-effort — session is cleared locally regardless */ }
-    clearSession();
-    setUser(null);
-    setTab('map');
-  }, []);
-
-  const handleProtectedTab = useCallback(() => { setShowLogin(true); }, []);
+  const handleProtectedTab = useCallback(() => { setShowLogin(true); }, [setShowLogin]);
 
   const handleMarkerClick = useCallback((id: string) => { setSelectedPlace(id); }, []);
   const handleSearchSelect = useCallback((id: string) => { setSelectedPlace(id); setTab('map'); }, []);
@@ -143,8 +127,6 @@ export default function TouristApp({ darkMode: dm, onToggleDarkMode, onTriggerSo
       return "Couldn't reach the server — your SOS is queued and will send automatically once you're back online.";
     }
   }, [isAuthenticated, user, onTriggerSos]);
-
-  if (booting) return <SkeletonMap darkMode={dm} />;
 
   const bg = dm ? '#070f1f' : '#e8eaed';
 
@@ -210,7 +192,7 @@ export default function TouristApp({ darkMode: dm, onToggleDarkMode, onTriggerSo
             isAuthenticated={isAuthenticated}
             user={user}
             onLogin={() => setShowLogin(true)}
-            onLogout={handleLogout}
+            onLogout={onLogout}
             onOpenAuthorityAccess={onReturnToGateway}
           />
         )}
@@ -223,10 +205,6 @@ export default function TouristApp({ darkMode: dm, onToggleDarkMode, onTriggerSo
         onProtected={handleProtectedTab}
         isAuthenticated={isAuthenticated}
       />
-
-      {showLogin && (
-        <LoginModal darkMode={dm} onClose={() => setShowLogin(false)} onAuthenticated={handleAuthenticated} />
-      )}
     </div>
   );
 }
