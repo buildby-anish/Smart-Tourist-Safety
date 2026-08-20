@@ -1,30 +1,30 @@
-import { Map, Compass, Route, Bell, User } from 'lucide-react'
+import { Map, Compass, Route, Bell, User } from 'lucide-react';
 
 const TABS = [
-  { id: 'map',     label: 'Map',     Icon: Map,     protected: false },
-  { id: 'explore', label: 'Explore', Icon: Compass,  protected: false },
-  { id: 'trips',   label: 'Trips',   Icon: Route,    protected: true  },
-  { id: 'alerts',  label: 'Alerts',  Icon: Bell,     protected: false },
-  { id: 'profile', label: 'Profile', Icon: User,     protected: true  },
-]
+  { id: 'map', label: 'Map', Icon: Map, protected: false },
+  { id: 'explore', label: 'Explore', Icon: Compass, protected: false },
+  { id: 'trips', label: 'Trips', Icon: Route, protected: true },
+  { id: 'alerts', label: 'Alerts', Icon: Bell, protected: false },
+  { id: 'profile', label: 'Profile', Icon: User, protected: true },
+];
 
 interface Props {
-  active: string
-  darkMode: boolean
-  onChange: (id: string) => void
-  onProtected: (id: string) => void
-  isAuthenticated: boolean
-  alertCount?: number
+  active: string;
+  darkMode: boolean;
+  onChange: (id: string) => void;
+  onProtected: (id: string) => void;
+  isAuthenticated: boolean;
+  alertCount?: number;
 }
 
-export default function BottomNav({ active, darkMode: dm, onChange, onProtected, isAuthenticated, alertCount = 2 }: Props) {
-  const bg     = dm ? '#0a1628' : '#ffffff'
-  const border = dm ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)'
+export default function BottomNav({ active, darkMode: dm, onChange, onProtected, isAuthenticated, alertCount = 0 }: Props) {
+  const bg = dm ? '#0a1628' : '#ffffff';
+  const border = dm ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)';
 
   const handle = (id: string, prot: boolean) => {
-    if (prot && !isAuthenticated) { onProtected(id); return }
-    onChange(id)
-  }
+    if (prot && !isAuthenticated) { onProtected(id); return; }
+    onChange(id);
+  };
 
   return (
     <nav
@@ -39,9 +39,9 @@ export default function BottomNav({ active, darkMode: dm, onChange, onProtected,
       aria-label="Main navigation"
     >
       {TABS.map(({ id, label, Icon, protected: prot }) => {
-        const on   = active === id
-        const iconC = on ? '#FF9933' : dm ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.38)'
-        const textC = on ? '#FF9933' : dm ? 'rgba(255,255,255,0.38)' : 'rgba(0,0,0,0.35)'
+        const on = active === id;
+        const iconC = on ? '#FF9933' : dm ? 'rgba(255,255,255,0.4)' : 'rgba(0,0,0,0.38)';
+        const textC = on ? '#FF9933' : dm ? 'rgba(255,255,255,0.38)' : 'rgba(0,0,0,0.35)';
 
         return (
           <button
@@ -51,15 +51,9 @@ export default function BottomNav({ active, darkMode: dm, onChange, onProtected,
             aria-current={on ? 'page' : undefined}
             className="flex-1 flex flex-col items-center justify-center gap-[5px] pt-2 pb-1.5 relative transition-all duration-100 active:scale-95"
           >
-            {/* Top indicator */}
             <div
               className="absolute top-0 left-1/2 -translate-x-1/2 rounded-full transition-all duration-200"
-              style={{
-                width: on ? 28 : 0,
-                height: 2.5,
-                background: '#FF9933',
-                opacity: on ? 1 : 0,
-              }}
+              style={{ width: on ? 28 : 0, height: 2.5, background: '#FF9933', opacity: on ? 1 : 0 }}
             />
 
             <div className="relative">
@@ -84,8 +78,8 @@ export default function BottomNav({ active, darkMode: dm, onChange, onProtected,
               {label}
             </span>
           </button>
-        )
+        );
       })}
     </nav>
-  )
+  );
 }

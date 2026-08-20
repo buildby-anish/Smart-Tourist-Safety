@@ -1,28 +1,28 @@
-import { MapPin, Utensils, Hotel, ShieldCheck, Building2, HeartPulse, Navigation, Flame, Users } from 'lucide-react'
+import { MapPin, Utensils, Hotel, ShieldCheck, Building2, HeartPulse, Navigation, Flame, Users } from 'lucide-react';
 
 const CHIPS = [
-  { id: null,          label: 'Nearby',      Icon: Navigation  },
-  { id: 'attraction',  label: 'Attractions', Icon: MapPin      },
-  { id: 'restaurant',  label: 'Restaurants', Icon: Utensils    },
-  { id: 'hotel',       label: 'Hotels',      Icon: Hotel       },
-  { id: 'safe',        label: 'Safe Places', Icon: ShieldCheck },
-  { id: 'police',      label: 'Police',      Icon: Building2   },
-  { id: 'hospital',    label: 'Hospitals',   Icon: HeartPulse  },
-  { id: 'crowd',       label: 'Crowd',       Icon: Users       },
-  { id: 'alert',       label: 'Alerts',      Icon: Flame       },
-]
+  { id: null, label: 'Nearby', Icon: Navigation },
+  { id: 'attraction', label: 'Attractions', Icon: MapPin },
+  { id: 'restaurant', label: 'Restaurants', Icon: Utensils },
+  { id: 'hotel', label: 'Hotels', Icon: Hotel },
+  { id: 'safe', label: 'Safe Places', Icon: ShieldCheck },
+  { id: 'police', label: 'Police', Icon: Building2 },
+  { id: 'hospital', label: 'Hospitals', Icon: HeartPulse },
+  { id: 'crowd', label: 'Crowd', Icon: Users },
+  { id: 'alert', label: 'Alerts', Icon: Flame },
+];
 
 interface Props {
-  darkMode: boolean
-  active: string | null
-  onChange: (id: string | null) => void
+  darkMode: boolean;
+  active: string | null;
+  onChange: (id: string | null) => void;
 }
 
 export default function QuickActions({ darkMode: dm, active, onChange }: Props) {
   return (
     <div className="flex gap-2 overflow-x-auto no-scrollbar">
       {CHIPS.map(({ id, label, Icon }) => {
-        const on = active === id
+        const on = active === id;
 
         return (
           <button
@@ -47,8 +47,8 @@ export default function QuickActions({ darkMode: dm, active, onChange }: Props) 
             <Icon size={12} strokeWidth={on ? 2.5 : 2} />
             {label}
           </button>
-        )
+        );
       })}
     </div>
-  )
+  );
 }

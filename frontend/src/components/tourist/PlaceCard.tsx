@@ -1,8 +1,8 @@
-import { X, Star, Navigation2, Bookmark, Clock, MapPin, Phone, ExternalLink } from 'lucide-react'
+import { X, Star, Navigation2, Bookmark, Clock, MapPin, Phone, ExternalLink } from 'lucide-react';
 
 const DB: Record<string, {
   name: string; type: string; rating: number | null; dist: string; open: boolean;
-  address: string; desc: string; img: string; tags: string[]; phone?: string;
+  address: string; desc: string; tags: string[]; phone?: string;
 }> = {
   gate: {
     name: 'Gateway of India',
@@ -12,7 +12,6 @@ const DB: Record<string, {
     open: true,
     address: 'Apollo Bandar, Colaba, Mumbai',
     desc: 'Iconic basalt arch monument on the Mumbai waterfront, built in 1924 to commemorate the visit of King George V and Queen Mary.',
-    img: 'https://images.unsplash.com/photo-1529253355930-ddbe423a2ac7?w=640&h=300&fit=crop&auto=format&q=80',
     tags: ['Heritage', 'Photography', 'Waterfront', 'Free entry'],
     phone: '+91 22 2204 4040',
   },
@@ -23,8 +22,7 @@ const DB: Record<string, {
     dist: '1.2 km',
     open: true,
     address: 'Apollo Bandar, Colaba, Mumbai 400 001',
-    desc: 'Legendary 5-star hotel opened in 1903, a landmark of Mumbai\'s heritage waterfront. Stunning sea views and iconic architecture.',
-    img: 'https://images.unsplash.com/photo-1566073771259-6a8506099945?w=640&h=300&fit=crop&auto=format&q=80',
+    desc: "Legendary 5-star hotel opened in 1903, a landmark of Mumbai's heritage waterfront. Stunning sea views and iconic architecture.",
     tags: ['Heritage', 'Luxury', 'Sea view', '5-star'],
     phone: '+91 22 6665 3366',
   },
@@ -35,8 +33,7 @@ const DB: Record<string, {
     dist: '1.5 km',
     open: true,
     address: '5A Merewether Road, Colaba, Mumbai',
-    desc: 'Mumbai\'s beloved jukebox café since 1932, known for its lively atmosphere, jukebox music, and hearty continental food.',
-    img: 'https://images.unsplash.com/photo-1517248135467-4c7edcad34c4?w=640&h=300&fit=crop&auto=format&q=80',
+    desc: "Mumbai's beloved jukebox café since 1932, known for its lively atmosphere and hearty continental food.",
     tags: ['Café', 'Heritage', 'Continental', 'Bar'],
     phone: '+91 22 2202 0591',
   },
@@ -48,7 +45,6 @@ const DB: Record<string, {
     open: true,
     address: 'Shahid Bhagat Singh Rd, Colaba, Mumbai',
     desc: 'Famous street market stretching from the Gateway of India, selling antiques, textiles, jewellery, and street food.',
-    img: 'https://images.unsplash.com/photo-1596422846543-75c6fc197f07?w=640&h=300&fit=crop&auto=format&q=80',
     tags: ['Shopping', 'Market', 'Street food'],
   },
   hosp1: {
@@ -57,9 +53,8 @@ const DB: Record<string, {
     rating: null,
     dist: '2.1 km',
     open: true,
-    address: 'P.D\'Mello Road, Fort, Mumbai 400 001',
-    desc: 'One of Mumbai\'s oldest government hospitals, offering emergency and speciality medical care to residents and tourists.',
-    img: 'https://images.unsplash.com/photo-1538108149393-fbbd81895907?w=640&h=300&fit=crop&auto=format&q=80',
+    address: "P.D'Mello Road, Fort, Mumbai 400 001",
+    desc: "One of Mumbai's oldest government hospitals, offering emergency and speciality medical care to residents and tourists.",
     tags: ['Emergency', '24×7', 'Government'],
     phone: '022 2262 3311',
   },
@@ -71,7 +66,6 @@ const DB: Record<string, {
     open: true,
     address: 'Colaba Causeway, Colaba, Mumbai',
     desc: 'Mumbai Police station serving the Colaba and tourist precinct area. Tourist assistance available around the clock.',
-    img: 'https://images.unsplash.com/photo-1589578527966-fdac0f44566c?w=640&h=300&fit=crop&auto=format&q=80',
     tags: ['Police', 'Tourist help', '24×7'],
     phone: '100',
   },
@@ -83,7 +77,6 @@ const DB: Record<string, {
     open: false,
     address: 'Near Apollo Bandar Junction',
     desc: 'High crowd density detected near Colaba Causeway junction. Exercise caution and keep your belongings secure.',
-    img: 'https://images.unsplash.com/photo-1611892441796-ae6af0ec2cc8?w=640&h=300&fit=crop&auto=format&q=80',
     tags: ['Alert', 'High crowd', 'Caution'],
   },
   hotel2: {
@@ -93,8 +86,7 @@ const DB: Record<string, {
     dist: '3.1 km',
     open: true,
     address: 'Nariman Point, Mumbai 400 021',
-    desc: 'Elegant 5-star hotel with panoramic views of Marine Drive and the Arabian Sea. Business and leisure hotel.',
-    img: 'https://images.unsplash.com/photo-1618773928121-c32242e63f39?w=640&h=300&fit=crop&auto=format&q=80',
+    desc: 'Elegant 5-star hotel with panoramic views of Marine Drive and the Arabian Sea.',
     tags: ['Luxury', 'Sea view', '5-star', 'Business'],
     phone: '+91 22 6632 4343',
   },
@@ -105,46 +97,43 @@ const DB: Record<string, {
     dist: '1.0 km',
     open: true,
     address: 'S.B. Singh Road, Colaba, Mumbai',
-    desc: 'Mumbai institution since 1871. One of the oldest and most popular restaurants in the city, famous for its unique character.',
-    img: 'https://images.unsplash.com/photo-1559339352-11d035aa65de?w=640&h=300&fit=crop&auto=format&q=80',
+    desc: 'Mumbai institution since 1871 — one of the oldest and most popular restaurants in the city.',
     tags: ['Historic', 'Multi-cuisine', 'Landmark'],
     phone: '+91 22 2202 0131',
   },
-}
+};
 
 const TYPE_COLOR: Record<string, string> = {
   'Tourist Attraction': '#FF9933',
-  'Heritage Site':      '#FF9933',
-  'Luxury Hotel':       '#6366f1',
-  'Restaurant · Bar':   '#f97316',
-  'Restaurant · Café':  '#f97316',
-  'Market · Shopping':  '#0ea5e9',
-  'Government Hospital':'#16a34a',
-  'Police Station':     '#2563eb',
-  'Safety Alert':       '#dc2626',
-}
+  'Luxury Hotel': '#6366f1',
+  'Restaurant · Bar': '#f97316',
+  'Restaurant · Café': '#f97316',
+  'Market · Shopping': '#0ea5e9',
+  'Government Hospital': '#16a34a',
+  'Police Station': '#2563eb',
+  'Safety Alert': '#dc2626',
+};
 
 interface Props {
-  placeId: string | null
-  isMobile: boolean
-  darkMode: boolean
-  onClose: () => void
+  placeId: string | null;
+  isMobile: boolean;
+  darkMode: boolean;
+  onClose: () => void;
 }
 
 export default function PlaceCard({ placeId, isMobile, darkMode: dm, onClose }: Props) {
-  const place = placeId ? (DB[placeId] || DB.gate) : DB.gate
+  const place = placeId ? (DB[placeId] || DB.gate) : DB.gate;
 
-  const surface  = dm ? '#0a1628' : '#ffffff'
-  const border   = dm ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)'
-  const text     = dm ? '#f1f5f9' : '#0c2340'
-  const subtle   = dm ? 'rgba(255,255,255,0.48)' : 'rgba(12,35,64,0.48)'
-  const tagBg    = dm ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)'
-  const typeColor = TYPE_COLOR[place.type] || '#FF9933'
-  const isAlert  = place.type === 'Safety Alert'
+  const surface = dm ? '#0a1628' : '#ffffff';
+  const border = dm ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)';
+  const text = dm ? '#f1f5f9' : '#0c2340';
+  const subtle = dm ? 'rgba(255,255,255,0.48)' : 'rgba(12,35,64,0.48)';
+  const tagBg = dm ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)';
+  const typeColor = TYPE_COLOR[place.type] || '#FF9933';
+  const isAlert = place.type === 'Safety Alert';
 
   const Content = () => (
     <>
-      {/* Type badge */}
       <div className="flex items-center justify-between mb-1">
         <span className="text-[11px] font-semibold uppercase tracking-wider" style={{ color: typeColor }}>
           {place.type}
@@ -161,7 +150,6 @@ export default function PlaceCard({ placeId, isMobile, darkMode: dm, onClose }: 
         {place.name}
       </h3>
 
-      {/* Meta row */}
       <div className="flex items-center gap-4 mb-3">
         <div className="flex items-center gap-1.5" style={{ color: subtle }}>
           <MapPin size={12} />
@@ -183,7 +171,6 @@ export default function PlaceCard({ placeId, isMobile, darkMode: dm, onClose }: 
 
       <p className="text-sm leading-relaxed mb-3" style={{ color: subtle }}>{place.desc}</p>
 
-      {/* Tags */}
       <div className="flex flex-wrap gap-1.5 mb-4">
         {place.tags.map((t) => (
           <span key={t} className="text-[11px] px-2.5 py-1 rounded-full" style={{ background: tagBg, color: subtle }}>
@@ -192,17 +179,19 @@ export default function PlaceCard({ placeId, isMobile, darkMode: dm, onClose }: 
         ))}
       </div>
 
-      {/* Actions */}
       <div className="flex gap-2 pt-3" style={{ borderTop: `1px solid ${border}` }}>
         {!isAlert ? (
           <>
-            <button
+            <a
+              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.address)}`}
+              target="_blank"
+              rel="noopener noreferrer"
               className="flex-1 h-10 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all hover:opacity-92 active:scale-95"
               style={{ background: '#FF9933', boxShadow: '0 2px 12px rgba(255,153,51,0.3)' }}
             >
               <Navigation2 size={14} />
               Directions
-            </button>
+            </a>
             <button
               className="w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:opacity-75 active:scale-95"
               style={{ background: tagBg, border: `1px solid ${border}` }}
@@ -210,13 +199,16 @@ export default function PlaceCard({ placeId, isMobile, darkMode: dm, onClose }: 
             >
               <Bookmark size={15} style={{ color: text }} />
             </button>
-            <button
-              className="w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:opacity-75 active:scale-95"
-              style={{ background: tagBg, border: `1px solid ${border}` }}
-              aria-label="More info"
-            >
-              <ExternalLink size={15} style={{ color: text }} />
-            </button>
+            {place.phone && (
+              <a
+                href={`tel:${place.phone.replace(/\s/g, '')}`}
+                className="w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:opacity-75 active:scale-95"
+                style={{ background: tagBg, border: `1px solid ${border}` }}
+                aria-label="Call"
+              >
+                <ExternalLink size={15} style={{ color: text }} />
+              </a>
+            )}
           </>
         ) : (
           <button
@@ -228,7 +220,7 @@ export default function PlaceCard({ placeId, isMobile, darkMode: dm, onClose }: 
         )}
       </div>
     </>
-  )
+  );
 
   if (isMobile) {
     return (
@@ -236,7 +228,6 @@ export default function PlaceCard({ placeId, isMobile, darkMode: dm, onClose }: 
         className="fixed inset-x-0 bottom-0 z-30 rounded-t-2xl overflow-hidden animate-sheet-up"
         style={{ background: surface, boxShadow: '0 -6px 40px rgba(0,0,0,0.3)', paddingBottom: 'env(safe-area-inset-bottom,16px)' }}
       >
-        {/* Drag handle */}
         <div className="flex justify-center pt-3 pb-2">
           <div className="w-9 h-1 rounded-full" style={{ background: dm ? 'rgba(255,255,255,0.18)' : 'rgba(0,0,0,0.12)' }} />
         </div>
@@ -249,36 +240,31 @@ export default function PlaceCard({ placeId, isMobile, darkMode: dm, onClose }: 
           <X size={15} style={{ color: text }} />
         </button>
 
-        <img src={place.img} alt={place.name} className="w-full h-44 object-cover" />
-
-        <div className="px-5 py-4">
+        <div className="px-5 py-4 pt-6">
           <Content />
         </div>
       </div>
-    )
+    );
   }
 
-  // Desktop floating card
   return (
     <div
       className="absolute bottom-6 left-5 w-[340px] rounded-2xl overflow-hidden z-20 animate-modal-in"
       style={{ background: surface, border: `1px solid ${border}`, boxShadow: `0 8px 48px rgba(0,0,0,${dm ? '0.6' : '0.16'})` }}
     >
-      <div className="relative">
-        <img src={place.img} alt={place.name} className="w-full h-40 object-cover" />
-        <div className="absolute inset-0" style={{ background: 'linear-gradient(to bottom, transparent 40%, rgba(0,0,0,0.45))' }} />
+      <div className="relative flex items-center justify-end px-3 pt-3">
         <button
           onClick={onClose}
-          className="absolute top-3 right-3 w-8 h-8 rounded-full flex items-center justify-center"
-          style={{ background: 'rgba(0,0,0,0.4)', backdropFilter: 'blur(4px)' }}
+          className="w-8 h-8 rounded-full flex items-center justify-center"
+          style={{ background: tagBg }}
           aria-label="Close"
         >
-          <X size={14} color="white" />
+          <X size={14} style={{ color: text }} />
         </button>
       </div>
-      <div className="px-4 pt-3.5 pb-4">
+      <div className="px-4 pt-1 pb-4">
         <Content />
       </div>
     </div>
-  )
+  );
 }
