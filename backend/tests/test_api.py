@@ -132,6 +132,58 @@ def test_incident_flows(auth_headers_tourist, auth_headers_authority):
     assert patch_resp.status_code == 200
     assert patch_resp.json()["status"] == "RESOLVED"
 
+def test_sos_cannot_spoof_another_tourist_id(auth_headers_tourist):
+    """A tourist session must not be able to raise an SOS under someone else's tourist_id."""
+    other_username = f"tourist_{uuid4().hex[:6]}"
+    reg_resp = client.post("/api/v1/auth/register", json={
+        "username": other_username,
+        "password": "Password123!",
+        "user_type": "tourist",
+        "mfa_enabled": False,
+    })
+    assert reg_resp.status_code == 201
+    other_tourist_id = reg_resp.json()["tourist_id"]
+    assert other_tourist_id != auth_headers_tourist["tourist_id"]
+
+    headers = {"Authorization": auth_headers_tourist["Authorization"]}
+    resp = client.post("/api/v1/sos", json={
+        "tourist_id": other_tourist_id,
+        "latitude": 32.2432,
+        "longitude": 77.1892,
+    }, headers=headers)
+
+    assert resp.status_code == 201
+    data = resp.json()
+    assert data["tourist_id"] == auth_headers_tourist["tourist_id"]
+    assert data["tourist_id"] != other_tourist_id
+
+
+def test_incident_cannot_spoof_another_tourist_id(auth_headers_tourist):
+    """A tourist session must not be able to file an incident as another tourist."""
+    other_username = f"tourist_{uuid4().hex[:6]}"
+    reg_resp = client.post("/api/v1/auth/register", json={
+        "username": other_username,
+        "password": "Password123!",
+        "user_type": "tourist",
+        "mfa_enabled": False,
+    })
+    assert reg_resp.status_code == 201
+    other_tourist_id = reg_resp.json()["tourist_id"]
+
+    headers = {"Authorization": auth_headers_tourist["Authorization"]}
+    resp = client.post("/api/v1/incidents", json={
+        "tourist_id": other_tourist_id,
+        "incident_type": "THEFT",
+        "severity": "HIGH",
+        "status": "OPEN",
+        "description": "Should be attributed to the authenticated tourist",
+    }, headers=headers)
+
+    assert resp.status_code == 201
+    assert resp.json()["tourist_id"] == auth_headers_tourist["tourist_id"]
+    assert resp.json()["tourist_id"] != other_tourist_id
+
+
 def test_sos_alarm(auth_headers_tourist):
     headers = {"Authorization": auth_headers_tourist["Authorization"]}
     tourist_id = auth_headers_tourist["tourist_id"]
