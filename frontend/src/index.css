@@ -110,3 +110,27 @@
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; }
 
+@keyframes splash-ring {
+  0%   { transform: scale(0.92); opacity: 0.35; }
+  100% { transform: scale(1.28); opacity: 0; }
+}
+
+@keyframes splash-mark {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.03); }
+}
+
+.splash-ring {
+  position: absolute;
+  width: 96px;
+  height: 96px;
+  border-radius: 12px;
+  border: 1.5px solid rgba(255, 153, 51, 0.55);
+  animation: splash-ring 1.4s ease-out infinite;
+  pointer-events: none;
+}
+
+.splash-mark {
+  animation: splash-mark 1.8s ease-in-out infinite;
+}
+

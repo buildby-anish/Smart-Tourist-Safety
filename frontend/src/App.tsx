@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Loader2 } from 'lucide-react';
+import BrandMark from './components/BrandMark';
 import {
   Language,
   UserRole,
@@ -76,6 +76,7 @@ export default function App() {
   const [showLogin, setShowLogin] = useState<boolean>(false);
   const [loginModalMode, setLoginModalMode] = useState<'login' | 'signup'>('login');
   const [booting, setBooting] = useState<boolean>(true);
+  const [splashGone, setSplashGone] = useState<boolean>(false);
 
   // Master Data State
   const [tourists, setTourists] = useState<TouristProfile[]>(INITIAL_TOURISTS);
@@ -102,13 +103,21 @@ export default function App() {
     }
   }, []);
 
-  // Restore session at boot time
+  // Restore session at boot time. Keep the splash up briefly so the
+  // branded loading screen can display, then fade into the main UI.
   useEffect(() => {
+    const started = Date.now();
+    const MIN_SPLASH_MS = 700;
+    const finishBoot = () => {
+      const wait = Math.max(0, MIN_SPLASH_MS - (Date.now() - started));
+      window.setTimeout(() => setBooting(false), wait);
+    };
+
     const token = getAuthToken();
     const type = getUserType();
 
     if (!token) {
-      setBooting(false);
+      finishBoot();
       return;
     }
 
@@ -119,7 +128,7 @@ export default function App() {
         refreshIncidentsFromBackend();
         refreshAuditLogsFromBackend();
       }
-      setBooting(false);
+      finishBoot();
     } else {
       const touristId = getTouristId();
       if (touristId) {
@@ -127,18 +136,24 @@ export default function App() {
           .then((profile) => {
             setTouristUser(profile);
             setUserRole('tourist');
-            setBooting(false);
+            finishBoot();
           })
           .catch((err) => {
             console.warn('Session restoration failed:', err);
             clearSession();
-            setBooting(false);
+            finishBoot();
           });
       } else {
-        setBooting(false);
+        finishBoot();
       }
     }
   }, []);
+
+  useEffect(() => {
+    if (booting) return;
+    const id = window.setTimeout(() => setSplashGone(true), 320);
+    return () => window.clearTimeout(id);
+  }, [booting]);
 
   // Audit Logging helper — persists to public.audit_logs on the backend
   // (see lib/api.ts createAuditLog) while also updating local state
@@ -581,19 +596,28 @@ export default function App() {
 
   const activeSosCount = incidents.filter((i) => i.status !== 'Resolved').length;
 
-  if (booting) {
-    return (
-      <div className={`min-h-screen ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-[#F4F6F9] text-slate-900'} flex items-center justify-center`}>
-        <div className="flex flex-col items-center gap-3">
-          <Loader2 className="animate-spin text-[#FF9933]" size={36} />
-          <p className="text-sm font-semibold tracking-wide" style={{ fontFamily: 'Outfit, sans-serif' }}>Suraksha Setu</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-[#F4F6F9] text-slate-900'} flex flex-col font-sans transition-colors duration-200`}>
+      {!splashGone && (
+        <div
+          className={`fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#0C2340] transition-opacity duration-300 ${
+            booting ? 'opacity-100' : 'opacity-0 pointer-events-none'
+          }`}
+          aria-hidden={!booting}
+          aria-busy={booting}
+        >
+          <div className="relative flex items-center justify-center">
+            <span className="splash-ring" />
+            <BrandMark size={72} className="splash-mark relative z-10" />
+          </div>
+          <div className="mt-6 h-0.5 w-16 flex overflow-hidden rounded-full">
+            <div className="h-full w-1/3 bg-[#FF9933]" />
+            <div className="h-full w-1/3 bg-white" />
+            <div className="h-full w-1/3 bg-[#138808]" />
+          </div>
+        </div>
+      )}
+
       
       {/* Command Header */}
       <Header

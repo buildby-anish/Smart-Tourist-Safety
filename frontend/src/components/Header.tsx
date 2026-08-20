@@ -10,11 +10,11 @@ import {
   Sun,
   Moon,
   LogOut,
-  Compass,
   ShieldAlert
 } from 'lucide-react';
 import { Language, UserRole, ActiveModule } from '../types';
 import { i18n } from '../data/i18n';
+import BrandMark from './BrandMark';
 
 interface HeaderProps {
   language: Language;
@@ -57,7 +57,6 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const t = i18n[language];
 
-  // Navigation items matching exact requested titles and badges
   const navItems = [
     {
       id: 'ai_hub' as ActiveModule,
@@ -97,45 +96,34 @@ export const Header: React.FC<HeaderProps> = ({
   ];
 
   return (
-    <header className="sticky top-0 z-50 bg-[#0C2340] text-white shadow-xl border-b border-slate-800">
-      
-      {/* Tricolor Top Bar Accent */}
-      <div className="h-1 w-full flex">
+    <header className="sticky top-0 z-50 bg-[#0C2340] text-white shadow-md border-b border-slate-800 pt-[env(safe-area-inset-top,0px)]">
+      <div className="h-0.5 w-full flex">
         <div className="h-full w-1/3 bg-[#FF9933]"></div>
         <div className="h-full w-1/3 bg-white"></div>
         <div className="h-full w-1/3 bg-[#138808]"></div>
       </div>
 
-      {/* ROW 1: DARK NAVY BAR WITH BRAND & HORIZONTAL NAV TABS */}
-      <div className="max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8 py-2">
-        <div className="flex flex-col xl:flex-row items-center justify-between gap-3">
-          
-          {/* Brand Logo & Emblem */}
-          <div
-            className="flex items-center space-x-3 cursor-pointer group flex-shrink-0"
+      <div className="max-w-[1700px] mx-auto px-3 sm:px-4">
+        <div className="h-12 flex items-center gap-2 min-h-0">
+          <button
+            type="button"
+            className="flex items-center gap-2 flex-shrink-0 cursor-pointer group"
             onClick={() => {
               onLogoClick();
               if (userRole === 'authority') onSelectModule('ai_hub');
             }}
+            aria-label="Suraksha Setu home"
           >
-            {/* Round White Wheel Emblem */}
-            <div className="w-9 h-9 rounded-full bg-white text-[#0C2340] flex items-center justify-center font-bold shadow-sm border border-slate-200 group-hover:scale-105 transition-transform">
-              <Compass className="w-5 h-5 text-[#0C2340]" />
-            </div>
-
-            <div className="flex flex-col leading-tight">
-              <span className="text-sm font-black tracking-wider text-white uppercase whitespace-nowrap">
-                SURAKSHA SETU
+            <BrandMark size={32} className="group-hover:scale-105 transition-transform" />
+            {userRole === 'authority' && (
+              <span className="hidden xl:inline text-[11px] font-bold tracking-wider text-white/90 uppercase whitespace-nowrap">
+                Suraksha Setu
               </span>
-              <span className="text-[10px] font-bold text-[#FF9933] whitespace-nowrap">
-                सुरक्षा सेतु • National Portal
-              </span>
-            </div>
-          </div>
+            )}
+          </button>
 
-          {/* Horizontal Nav Tabs (Requested Modules) */}
           {userRole === 'authority' && (
-            <div className="flex items-center space-x-1.5 sm:space-x-2 overflow-x-auto w-full xl:w-auto py-1 no-scrollbar">
+            <div className="flex items-center space-x-1 overflow-x-auto flex-1 min-w-0 py-0 no-scrollbar">
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const isActive = activeModule === item.id;
@@ -144,19 +132,19 @@ export const Header: React.FC<HeaderProps> = ({
                   <button
                     key={item.id}
                     onClick={() => onSelectModule(item.id)}
-                    className={`flex items-center space-x-2.5 px-3.5 py-2 rounded-xl text-left transition-all duration-200 flex-shrink-0 cursor-pointer hover:scale-[1.03] active:scale-[0.97] ${
+                    className={`flex items-center space-x-1.5 px-2.5 py-1.5 rounded-lg text-left transition-all duration-200 flex-shrink-0 cursor-pointer hover:scale-[1.03] active:scale-[0.97] ${
                       isActive
                         ? 'bg-[#153462] border border-[#234F8C] shadow-md ring-1 ring-[#FF9933]/40'
                         : 'bg-transparent hover:bg-white/5 text-slate-300 hover:text-white border border-transparent'
                     }`}
                   >
                     <Icon
-                      className={`w-4 h-4 flex-shrink-0 ${
+                      className={`w-3.5 h-3.5 flex-shrink-0 ${
                         isActive ? 'text-[#FF9933]' : 'text-slate-300'
                       }`}
                     />
                     <span
-                      className={`text-xs whitespace-nowrap font-bold ${
+                      className={`text-[11px] whitespace-nowrap font-bold ${
                         isActive ? 'text-white' : 'text-slate-200'
                       }`}
                     >
@@ -176,169 +164,129 @@ export const Header: React.FC<HeaderProps> = ({
             </div>
           )}
 
-        </div>
-      </div>
+          <div className={`flex items-center gap-2 min-w-0 ${userRole === 'authority' ? 'ml-1' : 'ml-auto'} justify-end`}>
+            {userRole === 'authority' && (
+              <div className="relative hidden md:block">
+                <input
+                  type="text"
+                  placeholder="Search districts or schemes..."
+                  value={globalSearchQuery}
+                  onChange={(e) => onGlobalSearchChange(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && onExecuteGlobalSearch()}
+                  className="w-44 lg:w-64 pl-8 pr-8 py-1 text-xs rounded-full bg-white/95 border border-white/20 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-[#FF9933] focus:ring-1 focus:ring-[#FF9933] shadow-sm font-medium"
+                />
+                <Search className="w-3.5 h-3.5 text-slate-400 absolute left-2.5 top-1.5" />
+                {globalSearchQuery && (
+                  <button
+                    onClick={onExecuteGlobalSearch}
+                    className="absolute right-1.5 top-1 px-2 py-0.5 bg-[#0C2340] text-white text-[10px] font-bold rounded-full hover:bg-slate-800"
+                  >
+                    GO
+                  </button>
+                )}
+              </div>
+            )}
 
-      {/* ROW 2: LIGHT SUB-BAR WITH PAGE TITLE, SEARCH & OFFICER PROFILE */}
-      <div className="bg-[#F8FAFC] text-slate-900 border-t border-slate-700/50 border-b border-slate-200 dark:bg-slate-900 dark:text-slate-100 dark:border-slate-800 py-2.5 transition-colors duration-200">
-        <div className="max-w-[1700px] mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col md:flex-row items-center justify-between gap-3">
-            
-            {/* Title & Subtitle */}
-            <div className="flex flex-col">
-              <h1 className="text-lg sm:text-xl font-black text-[#0C2340] dark:text-slate-200 tracking-tight whitespace-nowrap uppercase">
-                {t.nationalPortalName}
-              </h1>
-              <p className="text-xs text-slate-600 dark:text-slate-400 font-semibold mt-0.5 whitespace-nowrap">
-                {t.nationalPortalName} • {language === 'hi' ? 'हिमाचल प्रदेश राज्य' : 'Himachal Pradesh State'}
-              </p>
-            </div>
+            {userRole === 'authority' && activeSosCount > 0 && (
+              <button
+                onClick={() => onSelectModule('sos_map')}
+                className="hidden sm:flex items-center space-x-1 bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded-full text-[10px] font-black shadow-sm border border-red-400/40 whitespace-nowrap animate-pulse transition-all cursor-pointer"
+              >
+                <ShieldAlert className="w-3 h-3 text-white" />
+                <span>{activeSosCount} SOS</span>
+              </button>
+            )}
 
-            {/* Right Controls: Search, Profile & Action Utilities */}
-            <div className="flex items-center space-x-3 w-full md:w-auto justify-end">
-              
-              {/* Search Box */}
-              {userRole === 'authority' && (
-                <div className="relative flex-1 md:flex-initial">
-                  <input
-                    type="text"
-                    placeholder="Search districts or schemes..."
-                    value={globalSearchQuery}
-                    onChange={(e) => onGlobalSearchChange(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && onExecuteGlobalSearch()}
-                    className="w-full md:w-72 lg:w-80 pl-9 pr-8 py-1.5 text-xs rounded-full bg-white border border-slate-300 text-slate-900 placeholder-slate-400 focus:outline-none focus:border-[#0C2340] focus:ring-1 focus:ring-[#0C2340] dark:bg-slate-950 dark:border-slate-800 dark:text-slate-100 dark:placeholder-slate-500 dark:focus:border-slate-700 dark:focus:ring-slate-700 shadow-sm font-medium transition-all"
-                  />
-                  <Search className="w-3.5 h-3.5 text-slate-400 absolute left-3 top-2.5" />
-                  {globalSearchQuery && (
-                    <button
-                      onClick={onExecuteGlobalSearch}
-                      className="absolute right-2 top-1.5 px-2 py-0.5 bg-[#0C2340] text-white text-[10px] font-bold rounded-full hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700"
-                    >
-                      GO
-                    </button>
-                  )}
+            {userRole === 'authority' ? (
+              <div className="hidden lg:flex items-center space-x-2 border-l border-white/15 pl-2">
+                <img
+                  src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80"
+                  alt="Rajesh Kumar, IAS"
+                  className="w-7 h-7 rounded-full border border-white/20 object-cover flex-shrink-0"
+                />
+                <div className="flex flex-col leading-tight">
+                  <span className="text-[11px] font-extrabold text-white whitespace-nowrap">
+                    Rajesh Kumar, IAS
+                  </span>
+                  <span className="text-[9px] text-slate-300 font-medium whitespace-nowrap">
+                    State Chief Administrator
+                  </span>
+                </div>
+              </div>
+            ) : userRole === 'tourist' && isAuthenticatedTourist ? (
+              <div className="flex items-center space-x-2">
+                <div className="w-7 h-7 rounded-full border border-[#FF9933]/50 bg-[#153462] flex items-center justify-center flex-shrink-0 text-white font-black text-[11px]">
+                  {(touristName || 'T').substring(0, 1).toUpperCase()}
+                </div>
+                <span className="hidden sm:inline text-[11px] font-bold text-white/90 whitespace-nowrap max-w-[120px] truncate">
+                  {touristName || 'Tourist'}
+                </span>
+              </div>
+            ) : null}
+
+            <div className="flex items-center space-x-1.5">
+              {userRole === 'tourist' && !isAuthenticatedTourist && (
+                <div className="flex items-center space-x-1.5 mr-0.5">
+                  <button
+                    onClick={onLoginClick}
+                    className="px-2.5 py-1 text-[11px] font-bold rounded-md border border-white/20 hover:border-white/40 text-white/90 hover:text-white transition-all cursor-pointer hover:bg-white/10"
+                  >
+                    Login
+                  </button>
+                  <button
+                    onClick={onSignUpClick}
+                    className="px-2.5 py-1 text-[11px] font-bold rounded-md bg-[#FF9933] text-white hover:bg-[#e68a2e] shadow-sm transition-all cursor-pointer"
+                  >
+                    Sign Up
+                  </button>
                 </div>
               )}
 
-              {/* Active SOS Badge Banner */}
-              {userRole === 'authority' && activeSosCount > 0 && (
+              <div className="flex items-center bg-white/10 border border-white/15 rounded-md p-0.5 gap-0.5">
+                <Globe className="w-3 h-3 text-slate-300 ml-1 hidden sm:block" />
                 <button
-                  onClick={() => onSelectModule('sos_map')}
-                  className="flex items-center space-x-1.5 bg-red-600 hover:bg-red-700 text-white px-3 py-1.5 rounded-full text-xs font-black shadow-sm border border-red-400/40 whitespace-nowrap animate-pulse transition-all cursor-pointer"
+                  onClick={() => onLanguageChange('en')}
+                  className={`px-1.5 py-0.5 text-[10px] font-extrabold rounded ${
+                    language === 'en'
+                      ? 'bg-white text-[#0C2340] shadow-xs'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
                 >
-                  <ShieldAlert className="w-3.5 h-3.5 text-white" />
-                  <span>{activeSosCount} Active SOS</span>
+                  EN
                 </button>
-              )}
-
-              {/* Profile Badge */}
-              {userRole === 'authority' ? (
-                <div className="flex items-center space-x-2.5 border-l border-slate-300 dark:border-slate-800 pl-3">
-                  <img
-                    src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=150&auto=format&fit=crop&q=80"
-                    alt="Rajesh Kumar, IAS"
-                    className="w-8 h-8 rounded-full border border-slate-300 dark:border-slate-800 object-cover shadow-xs flex-shrink-0"
-                  />
-                  <div className="flex flex-col leading-tight">
-                    <span className="text-xs font-extrabold text-[#0C2340] dark:text-slate-200 whitespace-nowrap">
-                      Rajesh Kumar, IAS
-                    </span>
-                    <span className="text-[10px] text-slate-500 dark:text-slate-400 font-medium whitespace-nowrap">
-                      State Chief Administrator
-                    </span>
-                  </div>
-                </div>
-              ) : userRole === 'tourist' && isAuthenticatedTourist ? (
-                <div className="flex items-center space-x-2.5 border-l border-slate-300 dark:border-slate-800 pl-3">
-                  <div className="w-8 h-8 rounded-full border border-[#FF9933]/50 bg-[#0C2340] flex items-center justify-center shadow-xs flex-shrink-0 text-white font-black text-xs">
-                    {(touristName || 'T').substring(0, 1).toUpperCase()}
-                  </div>
-                  <div className="flex flex-col leading-tight">
-                    <span className="text-xs font-extrabold text-[#0C2340] dark:text-slate-200 whitespace-nowrap">
-                      {touristName || 'Tourist'}
-                    </span>
-                    <span className="text-[10px] font-bold whitespace-nowrap uppercase tracking-wider text-[#FF9933]">
-                      Active Safe
-                    </span>
-                  </div>
-                </div>
-              ) : null}
-
-              {/* Utilities: Language, Theme & Logout */}
-              <div className="flex items-center space-x-1.5 border-l border-slate-300 dark:border-slate-800 pl-2">
-                
-                {/* Login / Sign Up buttons for unauthenticated tourist */}
-                {userRole === 'tourist' && !isAuthenticatedTourist && (
-                  <div className="flex items-center space-x-2 mr-1">
-                    <button
-                      onClick={onLoginClick}
-                      className="px-3 py-1.5 text-xs font-bold rounded-lg border border-[#0C2340]/20 hover:border-[#0C2340]/40 text-[#0C2340] dark:border-slate-700 dark:text-slate-300 dark:hover:text-white transition-all cursor-pointer hover:bg-slate-100 dark:hover:bg-slate-800"
-                    >
-                      Login
-                    </button>
-                    <button
-                      onClick={onSignUpClick}
-                      className="px-3 py-1.5 text-xs font-bold rounded-lg bg-[#FF9933] text-white hover:bg-[#e68a2e] shadow-sm transition-all cursor-pointer"
-                    >
-                      Sign Up
-                    </button>
-                  </div>
-                )}
-
-                {/* Language Switcher */}
-                <div className="flex items-center bg-slate-200/80 border border-slate-300 dark:bg-slate-850 dark:border-slate-800 rounded-lg p-0.5 gap-0.5">
-                  <Globe className="w-3 h-3 text-slate-600 dark:text-slate-400 ml-1" />
-                  <button
-                    onClick={() => onLanguageChange('en')}
-                    className={`px-1.5 py-0.5 text-[10px] font-extrabold rounded ${
-                      language === 'en'
-                        ? 'bg-[#0C2340] text-white dark:bg-slate-950 shadow-xs'
-                        : 'text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
-                    }`}
-                  >
-                    EN
-                  </button>
-                  <button
-                    onClick={() => onLanguageChange('hi')}
-                    className={`px-1.5 py-0.5 text-[10px] font-extrabold rounded ${
-                      language === 'hi'
-                        ? 'bg-[#0C2340] text-white dark:bg-slate-950 shadow-xs'
-                        : 'text-slate-700 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
-                    }`}
-                  >
-                    हिंदी
-                  </button>
-                </div>
-
-                {/* Theme Toggle */}
                 <button
-                  onClick={onToggleDarkMode}
-                  className="p-1.5 rounded-lg bg-slate-200/80 border border-slate-300 text-slate-700 hover:bg-slate-300 dark:bg-slate-850 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-900 transition-all duration-200 hover:scale-105 active:scale-95"
-                  title="Toggle High-Contrast Theme"
+                  onClick={() => onLanguageChange('hi')}
+                  className={`px-1.5 py-0.5 text-[10px] font-extrabold rounded ${
+                    language === 'hi'
+                      ? 'bg-white text-[#0C2340] shadow-xs'
+                      : 'text-slate-300 hover:text-white'
+                  }`}
                 >
-                  {darkMode ? <Sun className="w-3.5 h-3.5 text-amber-500" /> : <Moon className="w-3.5 h-3.5 text-slate-700 dark:text-slate-400" />}
+                  हिंदी
                 </button>
-
-                {/* Logout — shown for authenticated users */}
-                {(userRole === 'authority' || (userRole === 'tourist' && isAuthenticatedTourist)) && (
-                  <button
-                    onClick={onLogout}
-                    className="p-1.5 rounded-lg bg-red-100 hover:bg-red-200 border border-red-300 text-red-800 dark:bg-red-950/40 dark:hover:bg-red-950/60 dark:border-red-900 dark:text-red-300 transition-all duration-200 hover:scale-105 active:scale-95"
-                    title={t.logoutBtn}
-                  >
-                    <LogOut className="w-3.5 h-3.5" />
-                  </button>
-                )}
-
               </div>
 
-            </div>
+              <button
+                onClick={onToggleDarkMode}
+                className="p-1.5 rounded-md bg-white/10 border border-white/15 text-slate-200 hover:bg-white/15 transition-all duration-200 hover:scale-105 active:scale-95"
+                title="Toggle High-Contrast Theme"
+              >
+                {darkMode ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-slate-200" />}
+              </button>
 
+              {(userRole === 'authority' || (userRole === 'tourist' && isAuthenticatedTourist)) && (
+                <button
+                  onClick={onLogout}
+                  className="p-1.5 rounded-md bg-red-500/15 hover:bg-red-500/25 border border-red-400/30 text-red-200 transition-all duration-200 hover:scale-105 active:scale-95"
+                  title={t.logoutBtn}
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </div>
-
     </header>
   );
 };
-
