@@ -506,31 +506,25 @@ export default function App() {
   return (
     <div className={`min-h-screen ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-[#F4F6F9] text-slate-900'} flex flex-col font-sans transition-colors duration-200`}>
       
-      {/* Command Header — the redesigned tourist UI below brings its own
-          full-screen header/navigation, so the command-console Header is
-          only rendered for the gateway role-picker and the authority
-          console (it previously rendered a slim bar for tourists too,
-          which would double up with the new tourist UI's own chrome). */}
-      {userRole !== 'tourist' && (
-        <Header
-          language={language}
-          onLanguageChange={setLanguage}
-          darkMode={darkMode}
-          onToggleDarkMode={() => setDarkMode(!darkMode)}
-          userRole={userRole}
-          onLogout={() => {
-            logoutUser().finally(() => clearSession());
-            setUserRole('tourist');
-          }}
-          onLogoClick={() => setUserRole('tourist')}
-          activeModule={activeModule}
-          onSelectModule={setActiveModule}
-          globalSearchQuery={globalSearchQuery}
-          onGlobalSearchChange={setGlobalSearchQuery}
-          onExecuteGlobalSearch={handleExecuteGlobalSearch}
-          activeSosCount={activeSosCount}
-        />
-      )}
+      {/* Command Header */}
+      <Header
+        language={language}
+        onLanguageChange={setLanguage}
+        darkMode={darkMode}
+        onToggleDarkMode={() => setDarkMode(!darkMode)}
+        userRole={userRole}
+        onLogout={() => {
+          logoutUser().finally(() => clearSession());
+          setUserRole('tourist');
+        }}
+        onLogoClick={() => setUserRole('tourist')}
+        activeModule={activeModule}
+        onSelectModule={setActiveModule}
+        globalSearchQuery={globalSearchQuery}
+        onGlobalSearchChange={setGlobalSearchQuery}
+        onExecuteGlobalSearch={handleExecuteGlobalSearch}
+        activeSosCount={activeSosCount}
+      />
 
       {/* Main Content Area */}
       {userRole === 'gateway' ? (

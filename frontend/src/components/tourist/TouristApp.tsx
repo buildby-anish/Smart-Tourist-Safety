@@ -149,15 +149,15 @@ export default function TouristApp({ darkMode: dm, onToggleDarkMode, onTriggerSo
   const bg = dm ? '#070f1f' : '#e8eaed';
 
   return (
-    <div className="fixed inset-0 flex flex-col" style={{ background: bg, fontFamily: 'Inter, sans-serif' }}>
+    <div className="relative flex-1 flex flex-col overflow-hidden" style={{ background: bg, fontFamily: 'Inter, sans-serif' }}>
 
       {/* ── Top chrome: search + quick actions (mobile & desktop) ── */}
       {tab === 'map' && (
-        <div className="absolute top-0 left-0 right-0 z-20 px-4 pt-4 pb-3 space-y-2.5" style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.35), transparent)' }}>
-          <div className="max-w-xl mx-auto md:mx-0 md:max-w-md">
+        <div className="absolute top-0 left-0 right-0 z-20 px-4 pt-4 pb-3 space-y-2.5 pointer-events-none" style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.35), transparent)' }}>
+          <div className="max-w-xl mx-auto md:mx-0 md:max-w-2xl pointer-events-auto">
             <SearchBar darkMode={dm} onSelect={handleSearchSelect} />
           </div>
-          <div className="max-w-xl mx-auto md:mx-0 md:max-w-md space-y-2.5">
+          <div className="max-w-xl mx-auto md:mx-0 md:max-w-2xl space-y-2.5 pointer-events-auto">
             <QuickActions darkMode={dm} active={mapFilter} onChange={setMapFilter} />
             <SafetyBanner darkMode={dm} onAlertsTap={() => setTab('alerts')} />
           </div>
@@ -178,11 +178,15 @@ export default function TouristApp({ darkMode: dm, onToggleDarkMode, onTriggerSo
             </div>
 
             {/* Right-side map controls */}
-            <div className="absolute right-4 z-20 flex flex-col gap-2.5" style={{ top: 132 }}>
-              <MapControlBtn dm={dm} onClick={() => handleZoom('in')} label="Zoom in"><Plus size={16} /></MapControlBtn>
-              <MapControlBtn dm={dm} onClick={() => handleZoom('out')} label="Zoom out"><Minus size={16} /></MapControlBtn>
-              <MapControlBtn dm={dm} onClick={handleLocateMe} label="Locate me"><Navigation size={15} /></MapControlBtn>
-              <MapLegend darkMode={dm} />
+            <div className="absolute right-4 z-20 flex flex-col gap-2.5 pointer-events-none" style={{ top: 132 }}>
+              <div className="pointer-events-auto flex flex-col gap-2.5">
+                <MapControlBtn dm={dm} onClick={() => handleZoom('in')} label="Zoom in"><Plus size={16} /></MapControlBtn>
+                <MapControlBtn dm={dm} onClick={() => handleZoom('out')} label="Zoom out"><Minus size={16} /></MapControlBtn>
+                <MapControlBtn dm={dm} onClick={handleLocateMe} label="Locate me"><Navigation size={15} /></MapControlBtn>
+              </div>
+              <div className="pointer-events-auto">
+                <MapLegend darkMode={dm} />
+              </div>
             </div>
 
             {/* SOS button, bottom-right above nav */}

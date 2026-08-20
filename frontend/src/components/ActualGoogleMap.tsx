@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { APIProvider, Map, AdvancedMarker, Pin, InfoWindow, useAdvancedMarkerRef, useMap } from '@vis.gl/react-google-maps';
+import React, { useEffect, useState, useRef } from 'react';
+import { APIProvider, Map, AdvancedMarker, Pin, useMap } from '@vis.gl/react-google-maps';
 import { MapPin, Navigation, Users, ShieldCheck, AlertTriangle, Layers, ExternalLink, ShieldAlert, Shield } from 'lucide-react';
 import { GeoFenceZone } from '../types';
 
@@ -57,7 +57,6 @@ interface ActualGoogleMapProps {
   zoomAction?: { type: 'in' | 'out'; ts: number };
 }
 
-
 const API_KEY =
   process.env.GOOGLE_MAPS_PLATFORM_KEY ||
   (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY ||
@@ -73,9 +72,6 @@ const RecenterHandler: React.FC<{ recenter?: ActualGoogleMapProps['recenter'] }>
     if (!map || !recenter || recenter.trigger <= 0) return;
     map.panTo(recenter.target);
     map.setZoom(15);
-    // Only re-run when the trigger counter changes, not on every target
-    // object identity change (target is recreated each render).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, recenter?.trigger]);
   return null;
 };
@@ -87,9 +83,178 @@ const ZoomHandler: React.FC<{ zoomAction?: ActualGoogleMapProps['zoomAction'] }>
     if (!map || !zoomAction) return;
     const current = map.getZoom() ?? 14;
     map.setZoom(zoomAction.type === 'in' ? current + 1 : current - 1);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [map, zoomAction?.ts]);
   return null;
+};
+
+const LeafletMap: React.FC<{
+  center: { lat: number; lng: number };
+  zoom: number;
+  markers: MapClusterMarker[];
+  geofenceZones?: GeoFenceZone[];
+  activeZoneId?: string;
+  onMarkerClick?: (marker: MapClusterMarker) => void;
+  selectedMarkerId?: string;
+  recenter?: { trigger: number; target: { lat: number; lng: number } };
+  zoomAction?: { type: 'in' | 'out'; ts: number };
+  darkMode: boolean;
+  mapMode: 'm' | 'k' | 'p';
+}> = ({
+  center,
+  zoom,
+  markers,
+  geofenceZones = [],
+  activeZoneId,
+  onMarkerClick,
+  selectedMarkerId,
+  recenter,
+  zoomAction,
+  darkMode,
+  mapMode
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<any>(null);
+  const tileLayerRef = useRef<any>(null);
+  const markersGroupRef = useRef<any>(null);
+  const geofencesGroupRef = useRef<any>(null);
+
+  useEffect(() => {
+    if (!containerRef.current || !(window as any).L) return;
+    const L = (window as any).L;
+
+    const map = L.map(containerRef.current, {
+      zoomControl: false,
+      scrollWheelZoom: true,
+      dragging: true,
+      touchZoom: true,
+    }).setView([center.lat, center.lng], zoom);
+
+    mapRef.current = map;
+
+    markersGroupRef.current = L.layerGroup().addTo(map);
+    geofencesGroupRef.current = L.layerGroup().addTo(map);
+
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !(window as any).L) return;
+    const L = (window as any).L;
+
+    if (tileLayerRef.current) {
+      tileLayerRef.current.remove();
+    }
+
+    let tileUrl = '';
+    let attribution = '';
+
+    if (mapMode === 'k') {
+      tileUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+      attribution = '&copy; Esri &mdash; Satellite';
+    } else if (mapMode === 'p') {
+      tileUrl = 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png';
+      attribution = '&copy; OpenTopoMap';
+    } else {
+      if (darkMode) {
+        tileUrl = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+        attribution = '&copy; OpenStreetMap &copy; CARTO';
+      } else {
+        tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
+        attribution = '&copy; OpenStreetMap';
+      }
+    }
+
+    tileLayerRef.current = L.tileLayer(tileUrl, { attribution, maxZoom: 19 }).addTo(map);
+  }, [mapMode, darkMode]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && recenter && recenter.trigger > 0) {
+      map.setView([recenter.target.lat, recenter.target.lng], 15, { animate: true });
+    }
+  }, [recenter?.trigger]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    if (map && zoomAction) {
+      const current = map.getZoom();
+      map.setZoom(zoomAction.type === 'in' ? current + 1 : current - 1, { animate: true });
+    }
+  }, [zoomAction?.ts]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const markersGroup = markersGroupRef.current;
+    const geofencesGroup = geofencesGroupRef.current;
+    if (!map || !markersGroup || !geofencesGroup || !(window as any).L) return;
+    const L = (window as any).L;
+
+    markersGroup.clearLayers();
+    geofencesGroup.clearLayers();
+
+    geofenceZones.forEach((z) => {
+      const isActive = activeZoneId === z.id;
+      let color = '#3B82F6';
+      if (z.riskLevel === 'Unsafe') color = '#EF4444';
+      else if (z.riskLevel === 'Caution') color = '#F59E0B';
+      else if (z.riskLevel === 'Safe') color = '#10B981';
+
+      L.circle([z.center.lat, z.center.lng], {
+        color: color,
+        fillColor: color,
+        fillOpacity: isActive ? 0.35 : 0.15,
+        weight: isActive ? 3 : 1.5,
+        radius: z.radiusKm * 1000
+      }).addTo(geofencesGroup);
+    });
+
+    markers.forEach((m) => {
+      let pinColor = m.pinColor || '#3B82F6';
+      if (!m.pinColor) {
+        if (m.crowdLevel === 'extreme' || m.crowdLevel === 'high') pinColor = '#EF4444';
+        else if (m.crowdLevel === 'medium') pinColor = '#F59E0B';
+        else if (m.crowdLevel === 'low') pinColor = '#10B981';
+        if (m.type === 'police') pinColor = '#138808';
+      }
+
+      const isSelected = selectedMarkerId === m.id;
+
+      const icon = L.divIcon({
+        html: `<div style="
+          background-color: ${pinColor};
+          width: 24px;
+          height: 24px;
+          border-radius: 50%;
+          border: 2px solid ${isSelected ? '#FFFFFF' : 'rgba(255,255,255,0.8)'};
+          box-shadow: 0 2px 8px rgba(0,0,0,0.5);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: white;
+          font-weight: 900;
+          font-size: 11px;
+          transform: ${isSelected ? 'scale(1.2)' : 'none'};
+          transition: transform 0.15s;
+        ">${m.glyph || ''}</div>`,
+        className: 'custom-leaflet-marker',
+        iconSize: [24, 24],
+        iconAnchor: [12, 12]
+      });
+
+      const marker = L.marker([m.lat, m.lng], { icon }).addTo(markersGroup);
+      if (onMarkerClick) {
+        marker.on('click', () => onMarkerClick(m));
+      }
+    });
+  }, [markers, geofenceZones, activeZoneId, selectedMarkerId]);
+
+  return <div ref={containerRef} className="w-full h-full z-0" />;
 };
 
 export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
@@ -109,24 +274,52 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   recenter,
   zoomAction
 }) => {
-
   const [activeMarker, setActiveMarker] = useState<MapClusterMarker | null>(null);
   const [mapMode, setMapMode] = useState<'m' | 'k' | 'p'>('m'); // m: roadmap, k: satellite, p: terrain
-  // Fallback (no API key) mode has no imperative map handle — it's a static
-  // embed URL — so recenter/zoom are honored there by rebuilding the embed
-  // URL from local state instead.
   const [fallbackCenter, setFallbackCenter] = useState(center);
   const [fallbackZoom, setFallbackZoom] = useState(zoom);
 
+  const [leafletLoaded, setLeafletLoaded] = useState(false);
+  const [isDarkMode, setIsDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
+
+  // Track global dark mode changes using MutationObserver
+  useEffect(() => {
+    const observer = new MutationObserver(() => {
+      setIsDarkMode(document.documentElement.classList.contains('dark'));
+    });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ['class'] });
+    return () => observer.disconnect();
+  }, []);
+
+  // Dynamically load Leaflet if no Google Maps key is present
+  useEffect(() => {
+    if (hasValidKey) return;
+    if ((window as any).L) {
+      setLeafletLoaded(true);
+      return;
+    }
+
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(link);
+
+    const script = document.createElement('script');
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.async = true;
+    script.onload = () => {
+      setLeafletLoaded(true);
+    };
+    document.body.appendChild(script);
+  }, []);
+
   useEffect(() => {
     if (recenter && recenter.trigger > 0) setFallbackCenter(recenter.target);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [recenter?.trigger]);
 
   useEffect(() => {
     if (!zoomAction) return;
     setFallbackZoom((z) => Math.max(3, Math.min(20, zoomAction.type === 'in' ? z + 1 : z - 1)));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [zoomAction?.ts]);
 
   const handleSelectMarker = (m: MapClusterMarker) => {
@@ -178,25 +371,33 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     );
   }
 
-  // Fallback Google Map View using Google Maps embed query + custom crowd/route overlays
-  // Google Map embed URL with dynamic query / coordinates
-  const searchLocation = destination ? encodeURIComponent(destination) : `${fallbackCenter.lat},${fallbackCenter.lng}`;
-  const embedUrl = `https://maps.google.com/maps?q=${searchLocation}&t=${mapMode}&z=${fallbackZoom}&ie=UTF8&iwloc=&output=embed`;
-
-  const fallbackWrapperClass = fullBleed
-    ? 'relative w-full h-full overflow-hidden bg-slate-900'
-    : 'relative w-full rounded-2xl overflow-hidden border-2 border-slate-300 shadow-sm bg-slate-900';
+  // Loading state if Leaflet resources are not yet loaded
+  if (!leafletLoaded) {
+    return (
+      <div className={wrapperClass} style={fullBleed ? undefined : { height }}>
+        <div className="w-full h-full flex items-center justify-center bg-slate-900 text-slate-400 text-sm font-medium">
+          Loading safety map...
+        </div>
+      </div>
+    );
+  }
 
   return (
-    <div className={fallbackWrapperClass} style={fullBleed ? undefined : { height }}>
+    <div className={wrapperClass} style={fullBleed ? undefined : { height }}>
       
-      {/* Live Google Map Iframe Layer */}
-      <iframe
-        title="Google Maps Location View"
-        src={embedUrl}
-        className="w-full h-full border-0 filter brightness-95 contrast-105"
-        loading="lazy"
-        allowFullScreen
+      {/* Interactive CDN-loaded Leaflet Map Layer */}
+      <LeafletMap
+        center={fallbackCenter}
+        zoom={fallbackZoom}
+        markers={markers}
+        geofenceZones={geofenceZones}
+        activeZoneId={activeZoneId}
+        onMarkerClick={handleSelectMarker}
+        selectedMarkerId={selectedMarkerId || activeMarker?.id}
+        recenter={recenter}
+        zoomAction={zoomAction}
+        darkMode={isDarkMode}
+        mapMode={mapMode}
       />
 
       {/* Map Control Bar Top */}
@@ -205,7 +406,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
         <div className="pointer-events-auto flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-700 shadow-md text-white text-xs font-bold">
           <MapPin className="w-3.5 h-3.5 text-red-500 animate-pulse" />
           <span className="truncate max-w-[180px] sm:max-w-[280px]">
-            {destination ? `${origin || 'My Location'} ➔ ${destination}` : 'Live Google Maps View'}
+            {destination ? `${origin || 'My Location'} ➔ ${destination}` : 'Live GIS View'}
           </span>
         </div>
 
@@ -213,7 +414,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
           <div className="pointer-events-auto flex items-center bg-slate-900/90 backdrop-blur-md p-1 rounded-xl border border-slate-700 shadow-md">
             <button
               onClick={() => setMapMode('m')}
-              className={`px-2 py-1 text-[10px] font-black rounded-lg transition ${
+              className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer ${
                 mapMode === 'm' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'
               }`}
             >
@@ -221,7 +422,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
             </button>
             <button
               onClick={() => setMapMode('k')}
-              className={`px-2 py-1 text-[10px] font-black rounded-lg transition ${
+              className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer ${
                 mapMode === 'k' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'
               }`}
             >
@@ -229,7 +430,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
             </button>
             <button
               onClick={() => setMapMode('p')}
-              className={`px-2 py-1 text-[10px] font-black rounded-lg transition ${
+              className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer ${
                 mapMode === 'p' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'
               }`}
             >
@@ -271,7 +472,6 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
           })}
 
           {markers.map((m) => {
-
             const isSelected = selectedMarkerId === m.id || activeMarker?.id === m.id;
             let badgeBg = 'bg-blue-600 border-blue-400 text-white';
             if (m.crowdLevel === 'extreme' || m.crowdLevel === 'high') {
@@ -286,7 +486,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
               <button
                 key={m.id}
                 onClick={() => handleSelectMarker(m)}
-                className={`flex-shrink-0 px-3 py-1.5 rounded-xl border text-xs font-black transition flex items-center gap-1.5 shadow-lg backdrop-blur-md ${
+                className={`flex-shrink-0 px-3 py-1.5 rounded-xl border text-xs font-black transition flex items-center gap-1.5 shadow-lg backdrop-blur-md cursor-pointer ${
                   isSelected
                     ? `${badgeBg} ring-2 ring-white scale-105`
                     : 'bg-slate-900/85 text-slate-200 border-slate-700 hover:bg-slate-800'
@@ -310,7 +510,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
       {/* External Google Maps Button */}
       {chrome && (
       <a
-        href={`https://www.google.com/maps/search/?api=1&query=${searchLocation}`}
+        href={`https://www.google.com/maps/search/?api=1&query=${fallbackCenter.lat},${fallbackCenter.lng}`}
         target="_blank"
         rel="noopener noreferrer"
         className="absolute top-3 right-3 z-20 hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/90 hover:bg-white text-slate-900 font-extrabold text-[11px] shadow border border-slate-300 transition"
