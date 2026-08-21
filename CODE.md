@@ -46,6 +46,7 @@ Smart-Tourist-Safety/
 │   ├── config.py                     # App settings & dotenv loading
 │   ├── db.py                         # Threaded pool & authenticated RLS contexts
 │   ├── main.py                       # FastAPI entry point, CORS, router registration
+│   ├── PROJECT_MEMORY.md             # Background project context & implementation history
 │   ├── requirements.txt              # Backend runtime packages
 │   ├── routers/                      # Route controllers
 │   │   ├── alerts.py                 # Incident alert logs
@@ -73,13 +74,22 @@ Smart-Tourist-Safety/
     ├── index.html
     ├── package.json                  # Frontend dependencies and run scripts
     ├── sw.js                         # Service worker for offline asset caching
+    ├── AGENTS.md                     # Local workspace agent rules
+    ├── CLAUDE.md                     # Command shortcuts and build instructions
+    ├── RUN_INSTRUCTIONS.md           # Guide to run frontend and backend
+    ├── SOS_IMPLEMENTATION.md         # Design documentation for offline SOS features
+    ├── tsconfig.json                 # TypeScript compiler configuration
+    ├── vite.config.ts                # Vite bundler configuration
+    ├── public/
+    │   └── sw.js                     # Service worker definition
     └── src/
         ├── App.tsx                   # Main router and console state
         ├── main.tsx                  # React entry point
         ├── types.ts                  # Shared TypeScript declarations
         ├── index.css
-        ├── components/               # Command center authority panels
+        ├── components/               # Command center panels and shared elements
         │   ├── ActualGoogleMap.tsx   # Google Map wrapper with iframe fallback
+        │   ├── BrandMark.tsx         # Compact square emblem badge for Suraksha Setu
         │   ├── Gateway.tsx           # Role selector and MFA Badge Login
         │   ├── Header.tsx            # Authority Dashboard Header
         │   ├── InterceptionModal.tsx # Statutory lookup audit confirmation
@@ -88,7 +98,23 @@ Smart-Tourist-Safety/
         │   ├── ModuleBroadcast.tsx   # Geofenced SMS broadcaster
         │   ├── ModuleSOSMap.tsx      # GIS dispatcher Kanban & PCR assigner
         │   ├── ModuleTouristTracking.tsx # Search and tracking console
-        │   └── Sidebar.tsx
+        │   ├── Sidebar.tsx           # Dashboard side navigation
+        │   └── tourist/              # Tourist App Portal Components
+        │       ├── AlertsPanel.tsx   # System hazard warnings and notification list
+        │       ├── BottomNav.tsx     # Tab navigations: Map, Explore, Trips, Alerts, Profile
+        │       ├── ExplorePanel.tsx  # Local destinations list
+        │       ├── LoginModal.tsx    # Email/Phone registration & verification modal
+        │       ├── MapCanvas.tsx     # Tourist Map wrapper (Google Maps / iframe)
+        │       ├── MapLegend.tsx     # Legend describing map pins & layers
+        │       ├── PlaceCard.tsx     # Selected point description card
+        │       ├── ProfilePanel.tsx  # Profile management & DigiLocker verification
+        │       ├── QuickActions.tsx  # Map filters for Police, Hospitals, Alerts, Hotels
+        │       ├── SafetyBanner.tsx  # Live weather & safety announcements
+        │       ├── SearchBar.tsx     # Auto-complete location search
+        │       ├── SkeletonLoader.tsx # Loading skeleton state components
+        │       ├── SOSButton.tsx     # Telemetry coordinates SOS panic button
+        │       ├── TouristApp.tsx    # Tourist App main wrapper and state coordinator
+        │       └── TripsPanel.tsx    # Trip itinerary planner panel
         ├── data/
         │   ├── i18n.ts               # Bilingual (English/Hindi) localizations
         │   └── mockData.ts           # Demo seed data
@@ -102,7 +128,7 @@ Smart-Tourist-Safety/
 * **`backend/`**: Implements REST API backend with mock fallback modes for offline local testing and live PostgreSQL modes.
 * **`database/`**: Contains schema changes and database setups.
 * **`frontend/src/`**: Houses PWA pages, component modules, styling layouts, and utility directories.
-* **`frontend/src/components/tourist/`**: Exclusively houses components running within the Tourist App Portal (`TouristApp.tsx`, `TripsPanel.tsx`, `ProfilePanel.tsx`, `AlertsPanel.tsx`, `LoginModal.tsx`, `MapCanvas.tsx`).
+* **`frontend/src/components/tourist/`**: Exclusively houses components running within the Tourist App Portal (`TouristApp.tsx`, `TripsPanel.tsx`, `ProfilePanel.tsx`, `AlertsPanel.tsx`, `LoginModal.tsx`, `MapCanvas.tsx`, etc.).
 
 ---
 
@@ -123,40 +149,40 @@ Smart-Tourist-Safety/
 App (Main State Coordinator)
  ├── Header (Console Nav, Dark mode toggles, language selections)
  ├── Gateway (Log In Gateway)
- │    └── MFA Login Form Modal (Badge Verification)
  ├── TouristApp (Tourist Safe Passage Portal)
  │    ├── SearchBar (Auto-complete)
  │    ├── QuickActions (Map category filters: Police, Hospitals, Alerts, Hotels)
  │    ├── SafetyBanner (Emergency weather notice)
  │    ├── MapCanvas (ActualGoogleMap mapping engine)
- │    │    └── PlaceCard (Selected point description card)
- │    ├── SOSButton (Panics trigger, GPS trackers, audio siren sirens)
+ │    │    ├── PlaceCard (Selected point description card)
+ │    │    └── MapLegend (Descriptions for pins & colors)
+ │    ├── SOSButton (Urgent panic trigger countdown)
  │    ├── BottomNav (Tab navigations: Map, Explore, Trips, Alerts, Profile)
  │    ├── ExplorePanel (Local destinations lists)
- │    ├── TripsPanel (Planned itinerary entries)
+ │    ├── TripsPanel (Planned itinerary entries, connects to itinerary API)
  │    │    └── LoginModal
- │    ├── AlertsPanel (System hazard warnings)
+ │    ├── AlertsPanel (System hazard warnings list)
  │    ├── ProfilePanel (KYC verifying and emergency contacts edit)
  │    │    └── LoginModal
- │    └── LoginModal (Phone input -> OTP code verification -> Profile registration)
+ │    └── LoginModal (Email direct authentication OR phone OTP verification)
  └── Authority Command Modules (Only loaded after verification success)
       ├── ModuleAIHub (Visualizes unusual crowd spikes and confidence statistics)
       ├── ModuleTouristTracking (Lookup tourist name/ID, interception reason modal, mark safe)
       │    └── InterceptionModal (Statutory logs reason)
       ├── ModuleSOSMap (Live GIS tracking, PCR Van assigner board, resolve ticket)
       ├── ModuleBroadcast (Radius-based emergency geofenced notifications editor)
-      └── ModuleAnalyticsAudit (Oversight and compliance table)
+      └── ModuleAnalyticsAudit (Immutable oversight and compliance table)
 ```
 
 ---
 
 ## 4. FRONTEND FILE-BY-FILE REFERENCE
 
-### File: `frontend/src/lib/api.ts`
+### File: [api.ts](file:///c:/Users/Tanvi/Documents/GitHub/Smart-Tourist-Safety/frontend/src/lib/api.ts)
 * **Purpose:** Handles all fetch requests, API base path configurations, and authentication session storage.
 * **State:** Local session caching in `localStorage`.
 * **Important Helpers:**
-  * `deriveTouristCredentials(phone)`: Standardized username/password generation from phone numbers.
+  * `deriveTouristCredentials(phoneOrEmail)`: Standardized username/password generation from phone numbers or email addresses.
   * `registerAndLoginTourist(details)`: Chains user signup, login, and profile creation together.
   * `syncQueuedSOS()`: Transmits IndexedDB queued offline SOS records online.
 * **Key Code Snippet:**
@@ -166,16 +192,26 @@ export function getApiBaseUrl(): string {
   return localStorage.getItem("sos_api_base_url") || envUrl || "http://localhost:8000/api/v1";
 }
 
-export function deriveTouristCredentials(phone: string): { username: string; password: string } {
-  const normalized = (phone || "").replace(/[^0-9]/g, "");
-  return {
-    username: `tourist-${normalized || "guest"}`,
-    password: `SurakshaSetu-${normalized || "guest"}-2026`,
-  };
+export function deriveTouristCredentials(phoneOrEmail: string): { username: string; password: string } {
+  const isEmail = (phoneOrEmail || "").includes("@");
+  if (isEmail) {
+    const cleanEmail = phoneOrEmail.trim().toLowerCase();
+    const hash = cleanEmail.split("").reduce((acc, char) => acc + char.charCodeAt(0), 0);
+    return {
+      username: cleanEmail,
+      password: `SurakshaSetu-${hash}-2026`,
+    };
+  } else {
+    const normalized = (phoneOrEmail || "").replace(/[^0-9]/g, "");
+    return {
+      username: `tourist-${normalized || "guest"}`,
+      password: `SurakshaSetu-${normalized || "guest"}-2026`,
+    };
+  }
 }
 ```
 
-### File: `frontend/src/lib/db.ts`
+### File: [db.ts](file:///c:/Users/Tanvi/Documents/GitHub/Smart-Tourist-Safety/frontend/src/lib/db.ts)
 * **Purpose:** Sets up IndexedDB storage for offline safety capabilities.
 * **Stores:**
   * `last_location`: Stores key `"latest"` containing current GPS coordinates.
@@ -206,7 +242,7 @@ export async function initDB(): Promise<IDBDatabase> {
 }
 ```
 
-### File: `frontend/src/lib/location.ts`
+### File: [location.ts](file:///c:/Users/Tanvi/Documents/GitHub/Smart-Tourist-Safety/frontend/src/lib/location.ts)
 * **Purpose:** Handles location telemetry fetch with a backup fallback to last known location cached in IndexedDB.
 * **Key Code Snippet:**
 ```typescript
@@ -236,25 +272,68 @@ export async function getLiveLocation(
 }
 ```
 
-### File: `frontend/src/components/tourist/LoginModal.tsx`
-* **Purpose:** Steps users through OTP code requests and profile registrations.
-* **Step Transitions:** `credentials` (phone input) → `otp` (SMS code verification) → `name` (new tourists profile signups) → `verifying` → `success` / `error`.
-* **Important Logic:** Connects OTP and profile registration calls to backend routers.
+### File: [LoginModal.tsx](file:///c:/Users/Tanvi/Documents/GitHub/Smart-Tourist-Safety/frontend/src/components/tourist/LoginModal.tsx)
+* **Purpose:** Steps users through authentication (direct email login or phone OTP requests) and tourist profile registrations.
+* **Step Transitions:** `role_selection` → `tourist_credentials` (email/phone input) → `otp` (SMS code verification, for phone) → `name` (new tourists profile signups) → `verifying` → `success` / `error`.
+* **Important Logic:** Integrates security checks, OTP validation, and credentials generation with backend routers. Aborts and displays errors on auth failures instead of silently bypassing.
 * **Key Code Snippet:**
 ```typescript
-const handleContinue = async () => {
-  if (!validatePhone()) return;
-  setLoading(true);
-  try {
-    await sendOtp(phone.trim());
-    setLoading(false);
-    setStep('otp');
-  } catch (err: any) {
-    setLoading(false);
-    setGenErr(err instanceof ApiError ? err.message : 'Network error.');
+const handleTouristContinue = async () => {
+  if (!validateIdentifier()) return;
+  setLoading(true); setGenErr('');
+  const val = identifier.trim();
+  const isEmail = val.includes('@');
+
+  if (isEmail) {
+    try {
+      if (mode === 'login') {
+        const existing = await loginTouristByPhone(val);
+        setLoading(false);
+        if (existing) {
+          setStep('success');
+          setTimeout(() => onAuthenticated('tourist', existing.tourist), 900);
+        } else {
+          setGenErr('No account matches this email. Check the spelling or switch to Sign Up.');
+        }
+      } else {
+        const existing = await loginTouristByPhone(val);
+        setLoading(false);
+        if (existing) {
+          setGenErr('This email is already registered. Please Sign In instead.');
+        } else {
+          setStep('name');
+        }
+      }
+    } catch (err: any) {
+      setLoading(false);
+      setGenErr(err instanceof ApiError ? err.message : 'Authentication failed. Please try again.');
+    }
+  } else {
+    // Phone OTP Flow...
   }
 };
 ```
+
+### File: [TouristApp.tsx](file:///c:/Users/Tanvi/Documents/GitHub/Smart-Tourist-Safety/frontend/src/components/tourist/TouristApp.tsx)
+* **Purpose:** Central coordinator for the Tourist Portal interface. Manages tab selection (`map`, `explore`, `trips`, `alerts`, `profile`), and integrates the geolocation tracker with offline fallback routing.
+* **Key Logic:** Automatically triggers database sync (`syncQueuedSOS`) whenever browser connectivity is restored (`online` event listener).
+* **Key Code Snippet:**
+```typescript
+useEffect(() => {
+  const trySync = () => { syncQueuedSOS().catch(() => {}); };
+  if (navigator.onLine) trySync();
+  window.addEventListener('online', trySync);
+  return () => window.removeEventListener('online', trySync);
+}, []);
+```
+
+### File: [SOSButton.tsx](file:///c:/Users/Tanvi/Documents/GitHub/Smart-Tourist-Safety/frontend/src/components/tourist/SOSButton.tsx)
+* **Purpose:** Renders the 1-tap SOS panic trigger. 
+* **Details:** Launches a statutorily mandated emergency confirmation modal and starts location tracking. If the network is unavailable, it queues the SOS details in local IndexedDB. If an API error (400/401/404) occurs, it handles the error state rather than falling back to offline queuing.
+
+### File: [TripsPanel.tsx](file:///c:/Users/Tanvi/Documents/GitHub/Smart-Tourist-Safety/frontend/src/components/tourist/TripsPanel.tsx)
+* **Purpose:** Allows tourists to plan their travel route and itinerary.
+* **Backend Connection:** Interfaces with `/api/v1/itinerary` to list, create, and remove planned destinations.
 
 ---
 
@@ -297,12 +376,14 @@ const handleContinue = async () => {
 | `POST` | `/api/v1/sos` | Create an active incident & SOS request | Yes | `SOSCreate` | `SOSResponse` | `TouristApp.tsx` / `api.ts` |
 | `POST` | `/api/v1/incidents` | Post a standard non-SOS incident report | Yes | `IncidentCreate` | `IncidentResponse` | Incident panels |
 | `GET` | `/api/v1/incidents` | List assigned or created incident logs | Yes | Query: `status` | `list[IncidentResponse]` | Authority dashboard |
+| `GET` | `/api/v1/incidents/{id}` | Read specific incident record details | Yes | None | `IncidentResponse` | Incident detail modal |
 | `PATCH` | `/api/v1/incidents/{id}` | Update incident (assign units, resolve cases)| Yes | `IncidentUpdate` | `IncidentResponse` | `App.tsx` |
 | `POST` | `/api/v1/incidents/{id}/responses` | Log emergency PCR dispatch units data | Yes | `ResponseCreate` | `ResponseRecord` | `App.tsx` |
 | `GET` | `/api/v1/incidents/{id}/responses` | List logged dispatch operations details | Yes | None | `list[ResponseRecord]` | Dispatch tracking charts |
 | `POST` | `/api/v1/alerts` | Create notification links for incidents | Yes | `AlertCreate` | `AlertResponse` | `App.tsx` (broadcast) |
 | `GET` | `/api/v1/alerts` | Get recorded notifications | Yes | Query: `incident_id`| `list[AlertResponse]` | `TouristApp.tsx` |
 | `GET` | `/api/v1/locations` | Retrieve recorded coordinates | Yes | None | `list[LocationResponse]` | Live map layers |
+| `GET` | `/api/v1/locations/{id}` | Retrieve details of a specific coordinate | Yes | None | `LocationResponse` | Map query detail popup |
 | `POST` | `/api/v1/itinerary` | Create destinations itinerary items | Yes | `ItineraryEntryCreate`| `ItineraryEntryResponse` | `TripsPanel.tsx` |
 | `GET` | `/api/v1/itinerary` | List tourist destinations itinerary items | Yes | None | `list[ItineraryEntryResponse]`| `TripsPanel.tsx` |
 | `DELETE`| `/api/v1/itinerary/{id}`| Remove destinations itinerary items | Yes | None | Status 204 | `TripsPanel.tsx` |
@@ -318,7 +399,7 @@ const handleContinue = async () => {
 
 ## 7. BACKEND FILE-BY-FILE REFERENCE
 
-### File: `backend/db.py`
+### File: [db.py](file:///c:/Users/Tanvi/Documents/GitHub/Smart-Tourist-Safety/backend/db.py)
 * **Purpose:** Configures the `ThreadedConnectionPool` and injects session variables for RLS simulation.
 * **Key Code Snippet:**
 ```python
@@ -344,7 +425,7 @@ def get_authenticated_cursor(auth_user_id, commit: bool = False):
         pool.putconn(conn)
 ```
 
-### File: `backend/routers/auth.py`
+### File: [auth.py](file:///c:/Users/Tanvi/Documents/GitHub/Smart-Tourist-Safety/backend/routers/auth.py)
 * **Purpose:** Manages registration (delegating to Supabase Admin API / signup endpoint) and JWT local decoding.
 * **Key Code Snippet:**
 ```python
@@ -387,7 +468,7 @@ def get_current_user(
         raise HTTPException(status_code=401, detail="Invalid token")
 ```
 
-### File: `backend/routers/sos.py`
+### File: [sos.py](file:///c:/Users/Tanvi/Documents/GitHub/Smart-Tourist-Safety/backend/routers/sos.py)
 * **Purpose:** Handles SOS panic operations, geocoding incident spots, and linking request metrics.
 * **Key Code Snippet:**
 ```python
@@ -431,6 +512,15 @@ def create_sos(payload: SOSCreate, current_user: SessionResponse = Depends(get_c
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"SOS creation failed: {e}")
 ```
+
+### File: [itinerary.py](file:///c:/Users/Tanvi/Documents/GitHub/Smart-Tourist-Safety/backend/routers/itinerary.py)
+* **Purpose:** Handles creation (`POST`), list retrieval (`GET`), and deletions (`DELETE`) of itineraries. If no `location_id` is supplied, it automatically resolves and creates a low-risk coordinates row in `public.locations`.
+
+### File: [incidents.py](file:///c:/Users/Tanvi/Documents/GitHub/Smart-Tourist-Safety/backend/routers/incidents.py)
+* **Purpose:** Performs CRUD actions on reported incidents. Auto-assigns the logged-in officer's `authority_id` on status updates to `RESPONDING`, and handles PCR dispatch logging via `POST /{id}/responses`.
+
+### File: [audit_logs.py](file:///c:/Users/Tanvi/Documents/GitHub/Smart-Tourist-Safety/backend/routers/audit_logs.py)
+* **Purpose:** Persists immutable audits (`POST`) and fetches all lookup audit data (`GET`) to maintain authority compliance records.
 
 ---
 
@@ -514,14 +604,14 @@ def create_sos(payload: SOSCreate, current_user: SessionResponse = Depends(get_c
    * `trigger_source` (VARCHAR(100), e.g., APP, WEARABLE, MANUAL, AI, SYSTEM)
    * `sos_status` (VARCHAR(50), e.g., ACTIVE, ACKNOWLEDGED, RESPONDING, RESOLVED, CANCELLED)
 10. **`audit_logs`**: compliance check oversight records.
-   * `audit_id` (UUID, PK)
-   * `authority_id` (UUID, FK -> `authorities.authority_id` ON DELETE CASCADE)
-   * `action_type` (VARCHAR(50))
-   * `target_id` (VARCHAR(255))
-   * `reason` (TEXT)
-   * `details` (TEXT)
-   * `ip_address` (VARCHAR(64))
-   * `created_at` (TIMESTAMPTZ, default NOW)
+    * `audit_id` (UUID, PK)
+    * `authority_id` (UUID, FK -> `authorities.authority_id` ON DELETE CASCADE)
+    * `action_type` (VARCHAR(50))
+    * `target_id` (VARCHAR(255))
+    * `reason` (TEXT)
+    * `details` (TEXT)
+    * `ip_address` (VARCHAR(64))
+    * `created_at` (TIMESTAMPTZ, default NOW)
 
 ### Database Relationship Diagram:
 ```text
@@ -570,12 +660,12 @@ def create_sos(payload: SOSCreate, current_user: SessionResponse = Depends(get_c
 ## 10. AUTHENTICATION FLOW
 
 ```text
-Tourist Signup (OTP Verification)
-  1. User enters phone number → LoginModal.tsx triggers sendOtp()
-  2. Backend: /auth/send-otp creates short-lived in-memory code and logs debug signature
-  3. User enters code → verifyOtp() validates with backend
-  4. Phone verified: UI collects full name and triggers registerAndLoginTourist()
-  5. Backend: /auth/register creates Supabase Auth record with synthetic email (tourist-<phone>@...)
+Tourist Signup (Direct Email OR Phone OTP Verification)
+  1. User enters identifier (email or phone) → LoginModal.tsx triggers handleTouristContinue()
+  2. For Phone: /auth/send-otp creates code, user enters OTP, verifyOtp() validates.
+  3. For Email: Direct check verifies if registered. If new, UI proceeds to name collection.
+  4. Phone/Email verified: UI collects full name and triggers registerAndLoginTourist()
+  5. Backend: /auth/register creates Supabase Auth record with synthetic email/identity
   6. Backend: inserts profile row into public.tourists and maps link in public.authentication
   7. Backend: /auth/login returns JWT session token
   8. Frontend: stores token and tourist ID in localStorage
@@ -585,7 +675,7 @@ Tourist Signup (OTP Verification)
 Authority MFA Login
   1. Officer enters Badge ID & MFA OTP code → Gateway.tsx submits form
   2. Frontend: authenticateAuthority() maps Badge ID → username and OTP → password
-  3. Backend: /authority/login verifies credentials against Supabase Auth (via email badge-id@...)
+  3. Backend: /authority/login verifies credentials against Supabase Auth
   4. Backend: updates last_login_at timestamp in public.authentication and returns session JWT
   5. Frontend: stores token in localStorage and loads authority command modules
 ```
@@ -632,10 +722,8 @@ Authority MFA Login
 
 | Issue | File | Severity | Description |
 | :--- | :--- | :---: | :--- |
-| Mock Chatbot | `TouristPortal.tsx` / `TouristApp.tsx` | Low | AI chatbot panel uses mock responses; no backend integration router exists. |
-| Audit CSV Export | `ModuleAnalyticsAudit.tsx` | Low | CSV export function triggers download of client-side logs; does not pull full backend audit trails. |
-| Geofenced Geolocation Map | `CrowdHeatmap.tsx` / `ActualGoogleMap.tsx` | Medium | Heatmap overlays use mock density zones; no backend API returns real-time regional crowd counts. |
-| Interception Logs | `ModuleTouristTracking.tsx` | Low | Statutory search reason is logged to local array; does not call `POST /api/v1/audit-logs`. |
+| Mock Chatbot | `TouristApp.tsx` | Low | AI chatbot panel uses mock responses; no backend integration router exists. |
+| Safety Heatmap Overlay | `MapCanvas.tsx` / `ActualGoogleMap.tsx` | Medium | Heatmap overlays use mock density zones; no backend API returns real-time regional crowd counts. |
 
 ---
 
@@ -751,10 +839,10 @@ CREATE TABLE IF NOT EXISTS public.audit_logs (
 
 * **Stack:** React 19 (Vite) + FastAPI (Python) + PostgreSQL (Supabase).
 * **Architecture:** Conditional role routing frontend, parameterized SQL query pooling backend, Row Level Security databases.
-* **Frontend Entry Point:** [`main.tsx`](file:///Users/anishsingh/Documents/GitHub/Smart-Tourist-Safety/frontend/src/main.tsx)
-* **Backend Entry Point:** [`main.py`](file:///Users/anishsingh/Documents/GitHub/Smart-Tourist-Safety/backend/main.py)
+* **Frontend Entry Point:** [main.tsx](file:///c:/Users/Tanvi/Documents/GitHub/Smart-Tourist-Safety/frontend/src/main.tsx)
+* **Backend Entry Point:** [main.py](file:///c:/Users/Tanvi/Documents/GitHub/Smart-Tourist-Safety/backend/main.py)
 * **Database:** PostgreSQL on Supabase (`public` schema).
 * **Authentication:** Supabase Auth (JWT HS256 tokens mapping).
-* **Main API Routers:** `auth.py`, `tourists.py`, `sos.py`, `incidents.py`, `authority.py`, `audit_logs.py`.
+* **Main API Routers:** `auth.py`, `tourists.py`, `sos.py`, `incidents.py`, `authority.py`, `audit_logs.py`, `itinerary.py`.
 * **Main Frontend Panels:** `TouristApp.tsx` (Trips, Alerts, Profile) & Authority command tabs (`ModuleSOSMap`, `ModuleTouristTracking`, `ModuleAIHub`, `ModuleBroadcast`, `ModuleAnalyticsAudit`).
 * **Deployment:** Railway (App servers) + Supabase (Database/Auth).
