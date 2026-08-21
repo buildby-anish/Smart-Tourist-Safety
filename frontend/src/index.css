@@ -134,3 +134,16 @@
   animation: splash-mark 1.8s ease-in-out infinite;
 }
 
+/* ─── Mobile/desktop polish: touch targets, tap feedback ───
+   Applies globally so interactive controls stay comfortable to tap on
+   Android/iOS and don't show the default gray tap-highlight flash. */
+button, a, input, [role="button"] {
+  -webkit-tap-highlight-color: transparent;
+}
+
+@media (max-width: 767px) {
+  button, a[role="button"] {
+    min-height: 40px;
+  }
+}
+

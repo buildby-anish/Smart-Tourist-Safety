@@ -730,6 +730,7 @@ export default function App() {
           initialMode={loginModalMode}
           onClose={() => setShowLogin(false)}
           onAuthenticated={handleAuthenticated}
+          dismissable={!(userRole === 'tourist' && !touristUser)}
         />
       )}
 

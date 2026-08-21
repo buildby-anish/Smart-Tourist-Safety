@@ -340,6 +340,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
             defaultCenter={center}
             defaultZoom={zoom}
             mapId="DEMO_MAP_ID"
+            colorScheme={isDarkMode ? 'DARK' : 'LIGHT'}
             gestureHandling="greedy"
             internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
             style={{ width: '100%', height: '100%' }}

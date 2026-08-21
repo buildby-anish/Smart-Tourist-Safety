@@ -29,9 +29,14 @@ interface Props {
   onAuthenticated: (role: 'tourist' | 'authority', user: any) => void;
   darkMode: boolean;
   initialMode?: 'login' | 'signup';
+  /** When false, hides the close (X) button and disables backdrop-click-to-
+   * close — used for the mandatory sign-in gate so it can't be dismissed
+   * without completing authentication. Defaults to true (existing,
+   * dismissable behavior) everywhere else the modal is used. */
+  dismissable?: boolean;
 }
 
-export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, initialMode = 'login' }: Props) {
+export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, initialMode = 'login', dismissable = true }: Props) {
   const [step, setStep] = useState<Step>(
     initialMode === 'signup' ? 'tourist_credentials' : 'role_selection'
   );
@@ -233,7 +238,7 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
       <div
         className="fixed inset-0 z-[50] animate-fade-in"
         style={{ background: 'rgba(7,15,31,0.72)', backdropFilter: 'blur(10px)' }}
-        onClick={onClose}
+        onClick={dismissable ? onClose : undefined}
       />
 
       {/* Centered Modal container */}
@@ -276,14 +281,16 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
                   </p>
                 </div>
               </div>
-              <button
-                onClick={onClose}
-                className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:opacity-75"
-                style={{ background: dm ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }}
-                aria-label="Close"
-              >
-                <X size={15} style={{ color: subtle }} />
-              </button>
+              {dismissable && (
+                <button
+                  onClick={onClose}
+                  className="w-8 h-8 rounded-full flex items-center justify-center transition-all hover:opacity-75"
+                  style={{ background: dm ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)' }}
+                  aria-label="Close"
+                >
+                  <X size={15} style={{ color: subtle }} />
+                </button>
+              )}
             </div>
 
             {/* ── step 1: Role Selection ── */}

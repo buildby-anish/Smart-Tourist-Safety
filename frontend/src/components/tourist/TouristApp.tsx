@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Minus, Navigation } from 'lucide-react';
+import { Plus, Minus, Navigation, Bell } from 'lucide-react';
 
 import MapCanvas from './MapCanvas';
 import SearchBar from './SearchBar';
@@ -13,7 +13,7 @@ import TripsPanel from './TripsPanel';
 import ProfilePanel from './ProfilePanel';
 import MapLegend from './MapLegend';
 import SafetyBanner from './SafetyBanner';
-import { SkeletonMap } from './SkeletonLoader';
+import BrandMark from '../BrandMark';
 
 import { getSOSLocation } from '../../lib/location';
 import { queueSOSRecord } from '../../lib/db';
@@ -79,6 +79,16 @@ export default function TouristApp({
     return () => window.removeEventListener('online', trySync);
   }, []);
 
+  // ── Auth gate: the tourist portal (map/explore/trips/alerts/profile) is
+  // never shown until sign-in completes. Existing auth logic/backend flow is
+  // untouched — this only opens the existing LoginModal (rendered by App.tsx)
+  // automatically and keeps it open while unauthenticated. ──
+  useEffect(() => {
+    if (!isAuthenticated && !showLogin) {
+      setShowLogin(true);
+    }
+  }, [isAuthenticated, showLogin, setShowLogin]);
+
   const handleProtectedTab = useCallback(() => { setShowLogin(true); }, [setShowLogin]);
 
   const handleMarkerClick = useCallback((id: string) => { setSelectedPlace(id); }, []);
@@ -130,13 +140,60 @@ export default function TouristApp({
 
   const bg = dm ? '#070f1f' : '#e8eaed';
 
+  // ── Auth gate screen: rendered instead of any tourist feature until the
+  // existing LoginModal (opened above via showLogin/setShowLogin, and
+  // rendered by App.tsx) completes sign-in. ──
+  if (!isAuthenticated) {
+    return (
+      <div
+        className="relative flex-1 flex flex-col items-center justify-center gap-4 px-6 text-center"
+        style={{ background: bg, fontFamily: 'Inter, sans-serif' }}
+      >
+        <BrandMark size={56} />
+        <div className="space-y-1.5">
+          <p className="text-lg font-bold" style={{ color: dm ? '#f1f5f9' : '#0c2340', fontFamily: 'Outfit, sans-serif' }}>
+            Sign in to continue
+          </p>
+          <p className="text-sm max-w-xs" style={{ color: dm ? 'rgba(255,255,255,0.5)' : 'rgba(12,35,64,0.55)' }}>
+            The map, alerts, trips and profile are available once you're signed in to Suraksha Setu.
+          </p>
+        </div>
+        <button
+          onClick={() => setShowLogin(true)}
+          className="h-11 px-7 rounded-xl text-sm font-bold text-white transition-transform active:scale-95"
+          style={{ background: '#FF9933', boxShadow: '0 4px 20px rgba(255,153,51,0.35)' }}
+        >
+          Sign in
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div className="relative flex-1 flex flex-col overflow-hidden" style={{ background: bg, fontFamily: 'Inter, sans-serif' }}>
+
+      {/* ── Persistent top-area alerts entry point (moved out of bottom nav) ── */}
+      <button
+        onClick={() => setTab('alerts')}
+        aria-label="Alerts"
+        aria-current={tab === 'alerts' ? 'page' : undefined}
+        className="absolute z-30 w-10 h-10 rounded-full flex items-center justify-center transition-all duration-150 hover:scale-105 active:scale-95"
+        style={{
+          top: 'calc(env(safe-area-inset-top, 0px) + 12px)',
+          right: 14,
+          background: dm ? 'rgba(10,20,40,0.92)' : 'rgba(255,255,255,0.95)',
+          border: `1.5px solid ${tab === 'alerts' ? '#FF9933' : dm ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
+          boxShadow: '0 2px 14px rgba(0,0,0,0.25)',
+          backdropFilter: 'blur(16px)',
+        }}
+      >
+        <Bell size={17} strokeWidth={2.2} style={{ color: tab === 'alerts' ? '#FF9933' : dm ? '#f1f5f9' : '#0c2340' }} />
+      </button>
 
       {/* ── Top chrome: search + quick actions (mobile & desktop) ── */}
       {tab === 'map' && (
         <div className="absolute top-0 left-0 right-0 z-20 px-4 pt-4 pb-3 space-y-2.5 pointer-events-none" style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.35), transparent)' }}>
-          <div className="max-w-xl mx-auto md:mx-0 md:max-w-2xl pointer-events-auto">
+          <div className="max-w-xl mx-auto md:mx-0 md:max-w-2xl pointer-events-auto pr-14">
             <SearchBar darkMode={dm} onSelect={handleSearchSelect} />
           </div>
           <div className="max-w-xl mx-auto md:mx-0 md:max-w-2xl space-y-2.5 pointer-events-auto">
@@ -147,7 +204,7 @@ export default function TouristApp({
       )}
 
       {/* ── Main content area ── */}
-      <div className="flex-1 relative overflow-hidden" style={{ marginBottom: 60 }}>
+      <div className="flex-1 relative overflow-hidden" style={{ marginBottom: 64 }}>
         {tab === 'map' && (
           <>
             <div className="absolute inset-0 z-0" style={{ isolation: 'isolate' }}>
@@ -169,11 +226,6 @@ export default function TouristApp({
               <div className="pointer-events-auto">
                 <MapLegend darkMode={dm} />
               </div>
-            </div>
-
-            {/* SOS button, bottom-right above nav */}
-            <div className="absolute right-4 z-20" style={{ bottom: 16 }}>
-              <SOSButton onTrigger={handleSOS} />
             </div>
 
             {selectedPlace && (
@@ -204,6 +256,7 @@ export default function TouristApp({
         onChange={(id) => setTab(id as Tab)}
         onProtected={handleProtectedTab}
         isAuthenticated={isAuthenticated}
+        sosButton={<SOSButton onTrigger={handleSOS} />}
       />
     </div>
   );
