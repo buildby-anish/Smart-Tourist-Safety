@@ -2,7 +2,11 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import Config
+from database.schema_manager import run_database_schema_check
 from routers import alerts, audit_logs, auth, authority, incidents, itinerary, locations, sos, tourists
+
+# Execute automatic database schema check and updates
+run_database_schema_check()
 
 app = FastAPI(title="Smart Tourist Safety API")
 
