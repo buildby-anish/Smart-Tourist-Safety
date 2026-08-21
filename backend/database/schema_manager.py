@@ -188,12 +188,20 @@ def run_database_schema_check():
             # 1. Extensions check
             check_and_create_extensions(cur)
             
-            # 2. Pass 1: Table Creation
+            # 2. Pass 1: Table Creation, RLS enablement, and authenticated privileges
             for table_name, table_info in TABLES.items():
                 if not table_exists(cur, table_name):
                     create_table(cur, table_name, table_info)
                 else:
                     logger.info(f"[DATABASE] Table {table_name} exists")
+                
+                # Ensure Row Level Security is active and appropriate authenticated privileges exist
+                try:
+                    cur.execute(f"ALTER TABLE public.{table_name} ENABLE ROW LEVEL SECURITY;")
+                    cur.execute(f"GRANT SELECT, INSERT, UPDATE, DELETE ON public.{table_name} TO authenticated;")
+                    logger.info(f"[DATABASE] RLS and authenticated privileges verified for table: {table_name}")
+                except Exception as e:
+                    logger.warning(f"[DATABASE] Failed to set RLS/grants on table {table_name}: {e}. Continuing...")
                     
             # 3. Pass 2: Column checks and additions
             for table_name, table_info in TABLES.items():

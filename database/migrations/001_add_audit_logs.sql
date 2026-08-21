@@ -45,3 +45,6 @@ CREATE POLICY audit_logs_select_authority ON public.audit_logs
             SELECT 1 FROM public.authorities WHERE auth_user_id = auth.uid()
         )
     );
+
+-- Table-level privileges must permit the operations for RLS policies to evaluate.
+GRANT SELECT, INSERT ON public.audit_logs TO authenticated;
