@@ -22,7 +22,7 @@ _cors_origin_regex = None
 
 if not _configured_origins or "*" in _configured_origins:
     _cors_origins = ["http://localhost:3000", "http://localhost:5173"]
-    _cors_origin_regex = r"https://.*\.vercel\.app|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?"
+    _cors_origin_regex = r"https://.*|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?"
 else:
     _cors_origins = _configured_origins
 

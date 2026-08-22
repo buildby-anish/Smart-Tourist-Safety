@@ -458,7 +458,7 @@ export async function registerAndLoginTourist(details: {
   } catch (err: any) {
     // If the derived account already exists (e.g. re-registering the same
     // identifier), fall through to login instead of failing the whole flow.
-    if (!(err instanceof ApiError && err.status === 409)) {
+    if (!(err instanceof ApiError && (err.status === 409 || err.status === 422))) {
       console.error("Tourist registration failed:", err);
       throw err;
     }

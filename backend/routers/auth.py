@@ -413,6 +413,11 @@ def register(payload: RegisterRequest) -> AuthResponse:
                 or "Failed to sign up with Supabase Auth."
             )
             logger.warning(f"Supabase {'admin ' if use_admin_api else ''}signup failed for {email_str}: status={resp.status_code} detail={err_detail}")
+            if resp.status_code == 422 and "already been registered" in err_detail.lower():
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail="Username already registered"
+                )
             raise HTTPException(
                 status_code=resp.status_code,
                 detail=err_detail
