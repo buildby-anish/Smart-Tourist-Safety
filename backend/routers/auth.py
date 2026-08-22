@@ -106,21 +106,34 @@ def resolve_session(token: str | None) -> SessionResponse:
 
     # 2. Database Mode: JWT Session Decoding
     try:
-        if not Config.JWT_SECRET:
-            # JWT_SECRET must be the Supabase project's JWT secret. Without
-            # it we cannot verify the token signature; decoding unsigned
-            # (verify_signature=False) would let anyone forge a token with
-            # an arbitrary "sub" claim and authenticate as any user. Fail
-            # closed instead of silently accepting unverified tokens.
-            logger.error("JWT_SECRET is not configured; refusing to accept unverified tokens.")
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="Authentication is not correctly configured on the server.",
-            )
+        header = jwt.get_unverified_header(token)
+        alg = header.get("alg", "HS256")
+        
+        if alg == "RS256":
+            if not Config.SUPABASE_URL:
+                logger.error("SUPABASE_URL is not configured; cannot fetch JWKS keys for RS256.")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Authentication is not correctly configured on the server.",
+                )
+            jwks_url = f"{Config.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
+            jwks_client = jwt.PyJWKClient(jwks_url)
+            signing_key = jwks_client.get_signing_key_from_jwt(token)
+            key = signing_key.key
+        else:
+            jwt_secret = Config.JWT_SECRET.strip().strip('"').strip("'")
+            if not jwt_secret:
+                logger.error("JWT_SECRET is not configured; refusing to accept unverified HS256 tokens.")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Authentication is not correctly configured on the server.",
+                )
+            key = jwt_secret
+
         claims = jwt.decode(
             token,
-            Config.JWT_SECRET,
-            algorithms=["HS256"],
+            key,
+            algorithms=[alg],
             options={"verify_aud": False}
         )
         
