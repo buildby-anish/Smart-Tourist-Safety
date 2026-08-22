@@ -178,12 +178,12 @@ def resolve_session(token: str | None) -> SessionResponse:
             headers={"WWW-Authenticate": "Bearer"},
         )
     except Exception as e:
-        logger.error(f"Error in session verification: {e}")
+        logger.error(f"Error in session verification: {e}", exc_info=True)
         if isinstance(e, HTTPException):
             raise e
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Internal server error during authentication",
+            detail=f"Internal server error during authentication: {type(e).__name__}: {str(e)}",
         )
 
 
