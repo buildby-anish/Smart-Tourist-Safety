@@ -593,11 +593,40 @@ def login(payload: LoginRequest) -> LoginResponse:
                 WHERE auth_user_id = %s;
             """, (auth_user_id,))
             row = cur.fetchone()
+            
             if not row:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Linked profile not found in application database.",
-                )
+                # Auto-recovery for orphaned Supabase Auth users who don't have a database profile yet
+                logger.info(f"Auto-recovering database profile for user: {payload.username} ({auth_user_id})")
+                auth_id = uuid4()
+                username = payload.username
+                user_type = "tourist" if ("@" in username or username.startswith("tourist-")) else "authority"
+                
+                tourist_profile_id = uuid4() if user_type == "tourist" else None
+                authority_id = uuid4() if user_type == "authority" else None
+                
+                if user_type == "tourist":
+                    cur.execute("""
+                        INSERT INTO public.tourist_profiles (id, user_id, username, full_name, email, kyc_status, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s);
+                    """, (tourist_profile_id, auth_user_id, username, username, email_str, "PENDING", now))
+                else:
+                    cur.execute("""
+                        INSERT INTO public.authorities (authority_id, auth_user_id, agency_name, contact_email)
+                        VALUES (%s, %s, %s, %s);
+                    """, (authority_id, auth_user_id, username, email_str))
+                    
+                cur.execute("""
+                    INSERT INTO public.authentication (auth_id, auth_user_id, tourist_profile_id, authority_id, username, mfa_enabled, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s);
+                """, (auth_id, auth_user_id, tourist_profile_id, authority_id, username, False, now))
+                
+                # Fetch the newly created row to populate variables
+                cur.execute("""
+                    SELECT auth_id, auth_user_id, tourist_profile_id, authority_id, username, mfa_enabled
+                    FROM public.authentication
+                    WHERE auth_user_id = %s;
+                """, (auth_user_id,))
+                row = cur.fetchone()
                 
             cur.execute("""
                 UPDATE public.authentication
