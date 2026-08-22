@@ -3,6 +3,7 @@
 import logging
 from db import is_db_active, get_db_cursor
 from database.schema_definition import TABLES
+from database.migration_v2 import run_v2_migration
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("database")
@@ -187,7 +188,26 @@ def run_database_schema_check():
         with get_db_cursor(commit=True) as cur:
             # 1. Extensions check
             check_and_create_extensions(cur)
-            
+            try:
+                cur.execute('CREATE EXTENSION IF NOT EXISTS "postgis";')
+                logger.info("[DATABASE] Extension postgis verified/created.")
+            except Exception as e:
+                logger.warning(f"[DATABASE] Failed to check/create extension postgis: {e}. Continuing...")
+
+            # 1b. One-time legacy-schema migration (renames old tables/columns
+            # in place so existing data survives the directive schema rename).
+            # Must run before table creation below, or schema_manager would
+            # just create the new tables empty alongside the untouched old ones.
+            try:
+                run_v2_migration(cur)
+            except Exception as e:
+                logger.critical(
+                    f"[DATABASE] Legacy migration failed: {e}. Halting schema "
+                    "checks to avoid creating duplicate/empty new-shape tables "
+                    "next to un-migrated old ones."
+                )
+                raise
+
             # 2. Pass 1: Table Creation, RLS enablement, and authenticated privileges
             for table_name, table_info in TABLES.items():
                 if not table_exists(cur, table_name):

@@ -1,0 +1,14 @@
+[
+  "tests/test_api.py::test_alerts",
+  "tests/test_api.py::test_audit_logs",
+  "tests/test_api.py::test_auth_flows",
+  "tests/test_api.py::test_authority_endpoints",
+  "tests/test_api.py::test_incident_cannot_spoof_another_tourist_id",
+  "tests/test_api.py::test_incident_flows",
+  "tests/test_api.py::test_incident_response_logging",
+  "tests/test_api.py::test_itinerary_flows",
+  "tests/test_api.py::test_locations",
+  "tests/test_api.py::test_sos_alarm",
+  "tests/test_api.py::test_sos_cannot_spoof_another_tourist_id",
+  "tests/test_api.py::test_tourist_profile"
+]

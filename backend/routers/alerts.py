@@ -41,7 +41,7 @@ def create_alert(
     try:
         with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
             # Verify incident exists
-            cur.execute("SELECT incident_id FROM public.incidents WHERE incident_id = %s;", (payload.incident_id,))
+            cur.execute("SELECT id FROM public.incidents WHERE id = %s;", (payload.incident_id,))
             if not cur.fetchone():
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,

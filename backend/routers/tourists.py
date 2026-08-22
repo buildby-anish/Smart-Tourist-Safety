@@ -1,3 +1,4 @@
+import json
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -6,18 +7,50 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from db import is_db_active, get_db_cursor, get_authenticated_cursor
 from routers.auth import get_current_user
 from schemas.auth import SessionResponse
-from schemas.tourist import DigitalIdResponse, TouristCreate, TouristResponse, TouristUpdate
+from schemas.tourist import DigitalIdResponse, EmergencyContact, TouristCreate, TouristResponse, TouristUpdate
 
 router = APIRouter(prefix="/tourists", tags=["tourists"])
 
 # Temporary in-memory storage for local API development only (fallback).
 _in_memory_tourist_store: dict[UUID, TouristResponse] = {}
 
+_PROFILE_COLUMNS = (
+    "id, tourist_id, username, full_name, phone_number, email, emergency_contacts, "
+    "govt_id_type, govt_id_number, id_photo_url, kyc_status, preferred_language, created_at"
+)
 
-def _get_tourist_or_404(tourist_id: UUID, current_user: SessionResponse | None = None) -> TouristResponse:
+
+def _generate_tourist_code() -> str:
+    """Public-facing tourist identifier, format TOUR-YYYY-[HEX] per the directive."""
+    year = datetime.now(timezone.utc).year
+    return f"TOUR-{year}-{uuid4().hex[:8].upper()}"
+
+
+def _row_to_response(row) -> TouristResponse:
+    raw_contacts = row[6]
+    if isinstance(raw_contacts, str):
+        raw_contacts = json.loads(raw_contacts) if raw_contacts else []
+    return TouristResponse(
+        id=row[0],
+        tourist_id=row[1],
+        username=row[2],
+        full_name=row[3],
+        phone_number=row[4],
+        email=row[5],
+        emergency_contacts=[EmergencyContact(**c) for c in (raw_contacts or [])],
+        govt_id_type=row[7],
+        govt_id_number=row[8],
+        id_photo_url=row[9],
+        kyc_status=row[10],
+        preferred_language=row[11],
+        created_at=row[12],
+    )
+
+
+def _get_tourist_or_404(profile_id: UUID, current_user: SessionResponse | None = None) -> TouristResponse:
     # 1. Fallback Mode
     if not is_db_active():
-        tourist = _in_memory_tourist_store.get(tourist_id)
+        tourist = _in_memory_tourist_store.get(profile_id)
         if tourist is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -30,17 +63,17 @@ def _get_tourist_or_404(tourist_id: UUID, current_user: SessionResponse | None =
     # policy applies. Otherwise, fall back to the system db cursor (e.g. for
     # registration or other trusted system actions with no request-scoped user).
     #
-    # SECURITY: this endpoint (GET /tourists/{tourist_id}) is tourist-facing
+    # SECURITY: this endpoint (GET /tourists/{id}) is tourist-facing
     # ("get my own profile"). It previously fell back to the RLS-bypassing
     # get_db_cursor() for ANY non-tourist caller, which let any authenticated
     # authority account fetch any tourist's full PII (name, phone, email,
-    # KYC info) by guessing/enumerating tourist_id, with no authorization
-    # check at all. Authorities have a dedicated, properly-scoped endpoint
-    # for this (GET /authority/tourists/{tourist_id}), so here we require
-    # tourists to be fetching their own profile and reject other callers.
+    # KYC info) by guessing/enumerating the id, with no authorization check
+    # at all. Authorities have a dedicated, properly-scoped endpoint for this
+    # (GET /authority/tourists/{id}), so here we require tourists to be
+    # fetching their own profile and reject other callers.
     if current_user is not None:
         if current_user.user_type == "tourist":
-            if current_user.tourist_id is not None and current_user.tourist_id != tourist_id:
+            if current_user.tourist_profile_id is not None and current_user.tourist_profile_id != profile_id:
                 raise HTTPException(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="Tourists may only access their own profile.",
@@ -49,36 +82,25 @@ def _get_tourist_or_404(tourist_id: UUID, current_user: SessionResponse | None =
         else:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Use /authority/tourists/{tourist_id} for authority access to tourist profiles.",
+                detail="Use /authority/tourists/{id} for authority access to tourist profiles.",
             )
     else:
         cursor_ctx = get_db_cursor()
 
     try:
         with cursor_ctx as cur:
-            cur.execute("""
-                SELECT tourist_id, digital_id, full_name, kyc_document_type, kyc_verified, phone, email, emergency_contact, preferred_language, created_at
-                FROM public.tourists
-                WHERE tourist_id = %s;
-            """, (tourist_id,))
+            cur.execute(f"""
+                SELECT {_PROFILE_COLUMNS}
+                FROM public.tourist_profiles
+                WHERE id = %s;
+            """, (profile_id,))
             row = cur.fetchone()
             if not row:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Tourist profile not found",
                 )
-            return TouristResponse(
-                tourist_id=row[0],
-                digital_id=row[1],
-                full_name=row[2],
-                kyc_document_type=row[3],
-                kyc_verified=row[4],
-                phone=row[5],
-                email=row[6],
-                emergency_contact=row[7],
-                preferred_language=row[8],
-                created_at=row[9]
-            )
+            return _row_to_response(row)
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -93,62 +115,57 @@ def create_tourist(
     payload: TouristCreate,
     current_user: SessionResponse = Depends(get_current_user)
 ) -> TouristResponse:
+    contacts_json = json.dumps([c.model_dump() for c in payload.emergency_contacts])
+
     # 1. Fallback Mode
     if not is_db_active():
         tourist = TouristResponse(
-            tourist_id=uuid4(),
-            digital_id=payload.digital_id,
+            id=uuid4(),
+            tourist_id=None,
+            username=payload.username,
             full_name=payload.full_name,
-            kyc_document_type=payload.kyc_document_type,
-            kyc_verified=payload.kyc_verified,
-            phone=payload.phone,
+            phone_number=payload.phone_number,
             email=payload.email,
-            emergency_contact=payload.emergency_contact,
+            emergency_contacts=payload.emergency_contacts,
+            govt_id_type=payload.govt_id_type,
+            govt_id_number=payload.govt_id_number,
+            id_photo_url=payload.id_photo_url,
+            kyc_status="PENDING",
             preferred_language=payload.preferred_language,
             created_at=datetime.now(timezone.utc),
         )
-        _in_memory_tourist_store[tourist.tourist_id] = tourist
+        _in_memory_tourist_store[tourist.id] = tourist
         return tourist
 
     # 2. Database Mode
     now = datetime.now(timezone.utc)
-    tourist_id = uuid4()
-    digital_id = payload.digital_id or f"DIG-{uuid4().hex[:8].upper()}"
-    
+    profile_id = uuid4()
+
     try:
         # Run under the current user's authenticated transaction
         with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
-            cur.execute("""
-                INSERT INTO public.tourists (
-                    tourist_id, auth_user_id, digital_id, full_name, kyc_document_type, 
-                    kyc_verified, phone, email, emergency_contact, preferred_language, created_at
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                RETURNING tourist_id, digital_id, full_name, kyc_document_type, kyc_verified, phone, email, emergency_contact, preferred_language, created_at;
+            cur.execute(f"""
+                INSERT INTO public.tourist_profiles (
+                    id, user_id, username, full_name, phone_number, email,
+                    emergency_contacts, govt_id_type, govt_id_number, id_photo_url,
+                    kyc_status, preferred_language, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING {_PROFILE_COLUMNS};
             """, (
-                tourist_id, current_user.auth_user_id, digital_id, payload.full_name, payload.kyc_document_type,
-                payload.kyc_verified or False, payload.phone, payload.email, payload.emergency_contact, payload.preferred_language, now
+                profile_id, current_user.auth_user_id, payload.username, payload.full_name,
+                payload.phone_number, payload.email, contacts_json, payload.govt_id_type,
+                payload.govt_id_number, payload.id_photo_url, "PENDING", payload.preferred_language, now
             ))
             row = cur.fetchone()
-            
+
             # Map this profile to authentication table as well if needed
             cur.execute("""
                 UPDATE public.authentication
-                SET tourist_id = %s
+                SET tourist_profile_id = %s
                 WHERE auth_user_id = %s;
-            """, (tourist_id, current_user.auth_user_id))
-            
-            return TouristResponse(
-                tourist_id=row[0],
-                digital_id=row[1],
-                full_name=row[2],
-                kyc_document_type=row[3],
-                kyc_verified=row[4],
-                phone=row[5],
-                email=row[6],
-                emergency_contact=row[7],
-                preferred_language=row[8],
-                created_at=row[9]
-            )
+            """, (profile_id, current_user.auth_user_id))
+
+            return _row_to_response(row)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -156,69 +173,74 @@ def create_tourist(
         )
 
 
-@router.get("/{tourist_id}", response_model=TouristResponse)
+@router.get("/{profile_id}", response_model=TouristResponse)
 def get_tourist(
-    tourist_id: UUID,
+    profile_id: UUID,
     current_user: SessionResponse = Depends(get_current_user)
 ) -> TouristResponse:
-    return _get_tourist_or_404(tourist_id, current_user)
+    return _get_tourist_or_404(profile_id, current_user)
 
 
-@router.get("/{tourist_id}/digital-id", response_model=DigitalIdResponse)
+@router.get("/{profile_id}/digital-id", response_model=DigitalIdResponse)
 def get_tourist_digital_id(
-    tourist_id: UUID,
+    profile_id: UUID,
     current_user: SessionResponse = Depends(get_current_user)
 ) -> DigitalIdResponse:
-    tourist = _get_tourist_or_404(tourist_id, current_user)
+    tourist = _get_tourist_or_404(profile_id, current_user)
     return DigitalIdResponse.model_validate(tourist)
 
 
-@router.patch("/{tourist_id}", response_model=TouristResponse)
+@router.patch("/{profile_id}", response_model=TouristResponse)
 def update_tourist(
-    tourist_id: UUID,
+    profile_id: UUID,
     payload: TouristUpdate,
     current_user: SessionResponse = Depends(get_current_user)
 ) -> TouristResponse:
     # 1. Fallback Mode
     if not is_db_active():
-        tourist = _get_tourist_or_404(tourist_id)
+        tourist = _get_tourist_or_404(profile_id)
         update_data = payload.model_dump(exclude_unset=True)
         updated = tourist.model_copy(update=update_data)
-        _in_memory_tourist_store[tourist_id] = updated
+        _in_memory_tourist_store[profile_id] = updated
         return updated
 
     # 2. Database Mode
-    _get_tourist_or_404(tourist_id, current_user)  # Verify existence and RLS permission first
-    
+    _get_tourist_or_404(profile_id, current_user)  # Verify existence and RLS permission first
+
     update_data = payload.model_dump(exclude_unset=True)
     if not update_data:
-        return _get_tourist_or_404(tourist_id, current_user)
-        
+        return _get_tourist_or_404(profile_id, current_user)
+
+    # KYC completion: per the directive, a public tourist_id code
+    # (TOUR-YYYY-[HEX]) is auto-generated the moment kyc_status becomes
+    # VERIFIED, if one hasn't already been assigned.
+    generated_code = None
+    if update_data.get("kyc_status") == "VERIFIED":
+        current = _get_tourist_or_404(profile_id, current_user)
+        if current.tourist_id is None:
+            generated_code = _generate_tourist_code()
+            update_data["tourist_id"] = generated_code
+
+    if "emergency_contacts" in update_data:
+        update_data["emergency_contacts"] = json.dumps(update_data["emergency_contacts"])
+
     set_clauses = []
     params = []
     for k, v in update_data.items():
         set_clauses.append(f"{k} = %s")
         params.append(v)
-        
-    params.append(tourist_id)
-    query = f"UPDATE public.tourists SET {', '.join(set_clauses)} WHERE tourist_id = %s RETURNING tourist_id, digital_id, full_name, kyc_document_type, kyc_verified, phone, email, emergency_contact, preferred_language, created_at;"
-    
+
+    params.append(profile_id)
+    query = (
+        f"UPDATE public.tourist_profiles SET {', '.join(set_clauses)} "
+        f"WHERE id = %s RETURNING {_PROFILE_COLUMNS};"
+    )
+
     try:
         with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
             cur.execute(query, tuple(params))
             row = cur.fetchone()
-            return TouristResponse(
-                tourist_id=row[0],
-                digital_id=row[1],
-                full_name=row[2],
-                kyc_document_type=row[3],
-                kyc_verified=row[4],
-                phone=row[5],
-                email=row[6],
-                emergency_contact=row[7],
-                preferred_language=row[8],
-                created_at=row[9]
-            )
+            return _row_to_response(row)
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import Config
 from database.schema_manager import run_database_schema_check
-from routers import alerts, audit_logs, auth, authority, incidents, itinerary, locations, sos, tourists
+from routers import alerts, audit_logs, auth, authority, geofences, incidents, itinerary, locations, points_of_interest, sos, tourists, ws
 
 # Execute automatic database schema check and updates
 run_database_schema_check()
@@ -37,5 +37,8 @@ app.include_router(sos.router, prefix="/api/v1")
 app.include_router(alerts.router, prefix="/api/v1")
 app.include_router(authority.router, prefix="/api/v1")
 app.include_router(locations.router, prefix="/api/v1")
+app.include_router(points_of_interest.router, prefix="/api/v1")
+app.include_router(geofences.router, prefix="/api/v1")
+app.include_router(ws.router, prefix="/api/v1")
 app.include_router(itinerary.router, prefix="/api/v1")
 app.include_router(audit_logs.router, prefix="/api/v1")

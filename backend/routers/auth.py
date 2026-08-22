@@ -79,19 +79,13 @@ def _verify_password(password: str, password_hash: str) -> bool:
         return False
 
 
-def get_current_user(
-    authorization: str | None = Header(None),
-    x_session_token: str | None = Header(None, alias="X-Session-Token"),
-) -> SessionResponse:
-    token = None
-    if authorization:
-        if authorization.lower().startswith("bearer "):
-            token = authorization.split(" ", 1)[1].strip()
-        else:
-            token = authorization.strip()
-    elif x_session_token:
-        token = x_session_token.strip()
-
+def resolve_session(token: str | None) -> SessionResponse:
+    """
+    Shared token->session resolution used by both the HTTP dependency
+    (get_current_user, below) and the WebSocket endpoints in routers/ws.py,
+    which can't use FastAPI's Header()-based dependency injection the same
+    way during the WS handshake.
+    """
     if not token:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -140,7 +134,7 @@ def get_current_user(
         # Look up authentication and profiles in DB
         with get_db_cursor() as cur:
             cur.execute("""
-                SELECT auth_id, auth_user_id, tourist_id, authority_id, username, mfa_enabled, last_login_at
+                SELECT auth_id, auth_user_id, tourist_profile_id, authority_id, username, mfa_enabled, last_login_at
                 FROM public.authentication
                 WHERE auth_user_id = %s;
             """, (auth_user_id,))
@@ -157,7 +151,7 @@ def get_current_user(
                 auth_user_id=row[1],
                 username=row[4],
                 user_type=user_type,
-                tourist_id=row[2],
+                tourist_profile_id=row[2],
                 authority_id=row[3],
                 mfa_enabled=row[5],
                 last_login_at=row[6],
@@ -180,6 +174,22 @@ def get_current_user(
         )
 
 
+def get_current_user(
+    authorization: str | None = Header(None),
+    x_session_token: str | None = Header(None, alias="X-Session-Token"),
+) -> SessionResponse:
+    token = None
+    if authorization:
+        if authorization.lower().startswith("bearer "):
+            token = authorization.split(" ", 1)[1].strip()
+        else:
+            token = authorization.strip()
+    elif x_session_token:
+        token = x_session_token.strip()
+
+    return resolve_session(token)
+
+
 def require_authority(
     current_user: SessionResponse = Depends(get_current_user),
 ) -> SessionResponse:
@@ -194,7 +204,7 @@ def require_authority(
 def require_tourist(
     current_user: SessionResponse = Depends(get_current_user),
 ) -> SessionResponse:
-    if current_user.user_type != "tourist" or current_user.tourist_id is None:
+    if current_user.user_type != "tourist" or current_user.tourist_profile_id is None:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Tourist access required",
@@ -284,9 +294,9 @@ def register(payload: RegisterRequest) -> AuthResponse:
         now = datetime.now(timezone.utc)
         auth_id = uuid4()
         auth_user_id = uuid4()
-        tourist_id = payload.tourist_id if user_type == "tourist" else None
-        if user_type == "tourist" and not tourist_id:
-            tourist_id = uuid4()
+        tourist_profile_id = payload.tourist_profile_id if user_type == "tourist" else None
+        if user_type == "tourist" and not tourist_profile_id:
+            tourist_profile_id = uuid4()
             
         authority_id = payload.authority_id if user_type == "authority" else None
         if user_type == "authority" and not authority_id:
@@ -296,15 +306,18 @@ def register(payload: RegisterRequest) -> AuthResponse:
         if user_type == "tourist":
             from routers.tourists import _in_memory_tourist_store
             from schemas.tourist import TouristResponse
-            _in_memory_tourist_store[tourist_id] = TouristResponse(
-                tourist_id=tourist_id,
-                digital_id=f"DIG-{uuid4().hex[:8].upper()}",
+            _in_memory_tourist_store[tourist_profile_id] = TouristResponse(
+                id=tourist_profile_id,
+                tourist_id=None,
+                username=payload.username,
                 full_name=payload.username,
-                kyc_document_type=None,
-                kyc_verified=False,
-                phone=None,
+                phone_number=None,
                 email=f"{payload.username}@smarttouristsafety.com",
-                emergency_contact=None,
+                emergency_contacts=[],
+                govt_id_type=None,
+                govt_id_number=None,
+                id_photo_url=None,
+                kyc_status="PENDING",
                 preferred_language="EN",
                 created_at=now
             )
@@ -312,7 +325,7 @@ def register(payload: RegisterRequest) -> AuthResponse:
         auth_record = {
             "auth_id": auth_id,
             "auth_user_id": auth_user_id,
-            "tourist_id": tourist_id,
+            "tourist_profile_id": tourist_profile_id,
             "authority_id": authority_id,
             "username": payload.username,
             "password_hash": _hash_password(payload.password),
@@ -325,7 +338,7 @@ def register(payload: RegisterRequest) -> AuthResponse:
 
         return AuthResponse(
             auth_id=auth_record["auth_id"],
-            tourist_id=auth_record["tourist_id"],
+            tourist_profile_id=auth_record["tourist_profile_id"],
             authority_id=auth_record["authority_id"],
             username=auth_record["username"],
             user_type=auth_record["user_type"],
@@ -418,19 +431,18 @@ def register(payload: RegisterRequest) -> AuthResponse:
             
         now = datetime.now(timezone.utc)
         auth_id = uuid4()
-        tourist_id = payload.tourist_id if user_type == "tourist" else None
+        tourist_profile_id = payload.tourist_profile_id if user_type == "tourist" else None
         authority_id = payload.authority_id if user_type == "authority" else None
         
-        # Insert profile into tourists or authorities table, and authentication table
+        # Insert profile into tourist_profiles or authorities table, and authentication table
         with get_db_cursor(commit=True) as cur:
             if user_type == "tourist":
-                if not tourist_id:
-                    tourist_id = uuid4()
-                digital_id = f"DIG-{uuid4().hex[:8].upper()}"
+                if not tourist_profile_id:
+                    tourist_profile_id = uuid4()
                 cur.execute("""
-                    INSERT INTO public.tourists (tourist_id, auth_user_id, digital_id, full_name, email, kyc_verified, created_at)
+                    INSERT INTO public.tourist_profiles (id, user_id, username, full_name, email, kyc_status, created_at)
                     VALUES (%s, %s, %s, %s, %s, %s, %s);
-                """, (tourist_id, auth_user_id, digital_id, payload.username, email_str, False, now))
+                """, (tourist_profile_id, auth_user_id, payload.username, payload.username, email_str, "PENDING", now))
             else:
                 if not authority_id:
                     authority_id = uuid4()
@@ -440,13 +452,13 @@ def register(payload: RegisterRequest) -> AuthResponse:
                 """, (authority_id, auth_user_id, payload.username, email_str))
                 
             cur.execute("""
-                INSERT INTO public.authentication (auth_id, auth_user_id, tourist_id, authority_id, username, mfa_enabled, created_at)
+                INSERT INTO public.authentication (auth_id, auth_user_id, tourist_profile_id, authority_id, username, mfa_enabled, created_at)
                 VALUES (%s, %s, %s, %s, %s, %s, %s);
-            """, (auth_id, auth_user_id, tourist_id, authority_id, payload.username, payload.mfa_enabled, now))
+            """, (auth_id, auth_user_id, tourist_profile_id, authority_id, payload.username, payload.mfa_enabled, now))
             
         return AuthResponse(
             auth_id=auth_id,
-            tourist_id=tourist_id,
+            tourist_profile_id=tourist_profile_id,
             authority_id=authority_id,
             username=payload.username,
             user_type=user_type,
@@ -490,7 +502,7 @@ def login(payload: LoginRequest) -> LoginResponse:
             "auth_user_id": target_record["auth_user_id"],
             "username": target_record["username"],
             "user_type": target_record["user_type"],
-            "tourist_id": target_record["tourist_id"],
+            "tourist_profile_id": target_record["tourist_profile_id"],
             "authority_id": target_record["authority_id"],
             "mfa_enabled": target_record["mfa_enabled"],
             "last_login_at": now,
@@ -503,7 +515,7 @@ def login(payload: LoginRequest) -> LoginResponse:
             auth_id=target_record["auth_id"],
             username=target_record["username"],
             user_type=target_record["user_type"],
-            tourist_id=target_record["tourist_id"],
+            tourist_profile_id=target_record["tourist_profile_id"],
             authority_id=target_record["authority_id"],
             mfa_enabled=target_record["mfa_enabled"],
             last_login_at=now,
@@ -571,7 +583,7 @@ def login(payload: LoginRequest) -> LoginResponse:
         # Retrieve profile mapping and update last login time
         with get_db_cursor(commit=True) as cur:
             cur.execute("""
-                SELECT auth_id, auth_user_id, tourist_id, authority_id, username, mfa_enabled
+                SELECT auth_id, auth_user_id, tourist_profile_id, authority_id, username, mfa_enabled
                 FROM public.authentication
                 WHERE auth_user_id = %s;
             """, (auth_user_id,))
@@ -596,7 +608,7 @@ def login(payload: LoginRequest) -> LoginResponse:
                 auth_id=row[0],
                 username=row[4],
                 user_type=user_type,
-                tourist_id=row[2],
+                tourist_profile_id=row[2],
                 authority_id=row[3],
                 mfa_enabled=row[5],
                 last_login_at=now,

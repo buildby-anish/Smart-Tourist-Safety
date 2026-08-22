@@ -1,13 +1,12 @@
 from uuid import UUID
-from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from db import is_db_active, get_db_cursor, get_authenticated_cursor
+from db import is_db_active, get_authenticated_cursor
 from routers.auth import login as auth_login, require_authority
 from schemas.auth import LoginRequest, LoginResponse, SessionResponse
 from schemas.alert import AlertResponse
 from schemas.incident import IncidentResponse
-from schemas.location import LocationResponse
+from schemas.location import CoordinatesResponse
 from schemas.tourist import TouristResponse
 
 router = APIRouter(prefix="/authority", tags=["authority"])
@@ -77,22 +76,26 @@ def get_authority_incidents(
             # Explicitly widen the query to also include unassigned
             # incidents so dispatchers can see and claim new incidents.
             cur.execute("""
-                SELECT incident_id, tourist_id, location_id, incident_type, severity, status, description, created_at, authority_id
+                SELECT id, incident_type, tourist_id, latitude, longitude, ai_risk_score,
+                       priority, status, description, assigned_officer_id, created_at
                 FROM public.incidents
-                WHERE authority_id IS NULL OR authority_id = %s;
+                WHERE assigned_officer_id IS NULL OR assigned_officer_id = %s
+                ORDER BY ai_risk_score DESC NULLS LAST, created_at DESC;
             """, (current_user.authority_id,))
             rows = cur.fetchall()
             return [
                 IncidentResponse(
-                    incident_id=row[0],
-                    tourist_id=row[1],
-                    location_id=row[2],
-                    incident_type=row[3],
-                    severity=row[4],
-                    status=row[5],
-                    description=row[6],
-                    created_at=row[7],
-                    authority_id=row[8]
+                    id=row[0],
+                    incident_type=row[1],
+                    tourist_id=row[2],
+                    latitude=float(row[3]) if row[3] is not None else None,
+                    longitude=float(row[4]) if row[4] is not None else None,
+                    ai_risk_score=row[5],
+                    priority=row[6],
+                    status=row[7],
+                    description=row[8],
+                    assigned_officer_id=row[9],
+                    created_at=row[10],
                 )
                 for row in rows
             ]
@@ -103,42 +106,32 @@ def get_authority_incidents(
         )
 
 
-@router.get("/tourists/{tourist_id}", response_model=TouristResponse)
+@router.get("/tourists/{profile_id}", response_model=TouristResponse)
 def get_authority_tourist_details(
-    tourist_id: UUID,
+    profile_id: UUID,
     current_user: SessionResponse = Depends(require_authority)
 ) -> TouristResponse:
     # 1. Fallback Mode
     if not is_db_active():
         from routers.tourists import _get_tourist_or_404
-        return _get_tourist_or_404(tourist_id)
+        return _get_tourist_or_404(profile_id)
 
     # 2. Database Mode
     try:
         with get_authenticated_cursor(current_user.auth_user_id) as cur:
-            cur.execute("""
-                SELECT tourist_id, digital_id, full_name, kyc_document_type, kyc_verified, phone, email, emergency_contact, preferred_language, created_at
-                FROM public.tourists
-                WHERE tourist_id = %s;
-            """, (tourist_id,))
+            from routers.tourists import _PROFILE_COLUMNS, _row_to_response
+            cur.execute(f"""
+                SELECT {_PROFILE_COLUMNS}
+                FROM public.tourist_profiles
+                WHERE id = %s;
+            """, (profile_id,))
             row = cur.fetchone()
             if not row:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Tourist profile not found",
                 )
-            return TouristResponse(
-                tourist_id=row[0],
-                digital_id=row[1],
-                full_name=row[2],
-                kyc_document_type=row[3],
-                kyc_verified=row[4],
-                phone=row[5],
-                email=row[6],
-                emergency_contact=row[7],
-                preferred_language=row[8],
-                created_at=row[9]
-            )
+            return _row_to_response(row)
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -148,65 +141,35 @@ def get_authority_tourist_details(
         )
 
 
-@router.get("/incidents/{incident_id}/location", response_model=LocationResponse)
+@router.get("/incidents/{incident_id}/location", response_model=CoordinatesResponse)
 def get_authority_incident_location(
     incident_id: UUID,
     current_user: SessionResponse = Depends(require_authority)
-) -> LocationResponse:
+) -> CoordinatesResponse:
+    # Incidents carry their own latitude/longitude directly (directive
+    # §4: incidents.latitude / incidents.longitude) rather than pointing
+    # at a point-of-interest row, so this is now a direct field read
+    # instead of a join through points_of_interest.
+
     # 1. Fallback Mode
     if not is_db_active():
         from routers.incidents import _get_incident_or_404
-        from routers.locations import _in_memory_location_store
-        
         incident = _get_incident_or_404(incident_id)
-        if incident.location_id is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Incident has no location assigned",
-            )
-        location = _in_memory_location_store.get(incident.location_id)
-        if location is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Location not found",
-            )
-        return location
+        return CoordinatesResponse(latitude=incident.latitude, longitude=incident.longitude)
 
     # 2. Database Mode
     try:
         with get_authenticated_cursor(current_user.auth_user_id) as cur:
-            cur.execute("SELECT location_id FROM public.incidents WHERE incident_id = %s;", (incident_id,))
+            cur.execute("SELECT latitude, longitude FROM public.incidents WHERE id = %s;", (incident_id,))
             row = cur.fetchone()
             if not row:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Incident not found",
                 )
-            loc_id = row[0]
-            if not loc_id:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Incident has no location assigned",
-                )
-                
-            cur.execute("""
-                SELECT location_id, name, latitude, longitude, risk_level, recorded_at
-                FROM public.locations
-                WHERE location_id = %s;
-            """, (loc_id,))
-            loc_row = cur.fetchone()
-            if not loc_row:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail="Location not found",
-                )
-            return LocationResponse(
-                location_id=loc_row[0],
-                name=loc_row[1],
-                latitude=float(loc_row[2]) if loc_row[2] is not None else None,
-                longitude=float(loc_row[3]) if loc_row[3] is not None else None,
-                risk_level=loc_row[4],
-                recorded_at=loc_row[5]
+            return CoordinatesResponse(
+                latitude=float(row[0]) if row[0] is not None else None,
+                longitude=float(row[1]) if row[1] is not None else None,
             )
     except HTTPException as he:
         raise he

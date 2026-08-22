@@ -6,32 +6,34 @@ from pydantic import BaseModel, ConfigDict
 
 class IncidentCreate(BaseModel):
     tourist_id: UUID
-    location_id: UUID | None = None
     latitude: float | None = None
     longitude: float | None = None
-    incident_type: str | None = "OTHER"
-    severity: str | None = "MEDIUM"
+    incident_type: str | None = "MANUAL"  # SOS | GEOFENCE_BREACH | MANUAL
+    priority: str | None = "LOW"  # LOW | MEDIUM | HIGH | CRITICAL
     status: str = "OPEN"
     description: str | None = None
-    authority_id: UUID | None = None
+    assigned_officer_id: UUID | None = None
 
 
 class IncidentUpdate(BaseModel):
     status: str | None = None
-    severity: str | None = None
+    priority: str | None = None
+    ai_risk_score: int | None = None
     description: str | None = None
-    authority_id: UUID | None = None
+    assigned_officer_id: UUID | None = None
 
 
 class IncidentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    incident_id: UUID
-    tourist_id: UUID
-    location_id: UUID | None = None
+    id: UUID
     incident_type: str | None = None
-    severity: str | None = None
+    tourist_id: UUID
+    latitude: float | None = None
+    longitude: float | None = None
+    ai_risk_score: int | None = None
+    priority: str | None = None
     status: str
     description: str | None = None
+    assigned_officer_id: UUID | None = None
     created_at: datetime
-    authority_id: UUID | None = None

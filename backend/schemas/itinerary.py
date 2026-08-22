@@ -1,28 +1,39 @@
-from datetime import datetime
+from datetime import date, datetime
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict
 
 
-class ItineraryEntryCreate(BaseModel):
-    location_id: UUID | None = None
-    # Optional convenience fields — when location_id is not supplied, a
-    # location record is resolved/created from a plain destination name
-    # (and optional coordinates), mirroring how incidents/sos resolve
-    # locations elsewhere in the backend.
-    destination_name: str | None = None
+class Destination(BaseModel):
+    name: str
     latitude: float | None = None
     longitude: float | None = None
+    activity_tags: list[str] = []
     planned_arrival: datetime | None = None
     planned_departure: datetime | None = None
 
 
-class ItineraryEntryResponse(BaseModel):
+class ItineraryCreate(BaseModel):
+    title: str
+    destinations: list[Destination] = []
+    start_date: date | None = None
+    end_date: date | None = None
+
+
+class ItineraryUpdate(BaseModel):
+    title: str | None = None
+    destinations: list[Destination] | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+
+
+class ItineraryResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
-    itinerary_id: UUID
+    id: UUID
     tourist_id: UUID
-    location_id: UUID
-    location_name: str | None = None
-    planned_arrival: datetime | None = None
-    planned_departure: datetime | None = None
+    title: str
+    destinations: list[Destination] = []
+    start_date: date | None = None
+    end_date: date | None = None
+    created_at: datetime

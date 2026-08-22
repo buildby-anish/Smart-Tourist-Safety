@@ -26,7 +26,7 @@ class RegisterRequest(BaseModel):
     username: str
     password: str
     user_type: str = "tourist"  # "tourist" or "authority"
-    tourist_id: UUID | None = None
+    tourist_profile_id: UUID | None = None
     authority_id: UUID | None = None
     mfa_enabled: bool = False
 
@@ -40,7 +40,7 @@ class AuthResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     auth_id: UUID
-    tourist_id: UUID | None = None
+    tourist_profile_id: UUID | None = None
     authority_id: UUID | None = None
     username: str
     user_type: str
@@ -55,7 +55,7 @@ class LoginResponse(BaseModel):
     auth_id: UUID
     username: str
     user_type: str
-    tourist_id: UUID | None = None
+    tourist_profile_id: UUID | None = None
     authority_id: UUID | None = None
     mfa_enabled: bool
     last_login_at: datetime | None = None
@@ -68,7 +68,7 @@ class SessionResponse(BaseModel):
     auth_user_id: UUID
     username: str
     user_type: str
-    tourist_id: UUID | None = None
+    tourist_profile_id: UUID | None = None
     authority_id: UUID | None = None
     mfa_enabled: bool
     last_login_at: datetime | None = None

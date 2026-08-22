@@ -6,11 +6,9 @@ from pydantic import BaseModel, ConfigDict
 
 class SOSCreate(BaseModel):
     tourist_id: UUID
-    location_id: UUID | None = None
-    latitude: float | None = None
-    longitude: float | None = None
-    description: str | None = None
-    severity: str | None = "HIGH"
+    latitude: float
+    longitude: float
+    battery_status: int | None = None
     trigger_source: str | None = "APP"
 
 
@@ -20,12 +18,10 @@ class SOSResponse(BaseModel):
     sos_id: UUID
     tourist_id: UUID
     incident_id: UUID | None = None
-    location_id: UUID | None = None
-    incident_type: str = "SOS"
-    severity: str | None = None
-    status: str = "OPEN"
-    description: str | None = None
+    latitude: float
+    longitude: float
+    battery_status: int | None = None
+    authority_id: UUID | None = None
     triggered_at: datetime
-    created_at: datetime
     trigger_source: str | None = "APP"
-    sos_status: str = "ACTIVE"
+    sos_status: str = "PENDING"  # PENDING | ACKNOWLEDGED | DISPATCHED | RESOLVED
