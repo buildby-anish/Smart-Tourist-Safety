@@ -109,6 +109,7 @@ def resolve_session(token: str | None) -> SessionResponse:
         header = jwt.get_unverified_header(token)
         alg = header.get("alg", "HS256")
         
+        claims = None
         if alg == "RS256":
             if not Config.SUPABASE_URL:
                 logger.error("SUPABASE_URL is not configured; cannot fetch JWKS keys for RS256.")
@@ -142,10 +143,11 @@ def resolve_session(token: str | None) -> SessionResponse:
                 )
                 
             # Direct RSA public key construction from raw modulus (n) and exponent (e)
-            # This completely bypasses PEM serialization/deserialization and avoids all "Unable to load PEM file" errors.
             import base64
             from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
             from cryptography.hazmat.backends import default_backend
+            from cryptography.hazmat.primitives import hashes
+            from cryptography.hazmat.primitives.asymmetric import padding
             
             def base64url_decode(s: str) -> bytes:
                 s = s.strip()
@@ -166,6 +168,35 @@ def resolve_session(token: str | None) -> SessionResponse:
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to parse signature verification key.",
                 )
+                
+            # Verify the signature manually to bypass PyJWT PEM-loading bugs
+            parts = token.split(".")
+            if len(parts) != 3:
+                raise jwt.PyJWTError("Invalid token format")
+                
+            message = f"{parts[0]}.{parts[1]}".encode("ascii")
+            try:
+                sig_bytes = base64url_decode(parts[2])
+            except Exception:
+                raise jwt.PyJWTError("Invalid base64 in signature")
+                
+            try:
+                key.verify(
+                    sig_bytes,
+                    message,
+                    padding.PKCS1v15(),
+                    hashes.SHA256()
+                )
+            except Exception as sig_err:
+                logger.warning(f"Signature verification failed: {sig_err}")
+                raise jwt.PyJWTError("Signature verification failed")
+                
+            # Signature verified successfully! Decode the payload without verification
+            claims = jwt.decode(
+                token,
+                "",
+                options={"verify_signature": False, "verify_aud": False}
+            )
         else:
             jwt_secret = Config.JWT_SECRET.strip().strip('"').strip("'")
             if not jwt_secret:
@@ -174,14 +205,12 @@ def resolve_session(token: str | None) -> SessionResponse:
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Authentication is not correctly configured on the server.",
                 )
-            key = jwt_secret
-
-        claims = jwt.decode(
-            token,
-            key,
-            algorithms=[alg],
-            options={"verify_aud": False}
-        )
+            claims = jwt.decode(
+                token,
+                jwt_secret,
+                algorithms=[alg],
+                options={"verify_aud": False}
+            )
         
         auth_user_id = claims.get("sub")
         if not auth_user_id:
