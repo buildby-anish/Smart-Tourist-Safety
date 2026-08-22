@@ -131,9 +131,7 @@ def resolve_session(token: str | None) -> SessionResponse:
             jwk_dict = None
             for key_dict in jwks.get("keys", []):
                 if key_dict.get("kid") == kid:
-                    # Strip x5c to force PyJWT to construct the key using n and e (avoids "Unable to load PEM file" error)
-                    jwk_dict = key_dict.copy()
-                    jwk_dict.pop("x5c", None)
+                    jwk_dict = key_dict
                     break
                     
             if not jwk_dict:
@@ -143,9 +141,31 @@ def resolve_session(token: str | None) -> SessionResponse:
                     detail="Invalid authentication token signature key.",
                 )
                 
-            from jwt import PyJWK
-            jwk_obj = PyJWK(jwk_dict)
-            key = jwk_obj.key
+            # Direct RSA public key construction from raw modulus (n) and exponent (e)
+            # This completely bypasses PEM serialization/deserialization and avoids all "Unable to load PEM file" errors.
+            import base64
+            from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+            from cryptography.hazmat.backends import default_backend
+            
+            def base64url_decode(s: str) -> bytes:
+                s = s.strip()
+                rem = len(s) % 4
+                if rem > 0:
+                    s += '=' * (4 - rem)
+                return base64.urlsafe_b64decode(s)
+                
+            try:
+                n_b = base64url_decode(jwk_dict["n"])
+                e_b = base64url_decode(jwk_dict["e"])
+                n_int = int.from_bytes(n_b, byteorder="big")
+                e_int = int.from_bytes(e_b, byteorder="big")
+                key = RSAPublicNumbers(e_int, n_int).public_key(default_backend())
+            except Exception as parse_err:
+                logger.error(f"Failed to construct RSA public key from JWK: {parse_err}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to parse signature verification key.",
+                )
         else:
             jwt_secret = Config.JWT_SECRET.strip().strip('"').strip("'")
             if not jwt_secret:
