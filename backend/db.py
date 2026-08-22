@@ -2,11 +2,22 @@ import json
 import logging
 from contextlib import contextmanager
 import psycopg2
+import psycopg2.extras
 from psycopg2.pool import ThreadedConnectionPool
 from config import Config
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("db")
+
+# Without this, psycopg2 has no idea how to serialize Python's uuid.UUID
+# objects (what uuid4() returns, and what every router in this codebase
+# passes directly as a query parameter — e.g. cur.execute(..., (auth_id, ...))
+# where auth_id = uuid4()) into a SQL value. That fails at query time with
+# "can't adapt type 'UUID'" — which only ever surfaces against a real
+# database, never in mock/offline mode, since mock mode skips SQL execution
+# entirely. This registers the adapter once, globally, for every connection
+# from the pool below, instead of needing str(x) at every call site.
+psycopg2.extras.register_uuid()
 
 pool = None
 DB_ACTIVE = False
