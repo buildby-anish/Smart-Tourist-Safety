@@ -1,6 +1,9 @@
 import { useEffect, useState } from 'react';
 import { ActualGoogleMap, MapClusterMarker } from '../ActualGoogleMap';
 import { getSOSLocation } from '../../lib/location';
+import { listGeofences } from '../../lib/api';
+import { GeoFenceZone } from '../../types';
+import { MOCK_GEOFENCE_ZONES } from '../../data/mockData';
 
 // ─── Marker palette (kept in sync with the redesigned UI's legend/quick-action colors) ───
 const MARKER_COLOR: Record<string, string> = {
@@ -61,6 +64,58 @@ interface Props {
 
 export default function MapCanvas({ activeFilter, recenterTrigger, zoomAction, onMarkerClick }: Props) {
   const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(null);
+  const [geofenceZones, setGeofenceZones] = useState<GeoFenceZone[]>(MOCK_GEOFENCE_ZONES);
+
+  // ── Real geofences from the backend (directive §A.3: safe/buffer/
+  // restricted zone overlay) ──
+  //
+  // The existing map renderer (ActualGoogleMap) draws zones as circles
+  // (center + radiusKm), not arbitrary polygons — that rendering path is
+  // unchanged here. The backend stores real polygons (directive §4:
+  // geofences.coordinates), so each polygon is approximated by its
+  // centroid + the distance to its farthest vertex as the circle radius.
+  // This is a visual approximation, not the exact polygon boundary — good
+  // enough to show tourists roughly where a zone is, but a genuine polygon
+  // renderer would be a more accurate follow-up if this matters for
+  // production use. Falls back to the existing mock zones if the backend
+  // has none defined yet or the request fails (e.g. offline).
+  useEffect(() => {
+    let cancelled = false;
+    listGeofences(true)
+      .then((zones) => {
+        if (cancelled || !zones?.length) return;
+        const converted: GeoFenceZone[] = zones.map((z) => {
+          const lats = z.coordinates.map((c) => c[1]);
+          const lngs = z.coordinates.map((c) => c[0]);
+          const centerLat = lats.reduce((a, b) => a + b, 0) / lats.length;
+          const centerLng = lngs.reduce((a, b) => a + b, 0) / lngs.length;
+          const toRad = (d: number) => (d * Math.PI) / 180;
+          const haversineKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+            const R = 6371;
+            const dLat = toRad(lat2 - lat1);
+            const dLng = toRad(lng2 - lng1);
+            const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+            return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+          };
+          const radiusKm = Math.max(
+            0.05,
+            ...z.coordinates.map(([lng, lat]) => haversineKm(centerLat, centerLng, lat, lng))
+          );
+          const riskLevel = z.zone_type === 'RESTRICTED' ? 'Unsafe' : z.zone_type === 'BUFFER' ? 'Caution' : 'Safe';
+          return {
+            id: z.id,
+            name: z.name,
+            riskLevel,
+            description: `${z.zone_type} zone`,
+            center: { lat: centerLat, lng: centerLng },
+            radiusKm,
+          };
+        });
+        setGeofenceZones(converted);
+      })
+      .catch(() => { /* keep the existing (mock) zones on failure */ });
+    return () => { cancelled = true; };
+  }, []);
 
   // Resolve a real device location once on mount (falls back to the last
   // known IndexedDB location, then to the default center — the same
@@ -107,6 +162,7 @@ export default function MapCanvas({ activeFilter, recenterTrigger, zoomAction, o
       center={userLoc || DEFAULT_CENTER}
       zoom={14}
       markers={markers}
+      geofenceZones={geofenceZones}
       height="100%"
       fullBleed
       chrome={false}

@@ -5,17 +5,7 @@ import {
   Lock, Wifi, Loader2, Pencil, Check, X as XIcon, Landmark,
 } from 'lucide-react';
 import { getDigitalId, updateTouristProfile, ApiError } from '../../lib/api';
-
-interface TouristUser {
-  tourist_id: string;
-  full_name?: string | null;
-  phone?: string | null;
-  email?: string | null;
-  emergency_contact?: string | null;
-  preferred_language?: string | null;
-  digital_id?: string | null;
-  kyc_verified?: boolean | null;
-}
+import { TouristUser } from '../../types';
 
 interface Props {
   darkMode: boolean;
@@ -30,31 +20,33 @@ interface Props {
 export default function ProfilePanel({ darkMode: dm, toggleDark, isAuthenticated, user, onLogin, onLogout, onOpenAuthorityAccess }: Props) {
   const [notifs, setNotifs] = useState(true);
   const [locShare, setLocShare] = useState(false);
-  const [digitalId, setDigitalId] = useState<string | null>(user?.digital_id || null);
+  const [digitalId, setDigitalId] = useState<string | null>(user?.tourist_id || null);
   const [editingContact, setEditingContact] = useState(false);
-  const [contactDraft, setContactDraft] = useState(user?.emergency_contact || '');
+  const [contactDraft, setContactDraft] = useState(user?.emergency_contacts?.[0]?.phone || '');
   const [savingContact, setSavingContact] = useState(false);
   const [contactErr, setContactErr] = useState('');
 
   useEffect(() => {
-    setContactDraft(user?.emergency_contact || '');
-    setDigitalId(user?.digital_id || null);
-  }, [user?.tourist_id]);
+    setContactDraft(user?.emergency_contacts?.[0]?.phone || '');
+    setDigitalId(user?.tourist_id || null);
+  }, [user?.id]);
 
-  // Fetch the digital safety pass ID if the profile we were handed doesn't
-  // already include it (e.g. right after login, before a full profile
-  // refresh) — real backend call, not a generated placeholder.
+  // Fetch the public digital safety pass code (TOUR-YYYY-HEX) if the profile
+  // we were handed doesn't already include it (e.g. KYC just got verified) —
+  // real backend call, not a generated placeholder.
   useEffect(() => {
-    if (isAuthenticated && user?.tourist_id && !digitalId) {
-      getDigitalId(user.tourist_id).then((r) => setDigitalId(r.digital_id || null)).catch(() => {});
+    if (isAuthenticated && user?.id && !digitalId) {
+      getDigitalId(user.id).then((r) => setDigitalId(r.tourist_id || null)).catch(() => {});
     }
-  }, [isAuthenticated, user?.tourist_id, digitalId]);
+  }, [isAuthenticated, user?.id, digitalId]);
 
   const saveContact = async () => {
-    if (!user?.tourist_id) return;
+    if (!user?.id) return;
     setSavingContact(true); setContactErr('');
     try {
-      await updateTouristProfile(user.tourist_id, { emergency_contact: contactDraft.trim() });
+      await updateTouristProfile(user.id, {
+        emergency_contacts: [{ name: null, relation: null, phone: contactDraft.trim() }],
+      });
       setEditingContact(false);
     } catch (err: any) {
       setContactErr(err instanceof ApiError ? err.message : 'Could not save. Try again.');
@@ -85,18 +77,18 @@ export default function ProfilePanel({ darkMode: dm, toggleDark, isAuthenticated
               <p className="text-lg font-bold truncate" style={{ color: text, fontFamily: 'Outfit, sans-serif' }}>{displayName}</p>
               <div className="flex items-center gap-2 mt-1">
                 <Hash size={12} style={{ color: subtle }} />
-                <span className="text-xs font-mono truncate" style={{ color: subtle }}>{digitalId || user.tourist_id}</span>
+                <span className="text-xs font-mono truncate" style={{ color: subtle }}>{digitalId || user.id}</span>
               </div>
-              {user.phone && (
+              {user.phone_number && (
                 <div className="flex items-center gap-2 mt-1">
                   <Phone size={12} style={{ color: subtle }} />
-                  <span className="text-xs" style={{ color: subtle }}>{user.phone}</span>
+                  <span className="text-xs" style={{ color: subtle }}>{user.phone_number}</span>
                 </div>
               )}
               <div className="flex items-center gap-1.5 mt-1.5">
-                <div className="w-2 h-2 rounded-full" style={{ background: user.kyc_verified ? '#138808' : '#d97706' }} />
-                <span className="text-xs font-medium" style={{ color: user.kyc_verified ? '#138808' : '#d97706' }}>
-                  {user.kyc_verified ? 'Verified tourist' : 'ID verification pending'}
+                <div className="w-2 h-2 rounded-full" style={{ background: user.kyc_status === 'VERIFIED' ? '#138808' : '#d97706' }} />
+                <span className="text-xs font-medium" style={{ color: user.kyc_status === 'VERIFIED' ? '#138808' : '#d97706' }}>
+                  {user.kyc_status === 'VERIFIED' ? 'Verified tourist' : 'ID verification pending'}
                 </span>
               </div>
             </div>
@@ -130,8 +122,8 @@ export default function ProfilePanel({ darkMode: dm, toggleDark, isAuthenticated
                 <div className="flex items-center gap-3">
                   <Phone size={16} style={{ color: '#dc2626' }} />
                   <div className="flex-1 min-w-0">
-                    <p className="text-sm" style={{ color: user?.emergency_contact ? text : subtle }}>
-                      {user?.emergency_contact || 'No emergency contact on file'}
+                    <p className="text-sm" style={{ color: user?.emergency_contacts?.[0]?.phone ? text : subtle }}>
+                      {user?.emergency_contacts?.[0]?.phone || 'No emergency contact on file'}
                     </p>
                   </div>
                   <button onClick={() => setEditingContact(true)} aria-label="Edit emergency contact" style={{ color: subtle }}>
@@ -158,7 +150,7 @@ export default function ProfilePanel({ darkMode: dm, toggleDark, isAuthenticated
                       {savingContact ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Save
                     </button>
                     <button
-                      onClick={() => { setEditingContact(false); setContactDraft(user?.emergency_contact || ''); setContactErr(''); }}
+                      onClick={() => { setEditingContact(false); setContactDraft(user?.emergency_contacts?.[0]?.phone || ''); setContactErr(''); }}
                       className="h-9 px-3 rounded-lg text-xs font-medium"
                       style={{ background: dm ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.05)', color: text }}
                     >

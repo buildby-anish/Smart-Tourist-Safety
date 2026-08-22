@@ -16,6 +16,7 @@ export interface SOSRecord {
   location_source?: string;
   description?: string;
   severity?: string;
+  battery_status?: number | null;
   status?: string;
   server_sos_id?: string | null;
   server_incident_id?: string | null;
@@ -103,6 +104,7 @@ export async function queueSOSRecord(sosRecord: SOSRecord): Promise<SOSRecord> {
       location_source: sosRecord.location_source || "unavailable",
       description: sosRecord.description || "Offline Emergency SOS Alert",
       severity: sosRecord.severity || "HIGH",
+      battery_status: sosRecord.battery_status ?? null,
       status: sosRecord.status || "QUEUED_OFFLINE",
       server_sos_id: sosRecord.server_sos_id || null,
       server_incident_id: sosRecord.server_incident_id || null,

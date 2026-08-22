@@ -1,12 +1,17 @@
 import { useEffect, useState } from 'react';
 import { Route, Plus, Trash2, MapPin, Calendar, Loader2, AlertTriangle, X, LogIn } from 'lucide-react';
-import { createItineraryEntry, listItineraryEntries, deleteItineraryEntry, ApiError } from '../../lib/api';
+import { createItinerary, listItineraries, deleteItinerary, ApiError, ItineraryDestination } from '../../lib/api';
 
+// The backend's itineraries are one row per TRIP with an array of
+// destinations (directive §4: itineraries.destinations JSONB), not one row
+// per destination. This panel keeps its existing "add a destination" UX by
+// treating each trip as holding exactly one destination — simplest mapping
+// onto the new shape without redesigning the screen. A future pass could
+// let one trip hold several destinations.
 interface Entry {
-  itinerary_id: string;
-  location_name?: string | null;
-  planned_arrival?: string | null;
-  planned_departure?: string | null;
+  id: string;
+  title: string;
+  destinations: ItineraryDestination[];
 }
 
 interface Props {
@@ -30,7 +35,7 @@ export default function TripsPanel({ darkMode: dm, isAuthenticated, onSignIn }: 
   const load = () => {
     if (!isAuthenticated) return;
     setState('loading'); setErrMsg('');
-    listItineraryEntries()
+    listItineraries()
       .then((rows) => { setEntries(rows as Entry[]); setState('ready'); })
       .catch((err) => { setErrMsg(err instanceof ApiError ? err.message : 'Could not load your trips.'); setState('error'); });
   };
@@ -41,10 +46,15 @@ export default function TripsPanel({ darkMode: dm, isAuthenticated, onSignIn }: 
     if (!destName.trim()) { setAddErr('Destination name is required'); return; }
     setSaving(true); setAddErr('');
     try {
-      await createItineraryEntry({
-        destination_name: destName.trim(),
-        planned_arrival: arrival ? new Date(arrival).toISOString() : undefined,
-        planned_departure: departure ? new Date(departure).toISOString() : undefined,
+      await createItinerary({
+        title: destName.trim(),
+        destinations: [{
+          name: destName.trim(),
+          planned_arrival: arrival ? new Date(arrival).toISOString() : undefined,
+          planned_departure: departure ? new Date(departure).toISOString() : undefined,
+        }],
+        start_date: arrival || undefined,
+        end_date: departure || undefined,
       });
       setDestName(''); setArrival(''); setDeparture(''); setShowAdd(false);
       load();
@@ -58,8 +68,8 @@ export default function TripsPanel({ darkMode: dm, isAuthenticated, onSignIn }: 
   const handleDelete = async (id: string) => {
     setDeletingId(id);
     try {
-      await deleteItineraryEntry(id);
-      setEntries((prev) => prev.filter((e) => e.itinerary_id !== id));
+      await deleteItinerary(id);
+      setEntries((prev) => prev.filter((e) => e.id !== id));
     } catch {
       /* leave the entry in place; the next manual refresh will reconcile */
     } finally {
@@ -132,29 +142,32 @@ export default function TripsPanel({ darkMode: dm, isAuthenticated, onSignIn }: 
 
         {state === 'ready' && entries.length > 0 && (
           <div className="space-y-2.5">
-            {entries.map((e) => (
-              <div key={e.itinerary_id} className="flex items-start gap-3 p-3.5 rounded-xl" style={{ background: card, border: `1px solid ${border}` }}>
-                <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(255,153,51,0.1)' }}>
-                  <MapPin size={16} style={{ color: '#FF9933' }} />
+            {entries.map((e) => {
+              const dest = e.destinations?.[0];
+              return (
+                <div key={e.id} className="flex items-start gap-3 p-3.5 rounded-xl" style={{ background: card, border: `1px solid ${border}` }}>
+                  <div className="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style={{ background: 'rgba(255,153,51,0.1)' }}>
+                    <MapPin size={16} style={{ color: '#FF9933' }} />
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-semibold" style={{ color: text }}>{e.title || dest?.name || 'Destination'}</p>
+                    {(dest?.planned_arrival || dest?.planned_departure) && (
+                      <div className="flex items-center gap-1.5 mt-1" style={{ color: subtle }}>
+                        <Calendar size={11} />
+                        <span className="text-xs">
+                          {dest?.planned_arrival ? new Date(dest.planned_arrival).toLocaleDateString() : '—'}
+                          {' → '}
+                          {dest?.planned_departure ? new Date(dest.planned_departure).toLocaleDateString() : '—'}
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                  <button onClick={() => handleDelete(e.id)} disabled={deletingId === e.id} aria-label="Delete" style={{ color: subtle }}>
+                    {deletingId === e.id ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
+                  </button>
                 </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold" style={{ color: text }}>{e.location_name || 'Destination'}</p>
-                  {(e.planned_arrival || e.planned_departure) && (
-                    <div className="flex items-center gap-1.5 mt-1" style={{ color: subtle }}>
-                      <Calendar size={11} />
-                      <span className="text-xs">
-                        {e.planned_arrival ? new Date(e.planned_arrival).toLocaleDateString() : '—'}
-                        {' → '}
-                        {e.planned_departure ? new Date(e.planned_departure).toLocaleDateString() : '—'}
-                      </span>
-                    </div>
-                  )}
-                </div>
-                <button onClick={() => handleDelete(e.itinerary_id)} disabled={deletingId === e.itinerary_id} aria-label="Delete" style={{ color: subtle }}>
-                  {deletingId === e.itinerary_id ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />}
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>

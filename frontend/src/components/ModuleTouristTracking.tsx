@@ -107,7 +107,7 @@ export const ModuleTouristTracking: React.FC<ModuleTouristTrackingProps> = ({
 
       // If this tourist has a real backend UUID (i.e. registered through the
       // Tourist Portal against the live backend), refresh the record with
-      // live data via GET /api/v1/authority/tourists/{tourist_id} so the KYC
+      // live data via GET /api/v1/authority/tourists/{profile_id} so the KYC
       // panel reflects the authoritative source. Falls back silently to the
       // already-displayed local record on any failure.
       if (found.tourist_id) {
@@ -118,11 +118,11 @@ export const ModuleTouristTracking: React.FC<ModuleTouristTrackingProps> = ({
               ? {
                   ...prev,
                   full_name: live.full_name,
-                  digital_id: live.digital_id,
-                  kyc_verified: live.kyc_verified,
-                  kyc_document_type: live.kyc_document_type,
+                  digital_id: live.tourist_id, // public TOUR-YYYY-HEX code (new schema)
+                  kyc_verified: live.kyc_status === 'VERIFIED',
+                  kyc_document_type: live.govt_id_type,
                   created_at: live.created_at,
-                  phone: live.phone || prev.phone,
+                  phone: live.phone_number || prev.phone,
                   email: live.email || prev.email
                 }
               : prev

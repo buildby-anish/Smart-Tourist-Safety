@@ -4,6 +4,7 @@ import logging
 from db import is_db_active, get_db_cursor
 from database.schema_definition import TABLES
 from database.migration_v2 import run_v2_migration
+from database.rls_policies import POLICIES
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("database")
@@ -175,6 +176,72 @@ def create_index(cur, table_name: str, index_name: str, col_expr: str):
     cur.execute(query)
     logger.info(f"[DATABASE] Created index {index_name} successfully.")
 
+def policy_exists(cur, table_name: str, policy_name: str) -> bool:
+    cur.execute("""
+        SELECT EXISTS (
+            SELECT 1 FROM pg_policies
+            WHERE schemaname = 'public' AND tablename = %s AND policyname = %s
+        );
+    """, (table_name, policy_name))
+    return cur.fetchone()[0]
+
+def create_policy(cur, table_name: str, policy: dict):
+    """
+    Creates one RLS policy. See database/rls_policies.py for why these
+    matter: RLS enabled with zero policies denies all access, even for a
+    role with GRANTed table privileges.
+    """
+    name = policy["name"]
+    cmd = policy["cmd"]
+    using_expr = policy.get("using")
+    check_expr = policy.get("check")
+
+    logger.info(f"[DATABASE] Creating RLS policy {name} ({cmd}) on {table_name}...")
+    query = f"CREATE POLICY {name} ON public.{table_name} FOR {cmd} TO authenticated"
+    if using_expr:
+        query += f" USING ({using_expr})"
+    if check_expr:
+        query += f" WITH CHECK ({check_expr})"
+    query += ";"
+    cur.execute(query)
+    logger.info(f"[DATABASE] Created RLS policy {name} successfully.")
+
+def trigger_exists(cur, trigger_name: str, table_name: str) -> bool:
+    cur.execute("""
+        SELECT EXISTS (
+            SELECT 1 FROM pg_trigger t
+            JOIN pg_class c ON t.tgrelid = c.oid
+            WHERE t.tgname = %s AND c.relname = %s AND NOT t.tgisinternal
+        );
+    """, (trigger_name, table_name))
+    return cur.fetchone()[0]
+
+def ensure_locations_geom_trigger(cur):
+    """
+    Keeps public.locations.geom in sync with latitude/longitude on every
+    insert or update, regardless of which code path wrote the row —
+    routers/locations.py already sets geom explicitly, but any other write
+    path (direct Supabase client, a future admin tool, a manual SQL fix)
+    would otherwise leave geom NULL and silently break the geofence
+    ST_Contains breach check in routers/geofences.py, which reads geom.
+    """
+    logger.info("[DATABASE] Ensuring locations geom sync trigger...")
+    cur.execute("""
+        CREATE OR REPLACE FUNCTION public.sync_locations_geom() RETURNS trigger AS $$
+        BEGIN
+            NEW.geom := ST_SetSRID(ST_MakePoint(NEW.longitude, NEW.latitude), 4326);
+            RETURN NEW;
+        END;
+        $$ LANGUAGE plpgsql;
+    """)
+    if not trigger_exists(cur, "trg_locations_sync_geom", "locations"):
+        cur.execute("""
+            CREATE TRIGGER trg_locations_sync_geom
+            BEFORE INSERT OR UPDATE OF latitude, longitude ON public.locations
+            FOR EACH ROW EXECUTE FUNCTION public.sync_locations_geom();
+        """)
+        logger.info("[DATABASE] Created trg_locations_sync_geom trigger.")
+
 def run_database_schema_check():
     """Runs a complete check of the Supabase PostgreSQL schemas and executes non-destructive upgrades."""
     if not is_db_active():
@@ -253,6 +320,17 @@ def run_database_schema_check():
                 for index_name, col_expr in table_info.get("indexes", {}).items():
                     if not index_exists(cur, table_name, index_name):
                         create_index(cur, table_name, index_name, col_expr)
+
+            # 7. Pass 6: RLS policies. Without this pass, RLS-enabled tables
+            # (Pass 1 above) with zero policies deny all access to the
+            # `authenticated` role — see database/rls_policies.py.
+            for table_name, policies in POLICIES.items():
+                for policy in policies:
+                    if not policy_exists(cur, table_name, policy["name"]):
+                        create_policy(cur, table_name, policy)
+
+            # 8. Pass 7: triggers
+            ensure_locations_geom_trigger(cur)
                         
         logger.info("[DATABASE] Schema verification completed successfully.")
         

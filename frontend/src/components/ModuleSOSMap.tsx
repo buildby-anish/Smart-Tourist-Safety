@@ -60,7 +60,13 @@ export const ModuleSOSMap: React.FC<ModuleSOSMapProps> = ({
 
   const [selectedIncident, setSelectedIncident] = useState<SOSIncident | null>(incidents[0] || null);
 
-  const newTickets = incidents.filter((i) => i.status === 'New');
+  // Directive §B.6 (AI Risk Prioritization Engine): new/unassigned SOS
+  // alerts are shown ranked by the backend's ai_risk_score (highest risk
+  // first), falling back to arrival order for locally-generated demo
+  // incidents that have no backend-computed score.
+  const newTickets = incidents
+    .filter((i) => i.status === 'New')
+    .sort((a, b) => (b.aiRiskScore ?? -1) - (a.aiRiskScore ?? -1));
   const dispatchedTickets = incidents.filter((i) => i.status === 'Units Dispatched');
   const resolvedTickets = incidents.filter((i) => i.status === 'Resolved');
 
@@ -313,6 +319,16 @@ export const ModuleSOSMap: React.FC<ModuleSOSMapProps> = ({
                     <span className="font-mono font-bold text-red-700">{ticket.id}</span>
                     <span className="text-[10px] text-slate-500 font-medium">{ticket.timestamp.split(' ')[1]}</span>
                   </div>
+
+                  {ticket.aiRiskScore != null && (
+                    <div className="flex items-center gap-1.5">
+                      <span className={`text-[10px] font-extrabold px-1.5 py-0.5 rounded ${
+                        ticket.aiRiskScore >= 70 ? 'bg-red-600 text-white' : ticket.aiRiskScore >= 40 ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-700'
+                      }`}>
+                        AI RISK {ticket.aiRiskScore}
+                      </span>
+                    </div>
+                  )}
 
                   <div className="font-bold text-slate-900 text-sm">{ticket.touristName}</div>
                   <div className="text-xs text-slate-600">{ticket.location.address}</div>

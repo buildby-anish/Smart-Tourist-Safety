@@ -266,8 +266,18 @@ def update_incident(
     if not is_db_active():
         incident = _get_incident_or_404(incident_id)
         update_data = payload.model_dump(exclude_unset=True)
+        # Mirror the DB-mode auto-assign-on-dispatch behavior below so
+        # fallback/mock mode (used by tests and DATABASE_URL-less local
+        # dev) doesn't silently diverge from production behavior.
+        if (
+            update_data.get("status") == "INVESTIGATING"
+            and current_user.user_type == "authority"
+            and "assigned_officer_id" not in update_data
+        ):
+            update_data["assigned_officer_id"] = current_user.authority_id
         updated = incident.model_copy(update=update_data)
         _in_memory_incident_store[incident_id] = updated
+        broadcast_sync(manager.broadcast_to_authorities, "incident.updated", updated.model_dump(mode="json"))
         return updated
 
     # 2. Database Mode

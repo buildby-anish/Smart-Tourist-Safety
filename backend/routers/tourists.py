@@ -200,6 +200,10 @@ def update_tourist(
     if not is_db_active():
         tourist = _get_tourist_or_404(profile_id)
         update_data = payload.model_dump(exclude_unset=True)
+        # Mirror the DB-mode KYC-completion auto-code-generation below so
+        # fallback/mock mode doesn't silently diverge from production.
+        if update_data.get("kyc_status") == "VERIFIED" and tourist.tourist_id is None:
+            update_data["tourist_id"] = _generate_tourist_code()
         updated = tourist.model_copy(update=update_data)
         _in_memory_tourist_store[profile_id] = updated
         return updated

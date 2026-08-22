@@ -19,21 +19,11 @@ import { getSOSLocation } from '../../lib/location';
 import { queueSOSRecord } from '../../lib/db';
 import {
   submitSOSOnline, syncQueuedSOS, getTouristProfile, getTouristId,
-  getAuthToken, clearSession, logoutUser, ApiError,
+  getAuthToken, clearSession, logoutUser, ApiError, connectTouristFeed,
 } from '../../lib/api';
+import { TouristUser } from '../../types';
 
 type Tab = 'map' | 'explore' | 'trips' | 'alerts' | 'profile';
-
-interface TouristUser {
-  tourist_id: string;
-  full_name?: string | null;
-  phone?: string | null;
-  email?: string | null;
-  emergency_contact?: string | null;
-  preferred_language?: string | null;
-  digital_id?: string | null;
-  kyc_verified?: boolean | null;
-}
 
 interface Props {
   darkMode: boolean;
@@ -68,8 +58,22 @@ export default function TouristApp({
   const [mapFilter, setMapFilter] = useState<string | null>(null);
   const [recenterTrigger, setRecenterTrigger] = useState(0);
   const [zoomAction, setZoomAction] = useState<{ type: 'in' | 'out'; ts: number } | undefined>(undefined);
+  const [geofenceAlert, setGeofenceAlert] = useState<string | null>(null);
 
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
+
+  // ── Realtime geofence alerts (directive §A.3: immediate in-app modal
+  // popup on entering a restricted zone) — pushed by the backend's
+  // /ws/tourist/{id} feed the moment a GPS ping trips a RESTRICTED geofence. ──
+  useEffect(() => {
+    if (!isAuthenticated || !user?.id) return;
+    const socket = connectTouristFeed(user.id, (event) => {
+      if (event.type === 'geofence.alert') {
+        setGeofenceAlert(event.data?.message || 'You have entered a restricted zone. Please proceed with caution.');
+      }
+    });
+    return () => socket?.close();
+  }, [isAuthenticated, user?.id]);
 
   // ── Offline SOS queue auto-sync ─────────────────────────────────────────
   useEffect(() => {
@@ -104,9 +108,15 @@ export default function TouristApp({
     }
 
     const loc = await getSOSLocation();
+    let batteryLevel: number | null = null;
+    try {
+      const battery = await (navigator as any).getBattery?.();
+      if (battery) batteryLevel = Math.round(battery.level * 100);
+    } catch { /* Battery Status API unavailable — omit, not fatal */ }
+
     const localRecord = {
       local_sos_id: crypto.randomUUID(),
-      tourist_id: user.tourist_id,
+      tourist_id: user.id,
       triggered_at: new Date().toISOString(),
       latitude: loc.latitude,
       longitude: loc.longitude,
@@ -114,6 +124,7 @@ export default function TouristApp({
       location_source: loc.location_source,
       description: `Emergency SOS Alert (${loc.location_source})`,
       severity: 'HIGH',
+      battery_status: batteryLevel,
       status: 'QUEUED_OFFLINE',
     };
     await queueSOSRecord(localRecord);
@@ -121,19 +132,19 @@ export default function TouristApp({
     const locStr = `${loc.latitude?.toFixed(4) ?? '—'}, ${loc.longitude?.toFixed(4) ?? '—'}`;
 
     if (!navigator.onLine) {
-      onTriggerSos(user.full_name || 'Tourist', `${locStr} (Queued Offline)`, user.tourist_id, user.phone || undefined);
+      onTriggerSos(user.full_name || 'Tourist', `${locStr} (Queued Offline)`, user.id, user.phone_number || undefined);
       return "No connection — your SOS is saved and will send automatically the moment you're back online.";
     }
 
     try {
       const res = await submitSOSOnline(localRecord);
-      onTriggerSos(user.full_name || 'Tourist', locStr, user.tourist_id, user.phone || undefined);
+      onTriggerSos(user.full_name || 'Tourist', locStr, user.id, user.phone_number || undefined);
       return `Authorities have been alerted with your location. Reference: ${res.incident_id || res.sos_id || 'pending'}.`;
     } catch (err: any) {
       if (err instanceof ApiError && [400, 401, 404].includes(err.status)) {
         throw new Error(err.message || 'Your session was rejected by the server. Please sign in again.');
       }
-      onTriggerSos(user.full_name || 'Tourist', `${locStr} (Queued Offline)`, user.tourist_id, user.phone || undefined);
+      onTriggerSos(user.full_name || 'Tourist', `${locStr} (Queued Offline)`, user.id, user.phone_number || undefined);
       return "Couldn't reach the server — your SOS is queued and will send automatically once you're back online.";
     }
   }, [isAuthenticated, user, onTriggerSos]);
@@ -171,6 +182,25 @@ export default function TouristApp({
 
   return (
     <div className="relative flex-1 flex flex-col overflow-hidden" style={{ background: bg, fontFamily: 'Inter, sans-serif' }}>
+
+      {/* ── Geofence breach alert (directive §A.3: immediate in-app modal
+          popup) — pushed over the tourist's realtime WebSocket feed the
+          moment a GPS ping trips a RESTRICTED zone. ── */}
+      {geofenceAlert && (
+        <div className="absolute inset-0 z-50 flex items-center justify-center px-6" style={{ background: 'rgba(0,0,0,0.55)' }}>
+          <div className="w-full max-w-sm rounded-2xl p-5 space-y-3" style={{ background: dm ? '#0c1d33' : '#ffffff', boxShadow: '0 10px 40px rgba(0,0,0,0.4)' }}>
+            <p className="text-sm font-bold" style={{ color: '#dc2626' }}>⚠ Restricted zone alert</p>
+            <p className="text-sm" style={{ color: dm ? '#f1f5f9' : '#0c2340' }}>{geofenceAlert}</p>
+            <button
+              onClick={() => setGeofenceAlert(null)}
+              className="w-full h-10 rounded-lg text-sm font-bold text-white"
+              style={{ background: '#dc2626' }}
+            >
+              Acknowledge
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* ── Persistent top-area alerts entry point (moved out of bottom nav) ── */}
       <button

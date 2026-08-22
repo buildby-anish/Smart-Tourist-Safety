@@ -84,6 +84,9 @@ export interface SOSIncident {
   // Backend linkage (real API), used to PATCH the actual incident record.
   // Undefined for locally-generated demo/mock incidents that have no backend counterpart.
   backendIncidentId?: string;
+  // AI Risk Prioritization Engine score (1-100, directive §B.6). Undefined
+  // for locally-generated demo/mock incidents.
+  aiRiskScore?: number;
 }
 
 export interface PatrollingUnit {
@@ -202,4 +205,30 @@ export interface GeoFenceZone {
 }
 
 export type SosStepState = 'ready' | 'confirming' | 'sending' | 'success' | 'error' | 'active';
+
+// ---------------------------------------------------------------------------
+// Canonical shapes matching backend/schemas/*.py (Phase 1 directive rename).
+// Used across the tourist-facing UI (LoginModal, TouristApp, ProfilePanel,
+// TripsPanel) so field names stay in one place instead of being redeclared
+// per-component.
+// ---------------------------------------------------------------------------
+
+export interface EmergencyContact {
+  name?: string | null;
+  relation?: string | null;
+  phone?: string | null;
+}
+
+export interface TouristUser {
+  id: string; // internal UUID PK — used for all API calls (/tourists/{id}, etc.)
+  tourist_id?: string | null; // public code, format TOUR-YYYY-[HEX], set once KYC is VERIFIED
+  username: string;
+  full_name?: string | null;
+  phone_number?: string | null;
+  email?: string | null;
+  emergency_contacts?: EmergencyContact[];
+  kyc_status?: 'PENDING' | 'VERIFIED' | 'REJECTED' | null;
+  preferred_language?: string | null;
+  created_at?: string;
+}
 

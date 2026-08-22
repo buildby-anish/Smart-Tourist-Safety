@@ -48,7 +48,8 @@ import {
   getAuthToken,
   getUserType,
   getTouristId,
-  getTouristProfile
+  getTouristProfile,
+  connectAuthorityFeed
 } from './lib/api';
 import LoginModal from './components/tourist/LoginModal';
 
@@ -232,12 +233,12 @@ export default function App() {
   const mapBackendStatus = (status: string): SOSIncident['status'] => {
     const s = (status || '').toUpperCase();
     if (s === 'RESOLVED' || s === 'CLOSED') return 'Resolved';
-    if (s === 'RESPONDING') return 'Units Dispatched';
+    if (s === 'INVESTIGATING') return 'Units Dispatched';
     return 'New';
   };
 
-  const mapBackendSeverity = (severity: string | null | undefined): SOSIncident['severity'] => {
-    const s = (severity || '').toUpperCase();
+  const mapBackendPriority = (priority: string | null | undefined): SOSIncident['severity'] => {
+    const s = (priority || '').toUpperCase();
     if (s === 'CRITICAL' || s === 'HIGH') return 'Critical';
     if (s === 'MEDIUM') return 'Warning';
     return 'Advisory';
@@ -262,27 +263,29 @@ export default function App() {
             try {
               const backendTourist = await getAuthorityTourist(inc.tourist_id);
               touristName = backendTourist.full_name || touristName;
-              touristPhone = backendTourist.phone || '';
+              touristPhone = backendTourist.phone_number || '';
             } catch (e) {
               // Tourist lookup failed (e.g. RLS/not found) — keep placeholder.
             }
           }
 
+          // Incidents carry their own latitude/longitude directly now
+          // (directive §4) — no separate location-name lookup, so the
+          // "address" shown is the incident's own description text.
           let lat = 32.2432;
           let lng = 77.1892;
-          let address = inc.description || `${inc.incident_type || 'Incident'} report`;
+          const address = inc.description || `${inc.incident_type || 'Incident'} report`;
           try {
-            const loc = await getAuthorityIncidentLocation(inc.incident_id);
+            const loc = await getAuthorityIncidentLocation(inc.id);
             if (loc.latitude != null) lat = loc.latitude;
             if (loc.longitude != null) lng = loc.longitude;
-            if (loc.name) address = loc.name;
           } catch (e) {
             // Location lookup failed — keep defaults.
           }
 
           const result: SOSIncident = {
-            id: `BE-${inc.incident_id}`,
-            backendIncidentId: inc.incident_id,
+            id: `BE-${inc.id}`,
+            backendIncidentId: inc.id,
             touristId: localTourist?.id || inc.tourist_id,
             touristName,
             touristPhone,
@@ -291,9 +294,10 @@ export default function App() {
               ? new Date(inc.created_at).toISOString().replace('T', ' ').substring(0, 19)
               : new Date().toISOString().replace('T', ' ').substring(0, 19),
             status: mapBackendStatus(inc.status),
-            severity: mapBackendSeverity(inc.severity),
+            severity: mapBackendPriority(inc.priority),
             hazardType: inc.incident_type || 'OTHER',
-            notes: inc.description || 'Incident synced from backend.'
+            notes: inc.description || 'Incident synced from backend.',
+            aiRiskScore: inc.ai_risk_score ?? undefined,
           };
           return result;
         })
@@ -308,6 +312,21 @@ export default function App() {
       console.warn('Failed to refresh incidents from backend:', err);
     }
   };
+
+  // Realtime authority feed (directive §B.1, §B.3, §B.2): connects once the
+  // dashboard is authenticated as an authority, and refreshes incidents the
+  // moment the backend pushes an sos.created / incident.updated /
+  // geofence.breach event, instead of relying solely on manual refresh calls.
+  useEffect(() => {
+    if (userRole !== 'authority') return;
+    const socket = connectAuthorityFeed((event) => {
+      if (event.type === 'sos.created' || event.type === 'incident.updated' || event.type === 'geofence.breach') {
+        refreshIncidentsFromBackend();
+      }
+    });
+    return () => socket?.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userRole]);
 
   // Authority MFA Authenticate — backed by the real /authority/login
   // endpoint (see lib/api.ts authenticateAuthority for the credential
@@ -438,21 +457,19 @@ export default function App() {
     }
 
     // If this incident has a real backend counterpart, persist the status
-    // change via PATCH /api/v1/incidents/{incident_id}, including the
-    // dispatching authority's own authority_id so the backend can link the
-    // incident to this authority at the moment of dispatch. Also log the
-    // dispatch action itself to public.responses.
+    // change via PATCH /api/v1/incidents/{incident_id}. The backend
+    // auto-assigns assigned_officer_id from the caller's session on this
+    // status transition (see routers/incidents.py update_incident), so no
+    // explicit officer id needs to be sent here — sending status alone is
+    // enough to both dispatch and claim the incident.
     if (targetIncident.backendIncidentId) {
-      const authorityId = getAuthorityId();
       try {
-        await updateIncidentStatus(targetIncident.backendIncidentId, {
-          status: 'RESPONDING',
-          ...(authorityId ? { authority_id: authorityId } : {})
-        });
+        await updateIncidentStatus(targetIncident.backendIncidentId, { status: 'INVESTIGATING' });
       } catch (err) {
         console.warn('Failed to persist dispatch status to backend:', err);
       }
       try {
+        const authorityId = getAuthorityId();
         await createIncidentResponse(targetIncident.backendIncidentId, {
           responder_unit: targetUnit?.unitName || unitId,
           action_taken: `Unit ${targetUnit?.unitName || unitId} dispatched to incident.`,

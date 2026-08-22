@@ -20,6 +20,9 @@ export function getAuthToken(): string {
 }
 
 export function getTouristId(): string {
+  // Storage key kept as "sos_tourist_id" for backward compatibility with
+  // already-installed clients; the value stored here is the backend's
+  // tourist_profile_id (internal UUID), not the public TOUR-YYYY-HEX code.
   return localStorage.getItem("sos_tourist_id") || "";
 }
 
@@ -38,7 +41,7 @@ export function getUsername(): string {
 interface SessionInfo {
   access_token?: string;
   user_type?: string;
-  tourist_id?: string | null;
+  tourist_profile_id?: string | null;
   authority_id?: string | null;
   username?: string;
 }
@@ -47,7 +50,7 @@ interface SessionInfo {
 export function storeSession(session: SessionInfo): void {
   if (session.access_token) localStorage.setItem("sos_auth_token", session.access_token);
   if (session.user_type) localStorage.setItem("sos_user_type", session.user_type);
-  if (session.tourist_id) localStorage.setItem("sos_tourist_id", session.tourist_id);
+  if (session.tourist_profile_id) localStorage.setItem("sos_tourist_id", session.tourist_profile_id);
   if (session.authority_id) localStorage.setItem("sos_authority_id", session.authority_id);
   if (session.username) localStorage.setItem("sos_username", session.username);
 }
@@ -195,10 +198,11 @@ export function deriveTouristCredentials(phoneOrEmail: string): { username: stri
 // ---------------------------------------------------------------------------
 
 export async function createTouristProfile(payload: {
+  username: string;
   full_name: string;
-  phone?: string;
+  phone_number?: string;
   email?: string;
-  emergency_contact?: string;
+  emergency_contacts?: { name?: string; relation?: string; phone?: string }[];
   preferred_language?: string;
 }): Promise<any> {
   return apiRequest("/tourists", { method: "POST", body: payload });
@@ -231,7 +235,7 @@ export async function getIncident(incidentId: string): Promise<any> {
 
 export async function updateIncidentStatus(
   incidentId: string,
-  payload: { status?: string; severity?: string; description?: string; authority_id?: string }
+  payload: { status?: string; priority?: string; ai_risk_score?: number; description?: string; assigned_officer_id?: string }
 ): Promise<any> {
   return apiRequest(`/incidents/${incidentId}`, { method: "PATCH", body: payload });
 }
@@ -247,22 +251,36 @@ export async function listIncidentResponses(incidentId: string): Promise<any[]> 
   return apiRequest(`/incidents/${incidentId}/responses`);
 }
 
-export async function createItineraryEntry(payload: {
-  location_id?: string;
-  destination_name?: string;
+export interface ItineraryDestination {
+  name: string;
   latitude?: number;
   longitude?: number;
+  activity_tags?: string[];
   planned_arrival?: string;
   planned_departure?: string;
+}
+
+export async function createItinerary(payload: {
+  title: string;
+  destinations?: ItineraryDestination[];
+  start_date?: string;
+  end_date?: string;
 }): Promise<any> {
   return apiRequest(`/itinerary`, { method: "POST", body: payload });
 }
 
-export async function listItineraryEntries(): Promise<any[]> {
+export async function listItineraries(): Promise<any[]> {
   return apiRequest(`/itinerary`);
 }
 
-export async function deleteItineraryEntry(itineraryId: string): Promise<void> {
+export async function updateItinerary(
+  itineraryId: string,
+  payload: { title?: string; destinations?: ItineraryDestination[]; start_date?: string; end_date?: string }
+): Promise<any> {
+  return apiRequest(`/itinerary/${itineraryId}`, { method: "PATCH", body: payload });
+}
+
+export async function deleteItinerary(itineraryId: string): Promise<void> {
   await apiRequest(`/itinerary/${itineraryId}`, { method: "DELETE" });
 }
 
@@ -283,12 +301,43 @@ export async function listAuditLogs(): Promise<any[]> {
 // Locations (backend/routers/locations.py)
 // ---------------------------------------------------------------------------
 
-export async function listLocations(): Promise<any[]> {
-  return apiRequest("/locations");
+export async function listPointsOfInterest(): Promise<any[]> {
+  return apiRequest("/points-of-interest");
 }
 
-export async function getLocation(locationId: string): Promise<any> {
-  return apiRequest(`/locations/${locationId}`);
+export async function getPointOfInterest(poiId: string): Promise<any> {
+  return apiRequest(`/points-of-interest/${poiId}`);
+}
+
+/** Reports a live GPS ping — feeds the backend's geofencing check and the authority dashboard's live tracker. */
+export async function reportLocationPing(payload: {
+  latitude: number;
+  longitude: number;
+  speed?: number;
+  heading?: number;
+}): Promise<any> {
+  return apiRequest("/locations", { method: "POST", body: payload });
+}
+
+export async function getTouristLocationHistory(touristId: string, limit = 100): Promise<any[]> {
+  return apiRequest(`/locations/tourist/${touristId}?limit=${limit}`);
+}
+
+// ---------------------------------------------------------------------------
+// Geofences (backend/routers/geofences.py)
+// ---------------------------------------------------------------------------
+
+export interface GeofenceZone {
+  id: string;
+  name: string;
+  zone_type: "SAFE" | "BUFFER" | "RESTRICTED";
+  coordinates: [number, number][]; // [lng, lat] ring
+  is_active: boolean;
+  created_at: string;
+}
+
+export async function listGeofences(activeOnly = true): Promise<GeofenceZone[]> {
+  return apiRequest(`/geofences?active_only=${activeOnly}`);
 }
 
 // ---------------------------------------------------------------------------
@@ -361,6 +410,33 @@ export async function authenticateAuthority(
   }
 }
 
+/** Opens the authority realtime feed (SOS/incident/location/geofence-breach events). */
+export function connectAuthorityFeed(onEvent: (event: { type: string; data: any }) => void): WebSocket | null {
+  const token = getAuthToken();
+  if (!token) return null;
+  const wsBase = getApiBaseUrl().replace(/^http/, "ws");
+  const socket = new WebSocket(`${wsBase}/ws/authority?token=${encodeURIComponent(token)}`);
+  socket.onmessage = (msg) => {
+    try { onEvent(JSON.parse(msg.data)); } catch { /* ignore malformed frame */ }
+  };
+  return socket;
+}
+
+/** Opens a tourist's own realtime feed (geofence alert popups, SOS status updates). */
+export function connectTouristFeed(
+  touristId: string,
+  onEvent: (event: { type: string; data: any }) => void
+): WebSocket | null {
+  const token = getAuthToken();
+  if (!token || !touristId) return null;
+  const wsBase = getApiBaseUrl().replace(/^http/, "ws");
+  const socket = new WebSocket(`${wsBase}/ws/tourist/${touristId}?token=${encodeURIComponent(token)}`);
+  socket.onmessage = (msg) => {
+    try { onEvent(JSON.parse(msg.data)); } catch { /* ignore malformed frame */ }
+  };
+  return socket;
+}
+
 /**
  * Connects the Tourist Portal's existing sign-up form to the real backend:
  * registers an auth account (derived credentials, see deriveTouristCredentials),
@@ -391,20 +467,22 @@ export async function registerAndLoginTourist(details: {
   storeSession({
     access_token: loginResp.access_token,
     user_type: loginResp.user_type,
-    tourist_id: loginResp.tourist_id,
+    tourist_profile_id: loginResp.tourist_profile_id,
     username: loginResp.username,
   });
 
-  if (!loginResp.tourist_id) return null;
+  if (!loginResp.tourist_profile_id) return null;
 
   const updatePayload: Record<string, any> = {
     full_name: details.fullName,
   };
-  if (details.phone) updatePayload.phone = details.phone;
+  if (details.phone) updatePayload.phone_number = details.phone;
   if (details.email) updatePayload.email = details.email;
-  if (details.emergencyContact) updatePayload.emergency_contact = details.emergencyContact;
+  if (details.emergencyContact) {
+    updatePayload.emergency_contacts = [{ name: null, relation: null, phone: details.emergencyContact }];
+  }
 
-  const updated = await updateTouristProfile(loginResp.tourist_id, updatePayload);
+  const updated = await updateTouristProfile(loginResp.tourist_profile_id, updatePayload);
 
   return { token: loginResp.access_token, tourist: updated };
 }
@@ -421,11 +499,11 @@ export async function loginTouristByPhone(phoneOrEmail: string): Promise<{ token
     storeSession({
       access_token: loginResp.access_token,
       user_type: loginResp.user_type,
-      tourist_id: loginResp.tourist_id,
+      tourist_profile_id: loginResp.tourist_profile_id,
       username: loginResp.username,
     });
-    if (!loginResp.tourist_id) return null;
-    const tourist = await getTouristProfile(loginResp.tourist_id);
+    if (!loginResp.tourist_profile_id) return null;
+    const tourist = await getTouristProfile(loginResp.tourist_profile_id);
     return { token: loginResp.access_token, tourist };
   } catch (err) {
     console.warn("Backend sign-in by phone/email did not match a registered account:", err);
@@ -439,12 +517,20 @@ export async function submitSOSOnline(sosRecord: SOSRecord): Promise<any> {
 
   const touristId = sosRecord.tourist_id || getTouristId();
 
+  // Backend requires latitude/longitude (SOSCreate has no default — an SOS
+  // with no coordinates at all is not something the dashboard can act on).
+  // A last-known-location fallback should already have been applied by the
+  // caller (see lib/location.ts getSOSLocation); if we truly have nothing,
+  // fail loudly here rather than send a request the server will reject.
+  if (sosRecord.latitude == null || sosRecord.longitude == null) {
+    throw new ApiError(0, "No location available to send with this SOS. Please enable location and try again.");
+  }
+
   const payload = {
     tourist_id: touristId,
-    latitude: sosRecord.latitude !== undefined ? sosRecord.latitude : null,
-    longitude: sosRecord.longitude !== undefined ? sosRecord.longitude : null,
-    description: sosRecord.description || `SOS Emergency Alert (${sosRecord.location_source || "live"})`,
-    severity: sosRecord.severity || "HIGH",
+    latitude: sosRecord.latitude,
+    longitude: sosRecord.longitude,
+    battery_status: sosRecord.battery_status ?? undefined,
     trigger_source: "APP",
   };
 
