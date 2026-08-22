@@ -15,7 +15,7 @@ class Config:
     # register()). Falls back to "" (unset) so existing deployments keep
     # working via the public signup endpoint until this is configured.
     SUPABASE_SERVICE_ROLE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
-    JWT_SECRET = os.getenv("JWT_SECRET", "").strip().strip('"').strip("'")
+    JWT_SECRET = os.getenv("JWT_SECRET", "").strip().strip('"').strip("'").replace("\\n", "\n")
     CORS_ALLOWED_ORIGINS = [
         o.strip() for o in os.getenv("CORS_ALLOWED_ORIGINS", "").split(",") if o.strip()
     ]

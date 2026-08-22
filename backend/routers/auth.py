@@ -198,16 +198,31 @@ def resolve_session(token: str | None) -> SessionResponse:
                 options={"verify_signature": False, "verify_aud": False}
             )
         else:
-            jwt_secret = Config.JWT_SECRET.strip().strip('"').strip("'")
+            jwt_secret = Config.JWT_SECRET.strip().strip('"').strip("'").replace("\\n", "\n")
             if not jwt_secret:
                 logger.error("JWT_SECRET is not configured; refusing to accept unverified HS256 tokens.")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Authentication is not correctly configured on the server.",
                 )
+            
+            # If it's a PEM key (e.g. asymmetric public key configured as JWT_SECRET)
+            if jwt_secret.startswith("-----BEGIN"):
+                key = jwt_secret
+            else:
+                # Try to base64-decode it because Supabase signs HS256 tokens using base64-decoded bytes.
+                # Fallback to the raw string if base64 decoding fails.
+                import base64
+                try:
+                    # Pad the secret if necessary
+                    padded = jwt_secret + "=" * (-len(jwt_secret) % 4)
+                    key = base64.urlsafe_b64decode(padded)
+                except Exception:
+                    key = jwt_secret.encode("utf-8")
+            
             claims = jwt.decode(
                 token,
-                jwt_secret,
+                key,
                 algorithms=[alg],
                 options={"verify_aud": False}
             )
