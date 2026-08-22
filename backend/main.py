@@ -17,14 +17,19 @@ app = FastAPI(title="Smart Tourist Safety API")
 # localhost defaults so local development keeps working out-of-the-box
 # without crashing the server on boot.
 _configured_origins = Config.CORS_ALLOWED_ORIGINS
+_cors_origins = []
+_cors_origin_regex = None
+
 if not _configured_origins or "*" in _configured_origins:
     _cors_origins = ["http://localhost:3000", "http://localhost:5173"]
+    _cors_origin_regex = r"https://.*\.vercel\.app|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?"
 else:
     _cors_origins = _configured_origins
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_origins,
+    allow_origin_regex=_cors_origin_regex,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
