@@ -117,9 +117,35 @@ def resolve_session(token: str | None) -> SessionResponse:
                     detail="Authentication is not correctly configured on the server.",
                 )
             jwks_url = f"{Config.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
-            jwks_client = jwt.PyJWKClient(jwks_url)
-            signing_key = jwks_client.get_signing_key_from_jwt(token)
-            key = signing_key.key
+            resp = requests.get(jwks_url, timeout=10)
+            if resp.status_code != 200:
+                logger.error(f"Failed to fetch JWKS from {jwks_url}: status={resp.status_code}")
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Authentication server could not be reached.",
+                )
+            jwks = resp.json()
+            
+            # Find the key matching the token's kid
+            kid = header.get("kid")
+            jwk_dict = None
+            for key_dict in jwks.get("keys", []):
+                if key_dict.get("kid") == kid:
+                    # Strip x5c to force PyJWT to construct the key using n and e (avoids "Unable to load PEM file" error)
+                    jwk_dict = key_dict.copy()
+                    jwk_dict.pop("x5c", None)
+                    break
+                    
+            if not jwk_dict:
+                logger.error(f"Key ID {kid} not found in JWKS.")
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Invalid authentication token signature key.",
+                )
+                
+            from jwt import PyJWK
+            jwk_obj = PyJWK(jwk_dict)
+            key = jwk_obj.key
         else:
             jwt_secret = Config.JWT_SECRET.strip().strip('"').strip("'")
             if not jwt_secret:
