@@ -40,16 +40,20 @@ export const POIS: {
   lng: number;
   type: keyof typeof MARKER_COLOR;
   label: string;
+  crowdLevel?: 'extreme' | 'high' | 'medium' | 'low';
+  crowdCount?: number;
 }[] = [
-  { id: 'gate', lat: 18.9220, lng: 72.8347, type: 'attraction', label: 'Gateway of India' },
-  { id: 'taj_m', lat: 18.9256, lng: 72.8242, type: 'hotel', label: 'Taj Mahal Palace' },
-  { id: 'cafe1', lat: 18.9280, lng: 72.8300, type: 'restaurant', label: 'Café Mondegar' },
-  { id: 'colaba', lat: 18.9150, lng: 72.8280, type: 'attraction', label: 'Colaba Causeway' },
+  { id: 'gate', lat: 18.9220, lng: 72.8347, type: 'attraction', label: 'Gateway of India', crowdLevel: 'extreme', crowdCount: 450 },
+  { id: 'taj_m', lat: 18.9256, lng: 72.8242, type: 'hotel', label: 'Taj Mahal Palace', crowdLevel: 'medium', crowdCount: 120 },
+  { id: 'cafe1', lat: 18.9280, lng: 72.8300, type: 'restaurant', label: 'Café Mondegar', crowdLevel: 'low', crowdCount: 45 },
+  { id: 'colaba', lat: 18.9150, lng: 72.8280, type: 'attraction', label: 'Colaba Causeway', crowdLevel: 'high', crowdCount: 280 },
   { id: 'hosp1', lat: 18.9300, lng: 72.8350, type: 'hospital', label: 'St. George Hospital' },
   { id: 'pol1', lat: 18.9190, lng: 72.8270, type: 'police', label: 'Colaba Police Stn' },
-  { id: 'alert1', lat: 18.9200, lng: 72.8380, type: 'alert', label: 'Crowd Alert' },
+  { id: 'alert1', lat: 18.9200, lng: 72.8380, type: 'alert', label: 'Crowd Alert', crowdLevel: 'extreme', crowdCount: 520 },
   { id: 'hotel2', lat: 18.9340, lng: 72.8260, type: 'hotel', label: 'Trident Nariman' },
-  { id: 'rest2', lat: 18.9240, lng: 72.8400, type: 'restaurant', label: 'Leopold Café' },
+  { id: 'rest2', lat: 18.9240, lng: 72.8400, type: 'restaurant', label: 'Leopold Café', crowdLevel: 'high', crowdCount: 180 },
+  { id: 'crowd1', lat: 18.9210, lng: 72.8310, type: 'crowd', label: 'Market Square', crowdLevel: 'extreme', crowdCount: 650 },
+  { id: 'crowd2', lat: 18.9260, lng: 72.8370, type: 'crowd', label: 'Station Exit 2', crowdLevel: 'high', crowdCount: 380 }
 ];
 
 export const DEFAULT_CENTER = { lat: 18.9230, lng: 72.8320 };
@@ -149,7 +153,9 @@ export default function MapCanvas({
     lat: p.lat,
     lng: p.lng,
     title: p.label,
-    type: p.type === 'police' ? 'police' : undefined,
+    type: p.type as any,
+    crowdLevel: p.crowdLevel,
+    crowdCount: p.crowdCount,
     pinColor: MARKER_COLOR[p.type],
     glyph: MARKER_GLYPH[p.type],
   }));
