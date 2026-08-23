@@ -63,6 +63,12 @@ export default function TouristApp({
   const [recenterTrigger, setRecenterTrigger] = useState(0);
   const [zoomAction, setZoomAction] = useState<{ type: 'in' | 'out'; ts: number } | undefined>(undefined);
   const [geofenceAlert, setGeofenceAlert] = useState<string | null>(null);
+  const [activeRouteTarget, setActiveRouteTarget] = useState<{
+    lat: number;
+    lng: number;
+    name: string;
+    address: string;
+  } | null>(null);
 
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 768;
 
@@ -262,6 +268,8 @@ export default function TouristApp({
                 recenterTrigger={recenterTrigger}
                 zoomAction={zoomAction}
                 onMarkerClick={handleMarkerClick}
+                activeRouteTarget={activeRouteTarget}
+                onClearRoute={() => setActiveRouteTarget(null)}
               />
             </div>
 
@@ -282,7 +290,17 @@ export default function TouristApp({
             </div>
 
             {selectedPlace && (
-              <PlaceCard placeId={selectedPlace} isMobile={isMobile} darkMode={dm} onClose={() => setSelectedPlace(null)} />
+              <PlaceCard
+                placeId={selectedPlace}
+                isMobile={isMobile}
+                darkMode={dm}
+                onClose={() => setSelectedPlace(null)}
+                onStartDirections={(lat, lng, name, address) => {
+                  setActiveRouteTarget({ lat, lng, name, address });
+                  setSelectedPlace(null);
+                  setTab('map');
+                }}
+              />
             )}
           </>
         )}

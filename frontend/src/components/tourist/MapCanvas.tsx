@@ -60,9 +60,18 @@ interface Props {
   recenterTrigger: number;
   zoomAction?: { type: 'in' | 'out'; ts: number };
   onMarkerClick: (id: string) => void;
+  activeRouteTarget?: { lat: number; lng: number; name: string; address: string } | null;
+  onClearRoute?: () => void;
 }
 
-export default function MapCanvas({ activeFilter, recenterTrigger, zoomAction, onMarkerClick }: Props) {
+export default function MapCanvas({
+  activeFilter,
+  recenterTrigger,
+  zoomAction,
+  onMarkerClick,
+  activeRouteTarget,
+  onClearRoute
+}: Props) {
   const [userLoc, setUserLoc] = useState<{ lat: number; lng: number } | null>(null);
   const [geofenceZones, setGeofenceZones] = useState<GeoFenceZone[]>(MOCK_GEOFENCE_ZONES);
 
@@ -170,6 +179,8 @@ export default function MapCanvas({ activeFilter, recenterTrigger, zoomAction, o
       recenter={{ trigger: recenterTrigger, target: userLoc || DEFAULT_CENTER }}
       zoomAction={zoomAction}
       onMarkerClick={(m) => { if (m.id !== 'user-location') onMarkerClick(m.id); }}
+      routeTarget={activeRouteTarget}
+      onClearRoute={onClearRoute}
     />
   );
 }

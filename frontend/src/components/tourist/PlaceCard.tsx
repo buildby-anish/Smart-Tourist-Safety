@@ -3,6 +3,7 @@ import { X, Star, Navigation2, Bookmark, Clock, MapPin, Phone, ExternalLink } fr
 const DB: Record<string, {
   name: string; type: string; rating: number | null; dist: string; open: boolean;
   address: string; desc: string; tags: string[]; phone?: string;
+  lat: number; lng: number;
 }> = {
   gate: {
     name: 'Gateway of India',
@@ -14,6 +15,8 @@ const DB: Record<string, {
     desc: 'Iconic basalt arch monument on the Mumbai waterfront, built in 1924 to commemorate the visit of King George V and Queen Mary.',
     tags: ['Heritage', 'Photography', 'Waterfront', 'Free entry'],
     phone: '+91 22 2204 4040',
+    lat: 18.9220,
+    lng: 72.8347
   },
   taj_m: {
     name: 'Taj Mahal Palace',
@@ -25,6 +28,8 @@ const DB: Record<string, {
     desc: "Legendary 5-star hotel opened in 1903, a landmark of Mumbai's heritage waterfront. Stunning sea views and iconic architecture.",
     tags: ['Heritage', 'Luxury', 'Sea view', '5-star'],
     phone: '+91 22 6665 3366',
+    lat: 18.9256,
+    lng: 72.8242
   },
   cafe1: {
     name: 'Café Mondegar',
@@ -36,6 +41,8 @@ const DB: Record<string, {
     desc: "Mumbai's beloved jukebox café since 1932, known for its lively atmosphere and hearty continental food.",
     tags: ['Café', 'Heritage', 'Continental', 'Bar'],
     phone: '+91 22 2202 0591',
+    lat: 18.9280,
+    lng: 72.8300
   },
   colaba: {
     name: 'Colaba Causeway',
@@ -46,6 +53,8 @@ const DB: Record<string, {
     address: 'Shahid Bhagat Singh Rd, Colaba, Mumbai',
     desc: 'Famous street market stretching from the Gateway of India, selling antiques, textiles, jewellery, and street food.',
     tags: ['Shopping', 'Market', 'Street food'],
+    lat: 18.9150,
+    lng: 72.8280
   },
   hosp1: {
     name: 'St. George Hospital',
@@ -57,6 +66,8 @@ const DB: Record<string, {
     desc: "One of Mumbai's oldest government hospitals, offering emergency and speciality medical care to residents and tourists.",
     tags: ['Emergency', '24×7', 'Government'],
     phone: '022 2262 3311',
+    lat: 18.9300,
+    lng: 72.8350
   },
   pol1: {
     name: 'Colaba Police Station',
@@ -68,6 +79,8 @@ const DB: Record<string, {
     desc: 'Mumbai Police station serving the Colaba and tourist precinct area. Tourist assistance available around the clock.',
     tags: ['Police', 'Tourist help', '24×7'],
     phone: '100',
+    lat: 18.9190,
+    lng: 72.8270
   },
   alert1: {
     name: 'Crowd Alert — Colaba Causeway',
@@ -78,6 +91,8 @@ const DB: Record<string, {
     address: 'Near Apollo Bandar Junction',
     desc: 'High crowd density detected near Colaba Causeway junction. Exercise caution and keep your belongings secure.',
     tags: ['Alert', 'High crowd', 'Caution'],
+    lat: 18.9200,
+    lng: 72.8380
   },
   hotel2: {
     name: 'Trident Nariman Point',
@@ -89,6 +104,8 @@ const DB: Record<string, {
     desc: 'Elegant 5-star hotel with panoramic views of Marine Drive and the Arabian Sea.',
     tags: ['Luxury', 'Sea view', '5-star', 'Business'],
     phone: '+91 22 6632 4343',
+    lat: 18.9340,
+    lng: 72.8260
   },
   rest2: {
     name: 'Leopold Café',
@@ -100,6 +117,8 @@ const DB: Record<string, {
     desc: 'Mumbai institution since 1871 — one of the oldest and most popular restaurants in the city.',
     tags: ['Historic', 'Multi-cuisine', 'Landmark'],
     phone: '+91 22 2202 0131',
+    lat: 18.9240,
+    lng: 72.8400
   },
 };
 
@@ -119,9 +138,10 @@ interface Props {
   isMobile: boolean;
   darkMode: boolean;
   onClose: () => void;
+  onStartDirections?: (lat: number, lng: number, name: string, address: string) => void;
 }
 
-export default function PlaceCard({ placeId, isMobile, darkMode: dm, onClose }: Props) {
+export default function PlaceCard({ placeId, isMobile, darkMode: dm, onClose, onStartDirections }: Props) {
   const place = placeId ? (DB[placeId] || DB.gate) : DB.gate;
 
   const surface = dm ? '#0a1628' : '#ffffff';
@@ -182,16 +202,18 @@ export default function PlaceCard({ placeId, isMobile, darkMode: dm, onClose }: 
       <div className="flex gap-2 pt-3" style={{ borderTop: `1px solid ${border}` }}>
         {!isAlert ? (
           <>
-            <a
-              href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(place.address)}`}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex-1 h-10 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all hover:opacity-92 active:scale-95"
+            <button
+              onClick={() => {
+                if (onStartDirections) {
+                  onStartDirections(place.lat, place.lng, place.name, place.address);
+                }
+              }}
+              className="flex-1 h-10 rounded-xl text-sm font-semibold text-white flex items-center justify-center gap-2 transition-all hover:opacity-92 active:scale-95 cursor-pointer"
               style={{ background: '#FF9933', boxShadow: '0 2px 12px rgba(255,153,51,0.3)' }}
             >
               <Navigation2 size={14} />
               Directions
-            </a>
+            </button>
             <button
               className="w-10 h-10 rounded-xl flex items-center justify-center transition-all hover:opacity-75 active:scale-95"
               style={{ background: tagBg, border: `1px solid ${border}` }}

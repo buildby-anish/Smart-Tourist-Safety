@@ -36,6 +36,8 @@ interface ActualGoogleMapProps {
   chrome?: boolean;
   recenter?: { trigger: number; target: { lat: number; lng: number } };
   zoomAction?: { type: 'in' | 'out'; ts: number };
+  routeTarget?: { lat: number; lng: number; name: string; address: string } | null;
+  onClearRoute?: () => void;
 }
 
 const TRAVEL_MODES = [
@@ -60,7 +62,9 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   fullBleed = false,
   chrome = true,
   recenter,
-  zoomAction
+  zoomAction,
+  routeTarget,
+  onClearRoute
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -68,6 +72,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   const markersGroupRef = useRef<any>(null);
   const geofencesGroupRef = useRef<any>(null);
   const routePolylineRef = useRef<any>(null);
+  const alternativePolylinesRef = useRef<any[]>([]);
   const destMarkerRef = useRef<any>(null);
 
   const [leafletLoaded, setLeafletLoaded] = useState(false);
@@ -85,8 +90,21 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     lng: number;
   } | null>(null);
   const [travelMode, setTravelMode] = useState<string>('driving');
+  
+  // Multi-route alternatives states
+  const [alternativeRoutes, setAlternativeRoutes] = useState<any[]>([]);
+  const [selectedRouteIndex, setSelectedRouteIndex] = useState<number>(0);
   const [routeInfo, setRouteInfo] = useState<{ distance: string; duration: string } | null>(null);
   const [isRouting, setIsRouting] = useState(false);
+
+  // Synchronize routeTarget prop into selectedPlaceInfo local state
+  useEffect(() => {
+    if (routeTarget) {
+      setSelectedPlaceInfo(routeTarget);
+    } else {
+      setSelectedPlaceInfo(null);
+    }
+  }, [routeTarget]);
 
   // Track global dark mode changes using MutationObserver
   useEffect(() => {
@@ -207,11 +225,12 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
       tileUrl = 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png';
       attribution = '&copy; OpenTopoMap';
     } else {
-      // Roadmap: CartoDB Dark Matter (Zero Blue Shades) or CartoDB Positron
+      // Roadmap: CartoDB Dark Matter (Zero Blue Shades) or CartoDB Voyager/Positron
       if (isDarkMode) {
         tileUrl = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
         attribution = '&copy; OpenStreetMap &copy; CARTO';
       } else {
+        // Light theme similar to Google Maps
         tileUrl = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
         attribution = '&copy; OpenStreetMap &copy; CARTO';
       }
@@ -340,11 +359,14 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
         routePolylineRef.current.remove();
         routePolylineRef.current = null;
       }
+      alternativePolylinesRef.current.forEach((p) => p.remove());
+      alternativePolylinesRef.current = [];
+      setAlternativeRoutes([]);
+      setRouteInfo(null);
       if (destMarkerRef.current) {
         destMarkerRef.current.remove();
         destMarkerRef.current = null;
       }
-      setRouteInfo(null);
       return;
     }
 
@@ -380,76 +402,66 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
       if (travelMode === 'foot') osrmProfile = 'foot';
       else if (travelMode === 'bicycle') osrmProfile = 'bicycle';
 
-      const url = `https://router.project-osrm.org/route/v1/${osrmProfile}/${startLoc.lng},${startLoc.lat};${selectedPlaceInfo.lng},${selectedPlaceInfo.lat}?overview=full&geometries=geojson`;
+      // alternatives=true query parameter retrieves alternative path options
+      const url = `https://router.project-osrm.org/route/v1/${osrmProfile}/${startLoc.lng},${startLoc.lat};${selectedPlaceInfo.lng},${selectedPlaceInfo.lat}?overview=full&geometries=geojson&alternatives=true`;
 
       try {
         const response = await fetch(url);
         const data = await response.json();
 
         if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
-          const route = data.routes[0];
-          const coordinates = route.geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]]); // OSRM is [lng, lat] -> Leaflet wants [lat, lng]
+          const parsedRoutes = data.routes.map((route: any, index: number) => {
+            const coordinates = route.geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]]); // OSRM [lng, lat] -> Leaflet [lat, lng]
+            const distKm = (route.distance / 1000).toFixed(1);
+            let durationMin = Math.round(route.duration / 60);
 
-          // Remove old polyline
-          if (routePolylineRef.current) {
-            routePolylineRef.current.remove();
-          }
+            // Adjust transit stats to simulate train/bus travel
+            if (travelMode === 'transit') {
+              durationMin = Math.max(3, Math.round(durationMin * 0.75 + 4)); // simulated delay
+            }
 
-          // Draw custom saffron polyline
-          routePolylineRef.current = L.polyline(coordinates, {
-            color: '#FF9933',
-            weight: 6,
-            opacity: 0.85,
-            dashArray: travelMode === 'transit' ? '12, 12' : undefined, // dashed line for transit
-          }).addTo(map);
-
-          // Pan/Fit bounds to show full route
-          const bounds = L.latLngBounds([
-            [startLoc.lat, startLoc.lng],
-            [selectedPlaceInfo.lat, selectedPlaceInfo.lng]
-          ]);
-          map.fitBounds(bounds, { padding: [50, 50] });
-
-          // Calculate distance and duration metrics
-          const distKm = (route.distance / 1000).toFixed(1);
-          let durationMin = Math.round(route.duration / 60);
-
-          // Adjust transit stats to simulate train/bus travel
-          if (travelMode === 'transit') {
-            durationMin = Math.max(3, Math.round(durationMin * 0.75 + 4)); // transit simulated delay/speed
-          }
-
-          setRouteInfo({
-            distance: `${distKm} km`,
-            duration: `${durationMin} mins`,
+            return {
+              index,
+              coordinates,
+              distance: `${distKm} km`,
+              duration: `${durationMin} mins`,
+              distanceVal: route.distance, // in meters
+            };
           });
+
+          setAlternativeRoutes(parsedRoutes);
+
+          // Find shortest route index
+          let shortestIdx = 0;
+          let minDistance = Infinity;
+          parsedRoutes.forEach((r: any) => {
+            if (r.distanceVal < minDistance) {
+              minDistance = r.distanceVal;
+              shortestIdx = r.index;
+            }
+          });
+
+          // Default to the shortest path
+          setSelectedRouteIndex(shortestIdx);
         } else {
           throw new Error('No route found');
         }
       } catch (err) {
         // Fallback straight dotted line if routing fails (e.g. offline)
-        if (routePolylineRef.current) {
-          routePolylineRef.current.remove();
-        }
-        routePolylineRef.current = L.polyline(
-          [[startLoc.lat, startLoc.lng], [selectedPlaceInfo.lat, selectedPlaceInfo.lng]],
-          {
-            color: '#FF9933',
-            weight: 4,
-            opacity: 0.7,
-            dashArray: '8, 8',
-          }
-        ).addTo(map);
-        
-        // Calculate rough aerial distance
+        const coordinates = [[startLoc.lat, startLoc.lng], [selectedPlaceInfo.lat, selectedPlaceInfo.lng]];
         const distanceVal = map.distance([startLoc.lat, startLoc.lng], [selectedPlaceInfo.lat, selectedPlaceInfo.lng]);
         const distKm = (distanceVal / 1000).toFixed(1);
-        const durationMin = Math.round(distanceVal / (travelMode === 'foot' ? 80 : 400)); // rough speeds
+        const durationMin = Math.round(distanceVal / (travelMode === 'foot' ? 80 : 400));
         
-        setRouteInfo({
+        const fallbackRoute = {
+          index: 0,
+          coordinates,
           distance: `${distKm} km`,
           duration: `~${durationMin} mins`,
-        });
+          distanceVal,
+        };
+        setAlternativeRoutes([fallbackRoute]);
+        setSelectedRouteIndex(0);
       } finally {
         setIsRouting(false);
       }
@@ -457,6 +469,77 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
 
     calculateRoute();
   }, [selectedPlaceInfo, travelMode, userLocation, leafletLoaded]);
+
+  // Draw / Sync Route Polylines
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !leafletLoaded) return;
+    const L = (window as any).L;
+
+    // Clear old route lines
+    if (routePolylineRef.current) {
+      routePolylineRef.current.remove();
+      routePolylineRef.current = null;
+    }
+    alternativePolylinesRef.current.forEach((p) => p.remove());
+    alternativePolylinesRef.current = [];
+
+    if (alternativeRoutes.length === 0) return;
+
+    // Draw alternatives first (rendered below the active path)
+    alternativeRoutes.forEach((r) => {
+      if (r.index === selectedRouteIndex) return;
+
+      const poly = L.polyline(r.coordinates, {
+        color: '#94a3b8', // Semi-transparent grey for alternative routes
+        weight: 5,
+        opacity: 0.55,
+        dashArray: travelMode === 'transit' ? '8, 8' : undefined,
+      }).addTo(map);
+
+      // Select route on click
+      poly.on('click', (e: any) => {
+        L.DomEvent.stopPropagation(e);
+        setSelectedRouteIndex(r.index);
+      });
+
+      alternativePolylinesRef.current.push(poly);
+    });
+
+    // Draw active path on top
+    const selectedRoute = alternativeRoutes.find((r) => r.index === selectedRouteIndex);
+    if (selectedRoute) {
+      const poly = L.polyline(selectedRoute.coordinates, {
+        color: '#FF9933', // Saffron / Safety Orange
+        weight: 8,
+        opacity: 0.9,
+        dashArray: travelMode === 'transit' ? '12, 12' : undefined,
+      }).addTo(map);
+
+      routePolylineRef.current = poly;
+
+      // Fit bounds to selected route
+      const startLoc = userLocation || center;
+      const bounds = L.latLngBounds([
+        [startLoc.lat, startLoc.lng],
+        [selectedPlaceInfo?.lat || center.lat, selectedPlaceInfo?.lng || center.lng]
+      ]);
+      map.fitBounds(bounds, { padding: [55, 55] });
+    }
+  }, [alternativeRoutes, selectedRouteIndex, leafletLoaded]);
+
+  // Sync route details text
+  useEffect(() => {
+    const activeRoute = alternativeRoutes.find((r) => r.index === selectedRouteIndex);
+    if (activeRoute) {
+      setRouteInfo({
+        distance: activeRoute.distance,
+        duration: activeRoute.duration,
+      });
+    } else {
+      setRouteInfo(null);
+    }
+  }, [alternativeRoutes, selectedRouteIndex]);
 
   // Marker select helper
   const handleSelectMarker = (m: MapClusterMarker) => {
@@ -476,13 +559,20 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   const handleCloseDirections = () => {
     setSelectedPlaceInfo(null);
     setRouteInfo(null);
+    setAlternativeRoutes([]);
+    setSelectedRouteIndex(0);
     if (routePolylineRef.current) {
       routePolylineRef.current.remove();
       routePolylineRef.current = null;
     }
+    alternativePolylinesRef.current.forEach((p) => p.remove());
+    alternativePolylinesRef.current = [];
     if (destMarkerRef.current) {
       destMarkerRef.current.remove();
       destMarkerRef.current = null;
+    }
+    if (onClearRoute) {
+      onClearRoute();
     }
   };
 
@@ -499,6 +589,11 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
       </div>
     );
   }
+
+  // Find minimum distance for "shortest" tag rendering
+  const minDistanceVal = alternativeRoutes.length > 0
+    ? Math.min(...alternativeRoutes.map((ar) => ar.distanceVal))
+    : 0;
 
   return (
     <div className={wrapperClass} style={fullBleed ? undefined : { height }}>
@@ -612,19 +707,6 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
         </div>
       )}
 
-      {/* External Map Link Button */}
-      {chrome && (
-        <a
-          href={`https://www.openstreetmap.org/#map=16/${center.lat}/${center.lng}`}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="absolute top-3 right-3 z-20 hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/95 hover:bg-white text-slate-900 font-extrabold text-[11px] shadow border border-slate-300 transition"
-        >
-          <span>Open OpenStreetMap</span>
-          <ExternalLink className="w-3.5 h-3.5 text-blue-600" />
-        </a>
-      )}
-
       {/* Shortest Directions Floating Panel Overlay */}
       {selectedPlaceInfo && (
         <div
@@ -661,6 +743,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
             </button>
           </div>
 
+          {/* Travel Mode selection grid */}
           <div className="grid grid-cols-4 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80">
             {TRAVEL_MODES.map((mode) => {
               const active = travelMode === mode.osrmMode;
@@ -684,11 +767,35 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
             })}
           </div>
 
+          {/* Multi-route selector options (Shortest vs Alternatives) */}
+          {alternativeRoutes.length > 1 && (
+            <div className="flex gap-2 overflow-x-auto pb-1 mt-1 scrollbar-thin">
+              {alternativeRoutes.map((r) => {
+                const isSelected = selectedRouteIndex === r.index;
+                const isShortest = r.distanceVal === minDistanceVal;
+                return (
+                  <button
+                    key={r.index}
+                    onClick={() => setSelectedRouteIndex(r.index)}
+                    className={`px-3 py-1.5 rounded-xl border text-[11px] font-black whitespace-nowrap transition-all cursor-pointer flex items-center gap-1.5 ${
+                      isSelected
+                        ? 'bg-orange-500 border-orange-500 text-white shadow-sm'
+                        : 'bg-slate-100 dark:bg-slate-800/80 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-200/50 dark:hover:bg-slate-700/50'
+                    }`}
+                  >
+                    <span>{isShortest ? '⚡ Shortest Route' : `Alt Route ${r.index + 1}`}</span>
+                    <span className="opacity-75 font-normal">({r.distance} - {r.duration})</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
           {routeInfo ? (
             <div className="flex items-center justify-between border-t border-slate-150 dark:border-slate-800 pt-3 mt-1">
               <div className="flex items-center gap-2">
                 <Navigation className="w-4 h-4 text-orange-500 rotate-45 animate-pulse" />
-                <span className="text-xs font-semibold">Shortest Route</span>
+                <span className="text-xs font-semibold">Active Path Info</span>
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-xs font-bold bg-orange-100 dark:bg-orange-950/60 text-orange-600 dark:text-orange-400 px-2.5 py-1 rounded-lg">
@@ -701,7 +808,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
             </div>
           ) : isRouting ? (
             <div className="text-center text-xs opacity-50 py-2 border-t border-slate-150 dark:border-slate-800">
-              Calculating shortest path...
+              Calculating alternative paths...
             </div>
           ) : (
             <div className="text-center text-xs opacity-50 py-2 border-t border-slate-150 dark:border-slate-800">
