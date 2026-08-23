@@ -244,26 +244,26 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     let attribution = '';
 
     if (mapMode === 'k') {
-      // Esri Satellite
-      tileUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-      attribution = '&copy; Esri &mdash; Satellite';
+      // Google Satellite
+      tileUrl = 'https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}';
+      attribution = '&copy; Google Maps';
     } else if (mapMode === 'p') {
-      // OpenTopoMap
-      tileUrl = 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png';
-      attribution = '&copy; OpenTopoMap';
+      // Google Terrain
+      tileUrl = 'https://{s}.google.com/vt/lyrs=p&x={x}&y={y}&z={z}';
+      attribution = '&copy; Google Maps';
     } else {
-      // Roadmap: CartoDB Dark Matter (Zero Blue Shades) or CartoDB Voyager/Positron
       if (isDarkMode) {
         tileUrl = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
         attribution = '&copy; OpenStreetMap &copy; CARTO';
       } else {
-        // Crisp white / light-grey theme with blue water
-        tileUrl = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
-        attribution = '&copy; OpenStreetMap &copy; CARTO';
+        // Google Streets (matches the user's uploaded image exactly)
+        tileUrl = 'https://{s}.google.com/vt/lyrs=m&x={x}&y={y}&z={z}';
+        attribution = '&copy; Google Maps';
       }
     }
 
     tileLayerRef.current = L.tileLayer(tileUrl, {
+      subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
       attribution,
       maxZoom: 20,
     }).addTo(map);
@@ -716,11 +716,9 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     }
   };
 
-  const wrapperClass = `${
-    fullBleed
-      ? 'relative w-full h-full overflow-hidden'
-      : 'relative w-full rounded-2xl overflow-hidden border border-slate-300 shadow-sm'
-  } ${(!isDarkMode && mapMode === 'm') ? 'clean-white-map' : ''}`;
+  const wrapperClass = fullBleed
+    ? 'relative w-full h-full overflow-hidden'
+    : 'relative w-full rounded-2xl overflow-hidden border border-slate-300 shadow-sm';
 
   if (!leafletLoaded) {
     return (
@@ -739,12 +737,6 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
 
   return (
     <div className={wrapperClass} style={fullBleed ? undefined : { height }}>
-      {/* Map CSS Filter Override */}
-      <style>{`
-        .clean-white-map .leaflet-tile {
-          filter: saturate(1.35) contrast(1.04) brightness(1.03);
-        }
-      `}</style>
       {/* Map Anchor container */}
       <div ref={containerRef} className="w-full h-full z-0" />
 
