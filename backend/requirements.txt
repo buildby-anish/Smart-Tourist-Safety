@@ -7,3 +7,5 @@ requests
 cryptography
 pytest
 httpx
+python-multipart
+Pillow
