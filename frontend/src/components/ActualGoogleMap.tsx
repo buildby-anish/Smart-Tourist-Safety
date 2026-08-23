@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
   Car, Bike, Footprints, Train, X as XIcon, MapPin, Navigation,
-  Users, ShieldCheck, AlertTriangle, ExternalLink, ShieldAlert, Shield
+  Users, ShieldCheck, AlertTriangle, ExternalLink, ShieldAlert, Shield, Flame
 } from 'lucide-react';
 import { GeoFenceZone } from '../types';
 
@@ -74,6 +74,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   const routePolylineRef = useRef<any>(null);
   const alternativePolylinesRef = useRef<any[]>([]);
   const destMarkerRef = useRef<any>(null);
+  const heatLayerRef = useRef<any>(null);
 
   const [leafletLoaded, setLeafletLoaded] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
@@ -81,6 +82,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
 
   // Map settings
   const [mapMode, setMapMode] = useState<'m' | 'k' | 'p'>('m'); // m: roadmap, k: satellite, p: terrain
+  const [showHeatmap, setShowHeatmap] = useState(true);
 
   // Directions routing states
   const [selectedPlaceInfo, setSelectedPlaceInfo] = useState<{
@@ -117,7 +119,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
 
   // Dynamically load Leaflet resources
   useEffect(() => {
-    if ((window as any).L) {
+    if ((window as any).L && (window as any).L.heatLayer) {
       setLeafletLoaded(true);
       return;
     }
@@ -131,7 +133,14 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
     script.async = true;
     script.onload = () => {
-      setLeafletLoaded(true);
+      // Load leaflet-heat after leaflet is loaded
+      const heatScript = document.createElement('script');
+      heatScript.src = 'https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js';
+      heatScript.async = true;
+      heatScript.onload = () => {
+        setLeafletLoaded(true);
+      };
+      document.body.appendChild(heatScript);
     };
     document.body.appendChild(script);
   }, []);
@@ -364,6 +373,72 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
       }).addTo(geofencesGroup);
     });
   }, [mapRef.current, geofenceZones, activeZoneId, leafletLoaded]);
+
+  // Render/Sync Heatmap Layer for Crowd Densities
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !leafletLoaded) return;
+    const L = (window as any).L;
+
+    // Clear existing heat layer
+    if (heatLayerRef.current) {
+      heatLayerRef.current.remove();
+      heatLayerRef.current = null;
+    }
+
+    if (!showHeatmap || !L.heatLayer) return;
+
+    // Build intensity points: [lat, lng, intensity]
+    const heatPoints: [number, number, number][] = [];
+
+    markers.forEach((m) => {
+      // Base intensity on crowdLevel and crowdCount
+      let intensity = 0.2; // default low
+      if (m.crowdLevel === 'extreme') intensity = 1.0;
+      else if (m.crowdLevel === 'high') intensity = 0.8;
+      else if (m.crowdLevel === 'medium') intensity = 0.5;
+
+      heatPoints.push([m.lat, m.lng, intensity]);
+
+      // If extreme/high, add minor jittered points around to simulate real-time crowd spread
+      if (m.crowdLevel === 'extreme' || m.crowdLevel === 'high') {
+        const numSecondaryPoints = m.crowdLevel === 'extreme' ? 8 : 4;
+        for (let i = 0; i < numSecondaryPoints; i++) {
+          const angle = Math.random() * Math.PI * 2;
+          const radius = (0.04 + Math.random() * 0.08) / 111.3; // ~50 to 120 meters
+          const latJitter = Math.sin(angle) * radius;
+          const lngJitter = Math.cos(angle) * (radius / Math.cos(m.lat * Math.PI / 180));
+          heatPoints.push([m.lat + latJitter, m.lng + lngJitter, intensity * 0.75]);
+        }
+      }
+    });
+
+    // Custom yellow-orange-red gradient (no blue shades for dark mode safety)
+    const heatGradient = {
+      0.25: 'rgba(245, 158, 11, 0.25)', // transparent amber
+      0.55: 'rgba(249, 115, 22, 0.65)', // orange
+      0.85: 'rgba(239, 68, 68, 0.85)', // red
+      1.0: 'rgba(220, 38, 38, 1.0)'    // dark red
+    };
+
+    const heatLayer = L.heatLayer(heatPoints, {
+      radius: 28,
+      blur: 18,
+      maxZoom: 16,
+      max: 1.0,
+      gradient: heatGradient
+    }).addTo(map);
+
+    heatLayerRef.current = heatLayer;
+
+    // Cleanup layer on unmount or toggle off
+    return () => {
+      if (heatLayerRef.current) {
+        heatLayerRef.current.remove();
+        heatLayerRef.current = null;
+      }
+    };
+  }, [mapRef.current, markers, showHeatmap, leafletLoaded]);
 
   // Extract user location from markers
   const userMarker = markers.find((m) => m.id === 'user-location' || m.type === 'user');
@@ -676,30 +751,43 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
           </div>
 
           {mapTypeControl && (
-            <div className="pointer-events-auto flex items-center bg-slate-900/90 backdrop-blur-md p-1 rounded-xl border border-slate-700 shadow-md">
+            <div className="pointer-events-auto flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md p-1 rounded-xl border border-slate-700 shadow-md">
+              <div className="flex items-center">
+                <button
+                  onClick={() => setMapMode('m')}
+                  className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer ${
+                    mapMode === 'm' ? 'bg-orange-500 text-white shadow-sm' : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  Map
+                </button>
+                <button
+                  onClick={() => setMapMode('k')}
+                  className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer ${
+                    mapMode === 'k' ? 'bg-orange-500 text-white shadow-sm' : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  Satellite
+                </button>
+                <button
+                  onClick={() => setMapMode('p')}
+                  className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer ${
+                    mapMode === 'p' ? 'bg-orange-500 text-white shadow-sm' : 'text-slate-300 hover:text-white'
+                  }`}
+                >
+                  Terrain
+                </button>
+              </div>
+              <div className="w-[1px] h-4 bg-slate-700 mx-0.5" />
               <button
-                onClick={() => setMapMode('m')}
-                className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer ${
-                  mapMode === 'm' ? 'bg-orange-500 text-white shadow-sm' : 'text-slate-300 hover:text-white'
+                onClick={() => setShowHeatmap(!showHeatmap)}
+                className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer flex items-center gap-1 ${
+                  showHeatmap ? 'bg-red-600 text-white shadow-sm font-bold' : 'text-slate-300 hover:text-white'
                 }`}
+                title="Toggle Crowd Heatmap"
               >
-                Map
-              </button>
-              <button
-                onClick={() => setMapMode('k')}
-                className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer ${
-                  mapMode === 'k' ? 'bg-orange-500 text-white shadow-sm' : 'text-slate-300 hover:text-white'
-                }`}
-              >
-                Satellite
-              </button>
-              <button
-                onClick={() => setMapMode('p')}
-                className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer ${
-                  mapMode === 'p' ? 'bg-orange-500 text-white shadow-sm' : 'text-slate-300 hover:text-white'
-                }`}
-              >
-                Terrain
+                <Flame size={11} className={showHeatmap ? 'animate-pulse' : ''} />
+                <span>Heatmap</span>
               </button>
             </div>
           )}
