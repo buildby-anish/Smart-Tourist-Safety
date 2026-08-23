@@ -257,8 +257,8 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
         tileUrl = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
         attribution = '&copy; OpenStreetMap &copy; CARTO';
       } else {
-        // Light theme similar to Google Maps
-        tileUrl = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+        // Crisp white / light-grey theme with blue water
+        tileUrl = 'https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png';
         attribution = '&copy; OpenStreetMap &copy; CARTO';
       }
     }
@@ -716,9 +716,11 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     }
   };
 
-  const wrapperClass = fullBleed
-    ? 'relative w-full h-full overflow-hidden'
-    : 'relative w-full rounded-2xl overflow-hidden border border-slate-300 shadow-sm';
+  const wrapperClass = `${
+    fullBleed
+      ? 'relative w-full h-full overflow-hidden'
+      : 'relative w-full rounded-2xl overflow-hidden border border-slate-300 shadow-sm'
+  } ${(!isDarkMode && mapMode === 'm') ? 'clean-white-map' : ''}`;
 
   if (!leafletLoaded) {
     return (
@@ -737,6 +739,12 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
 
   return (
     <div className={wrapperClass} style={fullBleed ? undefined : { height }}>
+      {/* Map CSS Filter Override */}
+      <style>{`
+        .clean-white-map .leaflet-tile {
+          filter: saturate(1.35) contrast(1.04) brightness(1.03);
+        }
+      `}</style>
       {/* Map Anchor container */}
       <div ref={containerRef} className="w-full h-full z-0" />
 
