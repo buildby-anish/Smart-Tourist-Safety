@@ -178,20 +178,20 @@ export default function ProfilePanel({
         <section>
           <SectionLabel text={text} label="Settings" />
           <div className="rounded-xl overflow-hidden" style={{ background: card, border: `1px solid ${border}`, boxShadow: shadow }}>
-            <ToggleRow icon={<Moon size={16} />} label="Dark mode" value={dm} onChange={toggleDark} text={text} subtle={subtle} border={border} />
-            <ToggleRow icon={<Bell size={16} />} label="Safety notifications" value={notifs} onChange={() => setNotifs((v) => !v)} text={text} subtle={subtle} border={border} />
-            <ToggleRow icon={<Wifi size={16} />} label="Share location with contacts" value={locShare} onChange={() => setLocShare((v) => !v)} text={text} subtle={subtle} border={border} />
+            <ToggleRow icon={<Moon size={16} />} label="Dark mode" value={dm} onChange={toggleDark} text={text} subtle={subtle} border={border} dm={dm} />
+            <ToggleRow icon={<Bell size={16} />} label="Safety notifications" value={notifs} onChange={() => setNotifs((v) => !v)} text={text} subtle={subtle} border={border} dm={dm} />
+            <ToggleRow icon={<Wifi size={16} />} label="Share location with contacts" value={locShare} onChange={() => setLocShare((v) => !v)} text={text} subtle={subtle} border={border} dm={dm} />
             
             {/* Language Selection Row */}
             <div className="flex items-center gap-3 px-4 py-3" style={{ borderTop: `1px solid ${border}` }}>
               <span style={{ color: subtle }}><Globe size={16} /></span>
               <span className="flex-1 text-sm" style={{ color: text }}>Language / भाषा</span>
-              <div className="flex items-center bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-lg p-0.5 gap-0.5">
+              <div className="flex items-center bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-lg p-0.5 gap-0.5 flex-shrink-0">
                 <button
                   onClick={() => onLanguageChange('en')}
                   className={`px-2.5 py-1 text-[11px] font-extrabold rounded-md transition-all cursor-pointer ${
                     language === 'en'
-                      ? dm ? 'bg-slate-750 text-white shadow-sm' : 'bg-white text-slate-800 shadow-sm'
+                      ? dm ? 'bg-slate-700 text-white shadow-sm' : 'bg-white text-slate-800 shadow-sm'
                       : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
                   }`}
                 >
@@ -201,7 +201,7 @@ export default function ProfilePanel({
                   onClick={() => onLanguageChange('hi')}
                   className={`px-2.5 py-1 text-[11px] font-extrabold rounded-md transition-all cursor-pointer ${
                     language === 'hi'
-                      ? dm ? 'bg-slate-750 text-white shadow-sm' : 'bg-white text-slate-800 shadow-sm'
+                      ? dm ? 'bg-slate-700 text-white shadow-sm' : 'bg-white text-slate-800 shadow-sm'
                       : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
                   }`}
                 >
@@ -264,15 +264,15 @@ function SectionLabel({ label, text }: { label: string; text: string }) {
   );
 }
 
-function ToggleRow({ icon, label, value, onChange, text, subtle, border, last }: {
+function ToggleRow({ icon, label, value, onChange, text, subtle, border, dm, last }: {
   icon: React.ReactNode; label: string; value: boolean; onChange: () => void;
-  text: string; subtle: string; border: string; last?: boolean;
+  text: string; subtle: string; border: string; dm: boolean; last?: boolean;
 }) {
   return (
     <div className="flex items-center gap-3 px-4 py-3.5" style={{ borderBottom: last ? 'none' : `1px solid ${border}` }}>
       <span style={{ color: subtle }}>{icon}</span>
       <span className="flex-1 text-sm" style={{ color: text }}>{label}</span>
-      <button onClick={onChange} className="relative w-11 h-6 rounded-full transition-all duration-200 flex-shrink-0" style={{ background: value ? '#FF9933' : subtle + '40' }} role="switch" aria-checked={value}>
+      <button onClick={onChange} className="relative w-11 h-6 rounded-full transition-all duration-200 flex-shrink-0" style={{ background: value ? '#FF9933' : dm ? 'rgba(255,255,255,0.16)' : 'rgba(12,35,64,0.15)' }} role="switch" aria-checked={value}>
         <span className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform duration-200" style={{ transform: value ? 'translateX(20px)' : 'translateX(0)' }} />
       </button>
     </div>
