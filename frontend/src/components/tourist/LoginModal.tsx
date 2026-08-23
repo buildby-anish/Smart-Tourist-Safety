@@ -750,7 +750,7 @@ function Field({
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
           placeholder={placeholder}
-          className="flex-1 bg-transparent text-sm outline-none"
+          className="flex-1 bg-transparent text-base outline-none"
           style={{ color: text, fontFamily: 'Inter, sans-serif' }}
           aria-invalid={!!error}
         />

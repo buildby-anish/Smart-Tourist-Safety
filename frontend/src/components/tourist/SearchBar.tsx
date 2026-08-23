@@ -56,7 +56,7 @@ export default function SearchBar({ darkMode: dm, onSelect }: Props) {
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 180)}
           placeholder="Search places, attractions, hotels..."
-          className="flex-1 bg-transparent text-[15px] leading-none outline-none pl-1"
+          className="flex-1 bg-transparent text-base leading-none outline-none pl-1"
           style={{ color: text, fontFamily: 'Inter, sans-serif' }}
           aria-label="Search places"
           autoComplete="off"

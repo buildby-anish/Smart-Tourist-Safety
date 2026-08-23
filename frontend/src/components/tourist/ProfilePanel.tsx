@@ -148,7 +148,7 @@ export default function ProfilePanel({
                     value={contactDraft}
                     onChange={(e) => setContactDraft(e.target.value)}
                     placeholder="Name and phone number"
-                    className="w-full h-10 px-3 rounded-lg text-sm outline-none"
+                    className="w-full h-10 px-3 rounded-lg text-base outline-none"
                     style={{ background: dm ? 'rgba(255,255,255,0.05)' : '#f8fafc', border: `1.5px solid ${dm ? 'rgba(255,255,255,0.11)' : '#e2e8f0'}`, color: text }}
                   />
                   {contactErr && <p className="text-xs" style={{ color: '#ef4444' }}>{contactErr}</p>}
