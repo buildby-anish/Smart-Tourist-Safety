@@ -110,9 +110,15 @@ def resolve_session(token: str | None) -> SessionResponse:
         alg = header.get("alg", "HS256")
         
         claims = None
-        if alg == "RS256":
+        # Asymmetric algorithms (Supabase's new JWT Signing Keys default to
+        # ES256/ECC; RS256/RSA is also supported). Route both through the
+        # same JWKS-based manual-verification path, since PyJWT's built-in
+        # PEM loading is what was throwing "Unable to load PEM file ...
+        # MalformedFraming" when an EC-signed (ES256) token fell through to
+        # the HS256/shared-secret branch below.
+        if alg in ("RS256", "ES256", "PS256"):
             if not Config.SUPABASE_URL:
-                logger.error("SUPABASE_URL is not configured; cannot fetch JWKS keys for RS256.")
+                logger.error(f"SUPABASE_URL is not configured; cannot fetch JWKS keys for {alg}.")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Authentication is not correctly configured on the server.",
@@ -126,7 +132,7 @@ def resolve_session(token: str | None) -> SessionResponse:
                     detail="Authentication server could not be reached.",
                 )
             jwks = resp.json()
-            
+
             # Find the key matching the token's kid
             kid = header.get("kid")
             jwk_dict = None
@@ -134,63 +140,76 @@ def resolve_session(token: str | None) -> SessionResponse:
                 if key_dict.get("kid") == kid:
                     jwk_dict = key_dict
                     break
-                    
+
             if not jwk_dict:
                 logger.error(f"Key ID {kid} not found in JWKS.")
                 raise HTTPException(
                     status_code=status.HTTP_401_UNAUTHORIZED,
                     detail="Invalid authentication token signature key.",
                 )
-                
-            # Direct RSA public key construction from raw modulus (n) and exponent (e)
+
             import base64
-            from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
             from cryptography.hazmat.backends import default_backend
             from cryptography.hazmat.primitives import hashes
-            from cryptography.hazmat.primitives.asymmetric import padding
-            
+            from cryptography.hazmat.primitives.asymmetric import padding, ec, utils as asym_utils
+
             def base64url_decode(s: str) -> bytes:
                 s = s.strip()
                 rem = len(s) % 4
                 if rem > 0:
                     s += '=' * (4 - rem)
                 return base64.urlsafe_b64decode(s)
-                
+
+            kty = jwk_dict.get("kty")
             try:
-                n_b = base64url_decode(jwk_dict["n"])
-                e_b = base64url_decode(jwk_dict["e"])
-                n_int = int.from_bytes(n_b, byteorder="big")
-                e_int = int.from_bytes(e_b, byteorder="big")
-                key = RSAPublicNumbers(e_int, n_int).public_key(default_backend())
+                if kty == "RSA":
+                    from cryptography.hazmat.primitives.asymmetric.rsa import RSAPublicNumbers
+                    n_int = int.from_bytes(base64url_decode(jwk_dict["n"]), byteorder="big")
+                    e_int = int.from_bytes(base64url_decode(jwk_dict["e"]), byteorder="big")
+                    key = RSAPublicNumbers(e_int, n_int).public_key(default_backend())
+                elif kty == "EC":
+                    curve_name = jwk_dict.get("crv", "P-256")
+                    curve = {"P-256": ec.SECP256R1(), "P-384": ec.SECP384R1(), "P-521": ec.SECP521R1()}.get(curve_name)
+                    if curve is None:
+                        raise ValueError(f"Unsupported EC curve: {curve_name}")
+                    x_int = int.from_bytes(base64url_decode(jwk_dict["x"]), byteorder="big")
+                    y_int = int.from_bytes(base64url_decode(jwk_dict["y"]), byteorder="big")
+                    key = ec.EllipticCurvePublicNumbers(x_int, y_int, curve).public_key(default_backend())
+                else:
+                    raise ValueError(f"Unsupported JWK key type: {kty}")
             except Exception as parse_err:
-                logger.error(f"Failed to construct RSA public key from JWK: {parse_err}")
+                logger.error(f"Failed to construct public key from JWK (kty={kty}): {parse_err}")
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                     detail="Failed to parse signature verification key.",
                 )
-                
+
             # Verify the signature manually to bypass PyJWT PEM-loading bugs
             parts = token.split(".")
             if len(parts) != 3:
                 raise jwt.PyJWTError("Invalid token format")
-                
+
             message = f"{parts[0]}.{parts[1]}".encode("ascii")
             try:
                 sig_bytes = base64url_decode(parts[2])
             except Exception:
                 raise jwt.PyJWTError("Invalid base64 in signature")
-                
+
             try:
-                key.verify(
-                    sig_bytes,
-                    message,
-                    padding.PKCS1v15(),
-                    hashes.SHA256()
-                )
+                if kty == "RSA":
+                    key.verify(sig_bytes, message, padding.PKCS1v15(), hashes.SHA256())
+                elif kty == "EC":
+                    # JWS EC signatures are raw (r || s) fixed-width concatenation,
+                    # not DER — convert before handing to cryptography's verify().
+                    half = len(sig_bytes) // 2
+                    r = int.from_bytes(sig_bytes[:half], byteorder="big")
+                    s = int.from_bytes(sig_bytes[half:], byteorder="big")
+                    der_sig = asym_utils.encode_dss_signature(r, s)
+                    key.verify(der_sig, message, ec.ECDSA(hashes.SHA256()))
             except Exception as sig_err:
                 logger.warning(f"Signature verification failed: {sig_err}")
                 raise jwt.PyJWTError("Signature verification failed")
-                
+
             # Signature verified successfully! Decode the payload without verification
             claims = jwt.decode(
                 token,
