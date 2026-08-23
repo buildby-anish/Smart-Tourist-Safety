@@ -5,7 +5,7 @@ import {
 } from 'lucide-react';
 import { GeoFenceZone } from '../types';
 
-declare var google: any;
+declare var L: any;
 
 export interface MapClusterMarker {
   id: string;
@@ -38,172 +38,11 @@ interface ActualGoogleMapProps {
   zoomAction?: { type: 'in' | 'out'; ts: number };
 }
 
-const API_KEY =
-  process.env.GOOGLE_MAPS_PLATFORM_KEY ||
-  (import.meta as any).env?.VITE_GOOGLE_MAPS_PLATFORM_KEY ||
-  (globalThis as any).GOOGLE_MAPS_PLATFORM_KEY ||
-  '';
-
 const TRAVEL_MODES = [
-  { id: 'drive', label: 'Car', googleMode: 'DRIVING', icon: Car },
-  { id: 'walk', label: 'Walk', googleMode: 'WALKING', icon: Footprints },
-  { id: 'bike', label: 'Bike', googleMode: 'BICYCLING', icon: Bike },
-  { id: 'train', label: 'Transit', googleMode: 'TRANSIT', icon: Train },
-];
-
-const darkMapStyle = [
-  {
-    "elementType": "geometry",
-    "stylers": [
-      { "color": "#212121" }
-    ]
-  },
-  {
-    "elementType": "labels.icon",
-    "stylers": [
-      { "visibility": "on" }
-    ]
-  },
-  {
-    "elementType": "labels.text.fill",
-    "stylers": [
-      { "color": "#ffffff" },
-      { "weight": 700 }
-    ]
-  },
-  {
-    "elementType": "labels.text.stroke",
-    "stylers": [
-      { "color": "#212121" },
-      { "weight": 3 }
-    ]
-  },
-  {
-    "featureType": "administrative",
-    "elementType": "geometry",
-    "stylers": [
-      { "color": "#757575" }
-    ]
-  },
-  {
-    "featureType": "administrative.country",
-    "elementType": "labels.text.fill",
-    "stylers": [
-      { "color": "#ffffff" }
-    ]
-  },
-  {
-    "featureType": "administrative.locality",
-    "elementType": "labels.text.fill",
-    "stylers": [
-      { "color": "#ffffff" }
-    ]
-  },
-  {
-    "featureType": "landscape",
-    "elementType": "geometry",
-    "stylers": [
-      { "color": "#282828" }
-    ]
-  },
-  {
-    "featureType": "poi",
-    "elementType": "geometry",
-    "stylers": [
-      { "color": "#333333" }
-    ]
-  },
-  {
-    "featureType": "poi",
-    "elementType": "labels.text.fill",
-    "stylers": [
-      { "color": "#ffffff" }
-    ]
-  },
-  {
-    "featureType": "poi.park",
-    "elementType": "geometry",
-    "stylers": [
-      { "color": "#183018" }
-    ]
-  },
-  {
-    "featureType": "poi.park",
-    "elementType": "labels.text.fill",
-    "stylers": [
-      { "color": "#a5d6a7" }
-    ]
-  },
-  {
-    "featureType": "road",
-    "elementType": "geometry.fill",
-    "stylers": [
-      { "color": "#424242" }
-    ]
-  },
-  {
-    "featureType": "road",
-    "elementType": "labels.text.fill",
-    "stylers": [
-      { "color": "#ffffff" }
-    ]
-  },
-  {
-    "featureType": "road.arterial",
-    "elementType": "geometry.fill",
-    "stylers": [
-      { "color": "#525252" }
-    ]
-  },
-  {
-    "featureType": "road.highway",
-    "elementType": "geometry.fill",
-    "stylers": [
-      { "color": "#616161" }
-    ]
-  },
-  {
-    "featureType": "road.highway.controlled_access",
-    "elementType": "geometry.fill",
-    "stylers": [
-      { "color": "#757575" }
-    ]
-  },
-  {
-    "featureType": "road.local",
-    "elementType": "geometry.fill",
-    "stylers": [
-      { "color": "#383838" }
-    ]
-  },
-  {
-    "featureType": "transit",
-    "elementType": "geometry",
-    "stylers": [
-      { "color": "#2c2c2c" }
-    ]
-  },
-  {
-    "featureType": "transit",
-    "elementType": "labels.text.fill",
-    "stylers": [
-      { "color": "#ffffff" }
-    ]
-  },
-  {
-    "featureType": "water",
-    "elementType": "geometry",
-    "stylers": [
-      { "color": "#121212" }
-    ]
-  },
-  {
-    "featureType": "water",
-    "elementType": "labels.text.fill",
-    "stylers": [
-      { "color": "#ffffff" }
-    ]
-  }
+  { id: 'drive', label: 'Car', osrmMode: 'driving', icon: Car },
+  { id: 'walk', label: 'Walk', osrmMode: 'foot', icon: Footprints },
+  { id: 'bike', label: 'Bike', osrmMode: 'bicycle', icon: Bike },
+  { id: 'train', label: 'Transit', osrmMode: 'transit', icon: Train },
 ];
 
 export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
@@ -223,10 +62,20 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   recenter,
   zoomAction
 }) => {
-  const [map, setMap] = useState<any>(null);
-  const [googleLoaded, setGoogleLoaded] = useState(false);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const mapRef = useRef<any>(null);
+  const tileLayerRef = useRef<any>(null);
+  const markersGroupRef = useRef<any>(null);
+  const geofencesGroupRef = useRef<any>(null);
+  const routePolylineRef = useRef<any>(null);
+  const destMarkerRef = useRef<any>(null);
+
+  const [leafletLoaded, setLeafletLoaded] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
   const [activeMarker, setActiveMarker] = useState<MapClusterMarker | null>(null);
+
+  // Map settings
+  const [mapMode, setMapMode] = useState<'m' | 'k' | 'p'>('m'); // m: roadmap, k: satellite, p: terrain
 
   // Directions routing states
   const [selectedPlaceInfo, setSelectedPlaceInfo] = useState<{
@@ -234,16 +83,10 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     address: string;
     lat: number;
     lng: number;
-    placeId?: string;
   } | null>(null);
-  const [travelMode, setTravelMode] = useState<string>('DRIVING');
-  const [directionsResult, setDirectionsResult] = useState<any>(null);
+  const [travelMode, setTravelMode] = useState<string>('driving');
   const [routeInfo, setRouteInfo] = useState<{ distance: string; duration: string } | null>(null);
-
-  const containerRef = useRef<HTMLDivElement>(null);
-  const googleMarkersRef = useRef<any[]>([]);
-  const googleCirclesRef = useRef<any[]>([]);
-  const directionsRendererRef = useRef<any>(null);
+  const [isRouting, setIsRouting] = useState(false);
 
   // Track global dark mode changes using MutationObserver
   useEffect(() => {
@@ -254,116 +97,157 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  // Dynamically load Google Maps script
+  // Dynamically load Leaflet resources
   useEffect(() => {
-    const callback = () => setGoogleLoaded(true);
-    if ((window as any).google && (window as any).google.maps) {
-      callback();
+    if ((window as any).L) {
+      setLeafletLoaded(true);
       return;
     }
 
-    const existingScript = document.getElementById('google-maps-script');
-    if (existingScript) {
-      existingScript.addEventListener('load', callback);
-      return;
-    }
+    const link = document.createElement('link');
+    link.rel = 'stylesheet';
+    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
+    document.head.appendChild(link);
 
     const script = document.createElement('script');
-    script.id = 'google-maps-script';
-    script.src = `https://maps.googleapis.com/maps/api/js?${API_KEY ? `key=${API_KEY}` : ''}&libraries=places`;
+    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
     script.async = true;
-    script.defer = true;
-    script.onload = callback;
-    document.head.appendChild(script);
+    script.onload = () => {
+      setLeafletLoaded(true);
+    };
+    document.body.appendChild(script);
   }, []);
 
   // Initialize Map
   useEffect(() => {
-    if (!googleLoaded || !containerRef.current || map) return;
+    if (!leafletLoaded || !containerRef.current || mapRef.current) return;
+    const L = (window as any).L;
 
-    const mapInstance = new google.maps.Map(containerRef.current, {
-      center: center,
-      zoom: zoom,
-      styles: isDarkMode ? darkMapStyle : [],
-      mapTypeControl: false,
+    const mapInstance = L.map(containerRef.current, {
       zoomControl: false,
-      streetViewControl: false,
-      fullscreenControl: false,
-      gestureHandling: 'greedy',
-    });
+      attributionControl: false,
+      scrollWheelZoom: true,
+      dragging: true,
+      touchZoom: true,
+    }).setView([center.lat, center.lng], zoom);
 
-    // Add map click listener to select real-life places or coordinate pins
-    mapInstance.addListener('click', (event: any) => {
-      if ('placeId' in event && event.placeId) {
-        event.stop(); // Stop default info popup
-        const service = new google.maps.places.PlacesService(mapInstance);
-        service.getDetails({ placeId: event.placeId }, (place: any, status: any) => {
-          if (status === google.maps.places.PlacesServiceStatus.OK && place && place.geometry?.location) {
-            setSelectedPlaceInfo({
-              name: place.name || 'Selected Destination',
-              address: place.formatted_address || 'Real-life Place',
-              lat: place.geometry.location.lat(),
-              lng: place.geometry.location.lng(),
-              placeId: event.placeId,
-            });
-          }
-        });
-      } else if (event.latLng) {
-        const lat = event.latLng.lat();
-        const lng = event.latLng.lng();
-        const geocoder = new google.maps.Geocoder();
-        geocoder.geocode({ location: { lat, lng } }, (results: any, status: any) => {
-          if (status === google.maps.GeocoderStatus.OK && results && results[0]) {
-            setSelectedPlaceInfo({
-              name: 'Dropped Pin',
-              address: results[0].formatted_address,
-              lat,
-              lng,
-            });
-          } else {
-            setSelectedPlaceInfo({
-              name: 'Dropped Pin',
-              address: `Coordinate: ${lat.toFixed(5)}, ${lng.toFixed(5)}`,
-              lat,
-              lng,
-            });
-          }
+    mapRef.current = mapInstance;
+
+    markersGroupRef.current = L.layerGroup().addTo(mapInstance);
+    geofencesGroupRef.current = L.layerGroup().addTo(mapInstance);
+
+    // Map click listener: select real-life places or drop pins
+    mapInstance.on('click', async (event: any) => {
+      const { lat, lng } = event.latlng;
+      
+      // Temporary loading indicator
+      setSelectedPlaceInfo({
+        name: 'Locating place...',
+        address: 'Fetching address details...',
+        lat,
+        lng,
+      });
+
+      try {
+        // Reverse geocoding via Nominatim OpenStreetMap API
+        const response = await fetch(
+          `https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lng}&zoom=18&addressdetails=1`,
+          { headers: { 'User-Agent': 'SurakshaSetu/1.0' } }
+        );
+        const data = await response.json();
+        
+        if (data && data.display_name) {
+          const name = data.name || data.address.road || data.address.suburb || 'Selected Location';
+          setSelectedPlaceInfo({
+            name,
+            address: data.display_name,
+            lat,
+            lng,
+          });
+        } else {
+          throw new Error('No address found');
+        }
+      } catch (err) {
+        setSelectedPlaceInfo({
+          name: 'Dropped Pin',
+          address: `Coordinates: ${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+          lat,
+          lng,
         });
       }
     });
 
-    setMap(mapInstance);
-  }, [googleLoaded]);
+    return () => {
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
+    };
+  }, [leafletLoaded]);
 
-  // Apply dark mode styling updates dynamically
+  // Apply Tile Layers based on Mode and Dark/Light Theme
   useEffect(() => {
-    if (map) {
-      map.setOptions({ styles: isDarkMode ? darkMapStyle : [] });
+    const map = mapRef.current;
+    if (!map || !leafletLoaded) return;
+    const L = (window as any).L;
+
+    if (tileLayerRef.current) {
+      tileLayerRef.current.remove();
     }
-  }, [map, isDarkMode]);
+
+    let tileUrl = '';
+    let attribution = '';
+
+    if (mapMode === 'k') {
+      // Esri Satellite
+      tileUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+      attribution = '&copy; Esri &mdash; Satellite';
+    } else if (mapMode === 'p') {
+      // OpenTopoMap
+      tileUrl = 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png';
+      attribution = '&copy; OpenTopoMap';
+    } else {
+      // Roadmap: CartoDB Dark Matter (Zero Blue Shades) or CartoDB Positron
+      if (isDarkMode) {
+        tileUrl = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
+        attribution = '&copy; OpenStreetMap &copy; CARTO';
+      } else {
+        tileUrl = 'https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png';
+        attribution = '&copy; OpenStreetMap &copy; CARTO';
+      }
+    }
+
+    tileLayerRef.current = L.tileLayer(tileUrl, {
+      attribution,
+      maxZoom: 20,
+    }).addTo(map);
+  }, [mapRef.current, mapMode, isDarkMode, leafletLoaded]);
 
   // Recenter Handler
   useEffect(() => {
+    const map = mapRef.current;
     if (map && recenter && recenter.trigger > 0) {
-      map.panTo(recenter.target);
-      map.setZoom(15);
+      map.setView([recenter.target.lat, recenter.target.lng], 15, { animate: true });
     }
-  }, [map, recenter?.trigger]);
+  }, [recenter?.trigger]);
 
   // Zoom Handler
   useEffect(() => {
+    const map = mapRef.current;
     if (map && zoomAction) {
-      const current = map.getZoom() || 14;
-      map.setZoom(zoomAction.type === 'in' ? current + 1 : current - 1);
+      const current = map.getZoom();
+      map.setZoom(zoomAction.type === 'in' ? current + 1 : current - 1, { animate: true });
     }
-  }, [map, zoomAction?.ts]);
+  }, [zoomAction?.ts]);
 
   // Render/Sync Markers
   useEffect(() => {
-    if (!map) return;
+    const map = mapRef.current;
+    const markersGroup = markersGroupRef.current;
+    if (!map || !markersGroup || !leafletLoaded) return;
+    const L = (window as any).L;
 
-    googleMarkersRef.current.forEach((m) => m.setMap(null));
-    googleMarkersRef.current = [];
+    markersGroup.clearLayers();
 
     markers.forEach((m) => {
       let pinColor = m.pinColor || '#3B82F6';
@@ -376,34 +260,56 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
 
       const isSelected = selectedMarkerId === m.id || activeMarker?.id === m.id;
 
-      const marker = new google.maps.Marker({
-        position: { lat: m.lat, lng: m.lng },
-        map: map,
-        title: m.title,
-        icon: {
-          path: google.maps.SymbolPath.CIRCLE,
-          fillColor: pinColor,
-          fillOpacity: 1.0,
-          strokeColor: '#FFFFFF',
-          strokeWeight: isSelected ? 3.5 : 1.5,
-          scale: isSelected ? 12 : 8,
-        },
+      // Premium custom HTML markers with ripple effect for active alerts/users
+      const isPulse = m.type === 'user' || m.type === 'alert' || m.crowdLevel === 'extreme';
+      const pulseHtml = isPulse 
+        ? `<span class="absolute inline-flex h-full w-full rounded-full animate-ping opacity-75" style="background-color: ${pinColor}"></span>`
+        : '';
+
+      const icon = L.divIcon({
+        html: `
+          <div class="relative flex items-center justify-center w-7 h-7">
+            ${pulseHtml}
+            <div style="
+              background-color: ${pinColor};
+              width: 24px;
+              height: 24px;
+              border-radius: 50%;
+              border: 2px solid ${isSelected ? '#FFFFFF' : 'rgba(255,255,255,0.85)'};
+              box-shadow: 0 3px 8px rgba(0,0,0,0.4);
+              display: flex;
+              align-items: center;
+              justify-content: center;
+              color: white;
+              font-size: 11px;
+              transform: ${isSelected ? 'scale(1.2)' : 'none'};
+              transition: transform 0.15s;
+            ">
+              ${m.glyph || ''}
+            </div>
+          </div>
+        `,
+        className: 'custom-leaflet-marker-wrapper',
+        iconSize: [28, 28],
+        iconAnchor: [14, 14]
       });
 
-      marker.addListener('click', () => {
+      const marker = L.marker([m.lat, m.lng], { icon }).addTo(markersGroup);
+      marker.on('click', (e: any) => {
+        L.DomEvent.stopPropagation(e);
         handleSelectMarker(m);
       });
-
-      googleMarkersRef.current.push(marker);
     });
-  }, [map, markers, selectedMarkerId, activeMarker]);
+  }, [mapRef.current, markers, selectedMarkerId, activeMarker, leafletLoaded]);
 
   // Render/Sync Geofences
   useEffect(() => {
-    if (!map) return;
+    const map = mapRef.current;
+    const geofencesGroup = geofencesGroupRef.current;
+    if (!map || !geofencesGroup || !leafletLoaded) return;
+    const L = (window as any).L;
 
-    googleCirclesRef.current.forEach((c) => c.setMap(null));
-    googleCirclesRef.current = [];
+    geofencesGroup.clearLayers();
 
     geofenceZones.forEach((z) => {
       const isActive = activeZoneId === z.id;
@@ -412,22 +318,147 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
       else if (z.riskLevel === 'Caution') color = '#F59E0B';
       else if (z.riskLevel === 'Safe') color = '#10B981';
 
-      const circle = new google.maps.Circle({
-        strokeColor: color,
-        strokeOpacity: isActive ? 0.8 : 0.4,
-        strokeWeight: isActive ? 3 : 1.5,
+      L.circle([z.center.lat, z.center.lng], {
+        color: color,
         fillColor: color,
         fillOpacity: isActive ? 0.35 : 0.15,
-        map: map,
-        center: { lat: z.center.lat, lng: z.center.lng },
-        radius: z.radiusKm * 1000,
-      });
-
-      googleCirclesRef.current.push(circle);
+        weight: isActive ? 3 : 1.5,
+        radius: z.radiusKm * 1000
+      }).addTo(geofencesGroup);
     });
-  }, [map, geofenceZones, activeZoneId]);
+  }, [mapRef.current, geofenceZones, activeZoneId, leafletLoaded]);
 
-  // Helper to handle marker select
+  // Extract user location from markers
+  const userMarker = markers.find((m) => m.id === 'user-location' || m.type === 'user');
+  const userLocation = userMarker ? { lat: userMarker.lat, lng: userMarker.lng } : null;
+
+  // Directions calculation using OSRM API (completely free and fast)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !selectedPlaceInfo || !leafletLoaded) {
+      if (routePolylineRef.current) {
+        routePolylineRef.current.remove();
+        routePolylineRef.current = null;
+      }
+      if (destMarkerRef.current) {
+        destMarkerRef.current.remove();
+        destMarkerRef.current = null;
+      }
+      setRouteInfo(null);
+      return;
+    }
+
+    const L = (window as any).L;
+    const startLoc = userLocation || center;
+
+    // Drop/update red location pin for selected destination
+    if (destMarkerRef.current) {
+      destMarkerRef.current.setLatLng([selectedPlaceInfo.lat, selectedPlaceInfo.lng]);
+    } else {
+      const destIcon = L.divIcon({
+        html: `
+          <div class="relative flex items-center justify-center w-8 h-8">
+            <span class="absolute inline-flex h-full w-full rounded-full bg-red-500 animate-ping opacity-50"></span>
+            <div class="bg-red-600 w-5 h-5 rounded-full border-2 border-white shadow flex items-center justify-center text-white">
+              📍
+            </div>
+          </div>
+        `,
+        className: 'dest-marker',
+        iconSize: [32, 32],
+        iconAnchor: [16, 16],
+      });
+      destMarkerRef.current = L.marker([selectedPlaceInfo.lat, selectedPlaceInfo.lng], { icon: destIcon }).addTo(map);
+    }
+
+    const calculateRoute = async () => {
+      setIsRouting(true);
+
+      // Determine profile for OSRM
+      // Options are: driving, foot, bicycle (we map transit to foot/driving with custom render)
+      let osrmProfile = 'driving';
+      if (travelMode === 'foot') osrmProfile = 'foot';
+      else if (travelMode === 'bicycle') osrmProfile = 'bicycle';
+
+      const url = `https://router.project-osrm.org/route/v1/${osrmProfile}/${startLoc.lng},${startLoc.lat};${selectedPlaceInfo.lng},${selectedPlaceInfo.lat}?overview=full&geometries=geojson`;
+
+      try {
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.code === 'Ok' && data.routes && data.routes.length > 0) {
+          const route = data.routes[0];
+          const coordinates = route.geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]]); // OSRM is [lng, lat] -> Leaflet wants [lat, lng]
+
+          // Remove old polyline
+          if (routePolylineRef.current) {
+            routePolylineRef.current.remove();
+          }
+
+          // Draw custom saffron polyline
+          routePolylineRef.current = L.polyline(coordinates, {
+            color: '#FF9933',
+            weight: 6,
+            opacity: 0.85,
+            dashArray: travelMode === 'transit' ? '12, 12' : undefined, // dashed line for transit
+          }).addTo(map);
+
+          // Pan/Fit bounds to show full route
+          const bounds = L.latLngBounds([
+            [startLoc.lat, startLoc.lng],
+            [selectedPlaceInfo.lat, selectedPlaceInfo.lng]
+          ]);
+          map.fitBounds(bounds, { padding: [50, 50] });
+
+          // Calculate distance and duration metrics
+          const distKm = (route.distance / 1000).toFixed(1);
+          let durationMin = Math.round(route.duration / 60);
+
+          // Adjust transit stats to simulate train/bus travel
+          if (travelMode === 'transit') {
+            durationMin = Math.max(3, Math.round(durationMin * 0.75 + 4)); // transit simulated delay/speed
+          }
+
+          setRouteInfo({
+            distance: `${distKm} km`,
+            duration: `${durationMin} mins`,
+          });
+        } else {
+          throw new Error('No route found');
+        }
+      } catch (err) {
+        // Fallback straight dotted line if routing fails (e.g. offline)
+        if (routePolylineRef.current) {
+          routePolylineRef.current.remove();
+        }
+        routePolylineRef.current = L.polyline(
+          [[startLoc.lat, startLoc.lng], [selectedPlaceInfo.lat, selectedPlaceInfo.lng]],
+          {
+            color: '#FF9933',
+            weight: 4,
+            opacity: 0.7,
+            dashArray: '8, 8',
+          }
+        ).addTo(map);
+        
+        // Calculate rough aerial distance
+        const distanceVal = map.distance([startLoc.lat, startLoc.lng], [selectedPlaceInfo.lat, selectedPlaceInfo.lng]);
+        const distKm = (distanceVal / 1000).toFixed(1);
+        const durationMin = Math.round(distanceVal / (travelMode === 'foot' ? 80 : 400)); // rough speeds
+        
+        setRouteInfo({
+          distance: `${distKm} km`,
+          duration: `~${durationMin} mins`,
+        });
+      } finally {
+        setIsRouting(false);
+      }
+    };
+
+    calculateRoute();
+  }, [selectedPlaceInfo, travelMode, userLocation, leafletLoaded]);
+
+  // Marker select helper
   const handleSelectMarker = (m: MapClusterMarker) => {
     setActiveMarker(m);
     if (onMarkerClick) onMarkerClick(m);
@@ -442,84 +473,16 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     }
   };
 
-  // Extract user location from markers
-  const userMarker = markers.find((m) => m.id === 'user-location' || m.type === 'user');
-  const userLocation = userMarker ? { lat: userMarker.lat, lng: userMarker.lng } : null;
-
-  // Directions calculation: Find the shortest route among alternatives
-  useEffect(() => {
-    if (!map || !selectedPlaceInfo) {
-      setDirectionsResult(null);
-      setRouteInfo(null);
-      return;
-    }
-
-    const directionsService = new google.maps.DirectionsService();
-    const startLoc = userLocation || center;
-
-    directionsService.route(
-      {
-        origin: startLoc,
-        destination: { lat: selectedPlaceInfo.lat, lng: selectedPlaceInfo.lng },
-        travelMode: travelMode as any,
-        provideRouteAlternatives: true,
-      },
-      (result: any, status: any) => {
-        if (status === google.maps.DirectionsStatus.OK && result) {
-          let shortestRoute = result.routes[0];
-          let shortestDistance = Infinity;
-          result.routes.forEach((route: any) => {
-            let distVal = 0;
-            route.legs.forEach((leg: any) => {
-              distVal += leg.distance?.value || 0;
-            });
-            if (distVal < shortestDistance) {
-              shortestDistance = distVal;
-              shortestRoute = route;
-            }
-          });
-
-          setDirectionsResult(result);
-          const leg = shortestRoute.legs[0];
-          if (leg) {
-            setRouteInfo({
-              distance: leg.distance?.text || '',
-              duration: leg.duration?.text || '',
-            });
-          }
-        } else {
-          setDirectionsResult(null);
-          setRouteInfo(null);
-        }
-      }
-    );
-  }, [map, selectedPlaceInfo, travelMode, userLocation]);
-
-  // Render directions polyline
-  useEffect(() => {
-    if (!map) return;
-
-    if (!directionsRendererRef.current) {
-      directionsRendererRef.current = new google.maps.DirectionsRenderer({
-        map: map,
-        suppressMarkers: false,
-        polylineOptions: {
-          strokeColor: '#FF9933', // Saffron / Safety Orange
-          strokeOpacity: 0.85,
-          strokeWeight: 6,
-        },
-      });
-    }
-
-    directionsRendererRef.current.setDirections(directionsResult);
-  }, [map, directionsResult]);
-
   const handleCloseDirections = () => {
     setSelectedPlaceInfo(null);
-    setDirectionsResult(null);
     setRouteInfo(null);
-    if (directionsRendererRef.current) {
-      directionsRendererRef.current.setDirections({ routes: [] });
+    if (routePolylineRef.current) {
+      routePolylineRef.current.remove();
+      routePolylineRef.current = null;
+    }
+    if (destMarkerRef.current) {
+      destMarkerRef.current.remove();
+      destMarkerRef.current = null;
     }
   };
 
@@ -527,7 +490,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     ? 'relative w-full h-full overflow-hidden'
     : 'relative w-full rounded-2xl overflow-hidden border border-slate-300 shadow-sm';
 
-  if (!googleLoaded) {
+  if (!leafletLoaded) {
     return (
       <div className={wrapperClass} style={fullBleed ? undefined : { height }}>
         <div className={`w-full h-full flex items-center justify-center ${isDarkMode ? 'bg-[#1e1e1e] text-slate-400' : 'bg-white text-slate-500'} text-sm font-medium`}>
@@ -539,6 +502,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
 
   return (
     <div className={wrapperClass} style={fullBleed ? undefined : { height }}>
+      {/* Map Anchor container */}
       <div ref={containerRef} className="w-full h-full z-0" />
 
       {/* Map Control Bar Top */}
@@ -550,6 +514,35 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
               {destination ? `${origin || 'My Location'} ➔ ${destination}` : 'Live GIS View'}
             </span>
           </div>
+
+          {mapTypeControl && (
+            <div className="pointer-events-auto flex items-center bg-slate-900/90 backdrop-blur-md p-1 rounded-xl border border-slate-700 shadow-md">
+              <button
+                onClick={() => setMapMode('m')}
+                className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer ${
+                  mapMode === 'm' ? 'bg-orange-500 text-white shadow-sm' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                Map
+              </button>
+              <button
+                onClick={() => setMapMode('k')}
+                className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer ${
+                  mapMode === 'k' ? 'bg-orange-500 text-white shadow-sm' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                Satellite
+              </button>
+              <button
+                onClick={() => setMapMode('p')}
+                className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer ${
+                  mapMode === 'p' ? 'bg-orange-500 text-white shadow-sm' : 'text-slate-300 hover:text-white'
+                }`}
+              >
+                Terrain
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -619,15 +612,15 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
         </div>
       )}
 
-      {/* External Google Maps Button */}
+      {/* External Map Link Button */}
       {chrome && (
         <a
-          href={`https://www.google.com/maps/search/?api=1&query=${center.lat},${center.lng}`}
+          href={`https://www.openstreetmap.org/#map=16/${center.lat}/${center.lng}`}
           target="_blank"
           rel="noopener noreferrer"
-          className="absolute top-3 right-3 z-20 hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/90 hover:bg-white text-slate-900 font-extrabold text-[11px] shadow border border-slate-300 transition"
+          className="absolute top-3 right-3 z-20 hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/95 hover:bg-white text-slate-900 font-extrabold text-[11px] shadow border border-slate-300 transition"
         >
-          <span>Open Google Maps</span>
+          <span>Open OpenStreetMap</span>
           <ExternalLink className="w-3.5 h-3.5 text-blue-600" />
         </a>
       )}
@@ -645,7 +638,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
           }}
         >
           <div className="flex items-start justify-between gap-3">
-            <div className="min-w-0">
+            <div className="min-w-0 flex-1">
               <span className="text-[10px] font-black uppercase tracking-wider text-teal-600 dark:text-teal-400">
                 Directions / मार्ग
               </span>
@@ -658,7 +651,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
             </div>
             <button
               onClick={handleCloseDirections}
-              className="w-7 h-7 rounded-full flex items-center justify-center transition-colors cursor-pointer"
+              className="w-7 h-7 rounded-full flex items-center justify-center transition-colors cursor-pointer flex-shrink-0"
               style={{
                 background: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
                 color: isDarkMode ? '#ffffff' : '#0c2340',
@@ -670,12 +663,12 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
 
           <div className="grid grid-cols-4 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80">
             {TRAVEL_MODES.map((mode) => {
-              const active = travelMode === mode.googleMode;
+              const active = travelMode === mode.osrmMode;
               const Icon = mode.icon;
               return (
                 <button
                   key={mode.id}
-                  onClick={() => setTravelMode(mode.googleMode)}
+                  onClick={() => setTravelMode(mode.osrmMode)}
                   className={`py-2 rounded-lg flex flex-col items-center gap-1 transition-all cursor-pointer ${
                     active
                       ? 'bg-orange-500 text-white shadow-sm font-bold'
@@ -694,7 +687,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
           {routeInfo ? (
             <div className="flex items-center justify-between border-t border-slate-150 dark:border-slate-800 pt-3 mt-1">
               <div className="flex items-center gap-2">
-                <Navigation className="w-4 h-4 text-orange-500 rotate-45" />
+                <Navigation className="w-4 h-4 text-orange-500 rotate-45 animate-pulse" />
                 <span className="text-xs font-semibold">Shortest Route</span>
               </div>
               <div className="flex items-center gap-3">
@@ -705,6 +698,10 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
                   {routeInfo.duration}
                 </span>
               </div>
+            </div>
+          ) : isRouting ? (
+            <div className="text-center text-xs opacity-50 py-2 border-t border-slate-150 dark:border-slate-800">
+              Calculating shortest path...
             </div>
           ) : (
             <div className="text-center text-xs opacity-50 py-2 border-t border-slate-150 dark:border-slate-800">
