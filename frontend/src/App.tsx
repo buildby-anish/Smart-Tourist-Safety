@@ -637,25 +637,27 @@ export default function App() {
 
       
       {/* Command Header */}
-      <Header
-        language={language}
-        onLanguageChange={setLanguage}
-        darkMode={darkMode}
-        onToggleDarkMode={() => setDarkMode(!darkMode)}
-        userRole={userRole}
-        onLogout={handleLogout}
-        onLogoClick={() => setUserRole('tourist')}
-        activeModule={activeModule}
-        onSelectModule={setActiveModule}
-        globalSearchQuery={globalSearchQuery}
-        onGlobalSearchChange={setGlobalSearchQuery}
-        onExecuteGlobalSearch={handleExecuteGlobalSearch}
-        activeSosCount={activeSosCount}
-        isAuthenticatedTourist={!!touristUser}
-        touristName={touristUser?.full_name || touristUser?.name || null}
-        onLoginClick={() => { setLoginModalMode('login'); setShowLogin(true); }}
-        onSignUpClick={() => { setLoginModalMode('signup'); setShowLogin(true); }}
-      />
+      {userRole !== 'tourist' && (
+        <Header
+          language={language}
+          onLanguageChange={setLanguage}
+          darkMode={darkMode}
+          onToggleDarkMode={() => setDarkMode(!darkMode)}
+          userRole={userRole}
+          onLogout={handleLogout}
+          onLogoClick={() => setUserRole('tourist')}
+          activeModule={activeModule}
+          onSelectModule={setActiveModule}
+          globalSearchQuery={globalSearchQuery}
+          onGlobalSearchChange={setGlobalSearchQuery}
+          onExecuteGlobalSearch={handleExecuteGlobalSearch}
+          activeSosCount={activeSosCount}
+          isAuthenticatedTourist={!!touristUser}
+          touristName={touristUser?.full_name || touristUser?.name || null}
+          onLoginClick={() => { setLoginModalMode('login'); setShowLogin(true); }}
+          onSignUpClick={() => { setLoginModalMode('signup'); setShowLogin(true); }}
+        />
+      )}
 
       {/* Main Content Area */}
       {userRole === 'gateway' ? (
@@ -675,6 +677,8 @@ export default function App() {
           showLogin={showLogin}
           setShowLogin={setShowLogin}
           onLogout={handleLogout}
+          language={language}
+          onLanguageChange={setLanguage}
         />
       ) : (
         <div className="flex-1 flex flex-col max-w-[1700px] w-full mx-auto">

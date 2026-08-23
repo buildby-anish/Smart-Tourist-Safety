@@ -1,5 +1,5 @@
 import { useState, useRef } from 'react';
-import { Search, X, MapPin, Star, ChevronRight } from 'lucide-react';
+import { Search, X, MapPin, Star, ChevronRight, Navigation } from 'lucide-react';
 
 // No backend "places search" endpoint exists in this project — these
 // suggestions mirror the same static POI set used on the map (see
@@ -38,7 +38,7 @@ export default function SearchBar({ darkMode: dm, onSelect }: Props) {
   return (
     <div className="relative w-full">
       <div
-        className="flex items-center gap-3 px-4 h-12 rounded-xl transition-all duration-150"
+        className="flex items-center gap-3 px-4 h-12 rounded-full transition-all duration-150"
         style={{
           background: surface,
           border: `1.5px solid ${borderC}`,
@@ -48,7 +48,6 @@ export default function SearchBar({ darkMode: dm, onSelect }: Props) {
           backdropFilter: 'blur(16px)',
         }}
       >
-        <Search size={17} strokeWidth={2.2} style={{ color: focused ? '#FF9933' : subtle, flexShrink: 0, transition: 'color 0.15s' }} />
         <input
           ref={inputRef}
           type="search"
@@ -57,7 +56,7 @@ export default function SearchBar({ darkMode: dm, onSelect }: Props) {
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 180)}
           placeholder="Search places, attractions, hotels..."
-          className="flex-1 bg-transparent text-[15px] leading-none outline-none"
+          className="flex-1 bg-transparent text-[15px] leading-none outline-none pl-1"
           style={{ color: text, fontFamily: 'Inter, sans-serif' }}
           aria-label="Search places"
           autoComplete="off"
@@ -68,11 +67,24 @@ export default function SearchBar({ darkMode: dm, onSelect }: Props) {
             onMouseDown={(e) => { e.preventDefault(); setQuery(''); inputRef.current?.focus(); }}
             aria-label="Clear"
             style={{ color: subtle, flexShrink: 0 }}
-            className="transition-opacity hover:opacity-70"
+            className="transition-opacity hover:opacity-70 mr-1"
           >
             <X size={15} />
           </button>
         )}
+        <Search size={17} strokeWidth={2.2} style={{ color: focused ? '#FF9933' : subtle, flexShrink: 0, transition: 'color 0.15s' }} />
+        
+        {/* Divider */}
+        <div className="w-[1px] h-5 bg-slate-200 dark:bg-slate-800 mx-1 flex-shrink-0" />
+        
+        {/* Directions Button */}
+        <button
+          type="button"
+          className="w-8 h-8 rounded-full bg-teal-600 hover:bg-teal-700 text-white flex items-center justify-center transition-all active:scale-95 shadow-xs flex-shrink-0 cursor-pointer"
+          title="Directions"
+        >
+          <Navigation size={13} className="rotate-45 fill-white" />
+        </button>
       </div>
 
       {showPanel && (

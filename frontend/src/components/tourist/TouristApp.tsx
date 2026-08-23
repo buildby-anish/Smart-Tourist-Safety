@@ -21,7 +21,7 @@ import {
   submitSOSOnline, syncQueuedSOS, getTouristProfile, getTouristId,
   getAuthToken, clearSession, logoutUser, ApiError, connectTouristFeed,
 } from '../../lib/api';
-import { TouristUser } from '../../types';
+import { TouristUser, Language } from '../../types';
 
 type Tab = 'map' | 'explore' | 'trips' | 'alerts' | 'profile';
 
@@ -38,6 +38,8 @@ interface Props {
   showLogin: boolean;
   setShowLogin: (show: boolean) => void;
   onLogout: () => void;
+  language: Language;
+  onLanguageChange: (lang: Language) => void;
 }
 
 export default function TouristApp({
@@ -49,7 +51,9 @@ export default function TouristApp({
   setUser,
   showLogin,
   setShowLogin,
-  onLogout
+  onLogout,
+  language,
+  onLanguageChange
 }: Props) {
   const [tab, setTab] = useState<Tab>('map');
   const isAuthenticated = !!user;
@@ -276,6 +280,8 @@ export default function TouristApp({
             onLogin={() => setShowLogin(true)}
             onLogout={onLogout}
             onOpenAuthorityAccess={onReturnToGateway}
+            language={language}
+            onLanguageChange={onLanguageChange}
           />
         )}
       </div>

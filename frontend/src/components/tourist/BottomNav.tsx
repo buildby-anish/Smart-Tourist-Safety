@@ -8,7 +8,7 @@ const LEFT_TABS = [
 
 const RIGHT_TABS = [
   { id: 'trips', label: 'Trips', Icon: Route, protected: true },
-  { id: 'profile', label: 'Profile', Icon: User, protected: true },
+  { id: 'profile', label: 'Profile', Icon: User, protected: false },
 ];
 
 interface Props {

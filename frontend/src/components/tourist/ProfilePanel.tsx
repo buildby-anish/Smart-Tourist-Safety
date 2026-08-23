@@ -5,7 +5,7 @@ import {
   Lock, Wifi, Loader2, Pencil, Check, X as XIcon, Landmark,
 } from 'lucide-react';
 import { getDigitalId, updateTouristProfile, ApiError } from '../../lib/api';
-import { TouristUser } from '../../types';
+import { TouristUser, Language } from '../../types';
 
 interface Props {
   darkMode: boolean;
@@ -15,9 +15,21 @@ interface Props {
   onLogin: () => void;
   onLogout: () => void;
   onOpenAuthorityAccess: () => void;
+  language: Language;
+  onLanguageChange: (lang: Language) => void;
 }
 
-export default function ProfilePanel({ darkMode: dm, toggleDark, isAuthenticated, user, onLogin, onLogout, onOpenAuthorityAccess }: Props) {
+export default function ProfilePanel({
+  darkMode: dm,
+  toggleDark,
+  isAuthenticated,
+  user,
+  onLogin,
+  onLogout,
+  onOpenAuthorityAccess,
+  language,
+  onLanguageChange
+}: Props) {
   const [notifs, setNotifs] = useState(true);
   const [locShare, setLocShare] = useState(false);
   const [digitalId, setDigitalId] = useState<string | null>(user?.tourist_id || null);
@@ -168,7 +180,35 @@ export default function ProfilePanel({ darkMode: dm, toggleDark, isAuthenticated
           <div className="rounded-xl overflow-hidden" style={{ background: card, border: `1px solid ${border}`, boxShadow: shadow }}>
             <ToggleRow icon={<Moon size={16} />} label="Dark mode" value={dm} onChange={toggleDark} text={text} subtle={subtle} border={border} />
             <ToggleRow icon={<Bell size={16} />} label="Safety notifications" value={notifs} onChange={() => setNotifs((v) => !v)} text={text} subtle={subtle} border={border} />
-            <ToggleRow icon={<Wifi size={16} />} label="Share location with contacts" value={locShare} onChange={() => setLocShare((v) => !v)} text={text} subtle={subtle} border={border} last />
+            <ToggleRow icon={<Wifi size={16} />} label="Share location with contacts" value={locShare} onChange={() => setLocShare((v) => !v)} text={text} subtle={subtle} border={border} />
+            
+            {/* Language Selection Row */}
+            <div className="flex items-center gap-3 px-4 py-3" style={{ borderTop: `1px solid ${border}` }}>
+              <span style={{ color: subtle }}><Globe size={16} /></span>
+              <span className="flex-1 text-sm" style={{ color: text }}>Language / भाषा</span>
+              <div className="flex items-center bg-slate-100 dark:bg-slate-800/80 border border-slate-200 dark:border-slate-700/80 rounded-lg p-0.5 gap-0.5">
+                <button
+                  onClick={() => onLanguageChange('en')}
+                  className={`px-2.5 py-1 text-[11px] font-extrabold rounded-md transition-all cursor-pointer ${
+                    language === 'en'
+                      ? dm ? 'bg-slate-750 text-white shadow-sm' : 'bg-white text-slate-800 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+                  }`}
+                >
+                  EN
+                </button>
+                <button
+                  onClick={() => onLanguageChange('hi')}
+                  className={`px-2.5 py-1 text-[11px] font-extrabold rounded-md transition-all cursor-pointer ${
+                    language === 'hi'
+                      ? dm ? 'bg-slate-750 text-white shadow-sm' : 'bg-white text-slate-800 shadow-sm'
+                      : 'text-slate-500 hover:text-slate-700 dark:text-slate-400 dark:hover:text-slate-200'
+                  }`}
+                >
+                  हिंदी
+                </button>
+              </div>
+            </div>
           </div>
         </section>
 
