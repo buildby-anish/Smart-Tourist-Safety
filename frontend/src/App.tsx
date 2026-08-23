@@ -614,7 +614,7 @@ export default function App() {
   const activeSosCount = incidents.filter((i) => i.status !== 'Resolved').length;
 
   return (
-    <div className={`min-h-screen ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-[#F4F6F9] text-slate-900'} flex flex-col font-sans transition-colors duration-200`}>
+    <div className={`h-screen w-screen overflow-hidden ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-[#F4F6F9] text-slate-900'} flex flex-col font-sans transition-colors duration-200`}>
       {!splashGone && (
         <div
           className={`fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#0C2340] transition-opacity duration-300 ${

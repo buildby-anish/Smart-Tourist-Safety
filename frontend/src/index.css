@@ -1,5 +1,14 @@
 @import "tailwindcss";
 
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+}
+
 @custom-variant dark (&:where(.dark, .dark *));
 
 @theme {

@@ -226,12 +226,27 @@ export default function TouristApp({
 
       {/* ── Top chrome: search + quick actions (mobile & desktop) ── */}
       {tab === 'map' && (
-        <div className="absolute top-0 left-0 right-0 z-20 px-4 pt-4 pb-3 space-y-2.5 pointer-events-none" style={{ background: 'linear-gradient(to bottom, rgba(0,0,0,0.35), transparent)' }}>
-          <div className="max-w-xl mx-auto md:mx-0 md:max-w-2xl pointer-events-auto pr-14">
-            <SearchBar darkMode={dm} onSelect={handleSearchSelect} />
+        <div
+          className="absolute top-0 left-0 right-0 z-20 px-4 pb-3 space-y-2.5 pointer-events-none"
+          style={{
+            background: 'linear-gradient(to bottom, rgba(0,0,0,0.35), transparent)',
+            paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)'
+          }}
+        >
+          {/* Controls Row: Search Bar + Quick Actions */}
+          <div className="flex flex-col md:flex-row md:items-center gap-3 w-full md:pr-14">
+            {/* Search Bar Container */}
+            <div className="w-full md:w-96 flex-shrink-0 pointer-events-auto">
+              <SearchBar darkMode={dm} onSelect={handleSearchSelect} />
+            </div>
+            {/* Quick Action Buttons Container */}
+            <div className="w-full md:flex-1 min-w-0 pointer-events-auto">
+              <QuickActions darkMode={dm} active={mapFilter} onChange={setMapFilter} />
+            </div>
           </div>
-          <div className="max-w-xl mx-auto md:mx-0 md:max-w-2xl space-y-2.5 pointer-events-auto">
-            <QuickActions darkMode={dm} active={mapFilter} onChange={setMapFilter} />
+
+          {/* Safety Banner */}
+          <div className="max-w-xl md:max-w-2xl pointer-events-auto">
             <SafetyBanner darkMode={dm} onAlertsTap={() => setTab('alerts')} />
           </div>
         </div>
@@ -251,7 +266,7 @@ export default function TouristApp({
             </div>
 
             {/* Right-side map controls */}
-            <div className="absolute right-4 z-20 flex flex-col gap-2.5 pointer-events-none" style={{ top: 132 }}>
+            <div className="absolute right-4 z-20 flex flex-col gap-2.5 pointer-events-none" style={{ top: 'calc(env(safe-area-inset-top, 0px) + 140px)' }}>
               <div className="pointer-events-auto flex flex-col gap-2.5">
                 <MapControlBtn dm={dm} onClick={() => handleZoom('in')} label="Zoom in"><Plus size={16} /></MapControlBtn>
                 <MapControlBtn dm={dm} onClick={() => handleZoom('out')} label="Zoom out"><Minus size={16} /></MapControlBtn>
