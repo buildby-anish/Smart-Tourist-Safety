@@ -349,7 +349,11 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
 
   // Extract user location from markers
   const userMarker = markers.find((m) => m.id === 'user-location' || m.type === 'user');
-  const userLocation = userMarker ? { lat: userMarker.lat, lng: userMarker.lng } : null;
+  const userLat = userMarker?.lat || null;
+  const userLng = userMarker?.lng || null;
+
+  const destLat = selectedPlaceInfo?.lat || null;
+  const destLng = selectedPlaceInfo?.lng || null;
 
   // Directions calculation using OSRM API (completely free and fast)
   useEffect(() => {
@@ -371,7 +375,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     }
 
     const L = (window as any).L;
-    const startLoc = userLocation || center;
+    const startLoc = (userLat && userLng) ? { lat: userLat, lng: userLng } : center;
 
     // Drop/update red location pin for selected destination
     if (destMarkerRef.current) {
@@ -468,7 +472,23 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     };
 
     calculateRoute();
-  }, [selectedPlaceInfo, travelMode, userLocation, leafletLoaded]);
+  }, [destLat, destLng, travelMode, userLat, userLng, leafletLoaded]);
+
+  // Fit bounds to route ONLY once when route calculation updates (avoids resetting user custom zoom during toggles or pans)
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !leafletLoaded || alternativeRoutes.length === 0) return;
+    const L = (window as any).L;
+
+    const startLoc = (userLat && userLng) ? { lat: userLat, lng: userLng } : center;
+    const destLoc = selectedPlaceInfo || center;
+
+    const bounds = L.latLngBounds([
+      [startLoc.lat, startLoc.lng],
+      [destLoc.lat, destLoc.lng]
+    ]);
+    map.fitBounds(bounds, { padding: [55, 55] });
+  }, [alternativeRoutes, leafletLoaded]);
 
   // Draw / Sync Route Polylines
   useEffect(() => {
@@ -517,14 +537,6 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
       }).addTo(map);
 
       routePolylineRef.current = poly;
-
-      // Fit bounds to selected route
-      const startLoc = userLocation || center;
-      const bounds = L.latLngBounds([
-        [startLoc.lat, startLoc.lng],
-        [selectedPlaceInfo?.lat || center.lat, selectedPlaceInfo?.lng || center.lng]
-      ]);
-      map.fitBounds(bounds, { padding: [55, 55] });
     }
   }, [alternativeRoutes, selectedRouteIndex, leafletLoaded]);
 
