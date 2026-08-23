@@ -1,7 +1,11 @@
 import React, { useEffect, useState, useRef } from 'react';
-import { APIProvider, Map, AdvancedMarker, Pin, useMap } from '@vis.gl/react-google-maps';
-import { MapPin, Navigation, Users, ShieldCheck, AlertTriangle, Layers, ExternalLink, ShieldAlert, Shield } from 'lucide-react';
+import {
+  Car, Bike, Footprints, Train, X as XIcon, MapPin, Navigation,
+  Users, ShieldCheck, AlertTriangle, ExternalLink, ShieldAlert, Shield
+} from 'lucide-react';
 import { GeoFenceZone } from '../types';
+
+declare var google: any;
 
 export interface MapClusterMarker {
   id: string;
@@ -12,8 +16,6 @@ export interface MapClusterMarker {
   crowdLevel?: 'extreme' | 'high' | 'medium' | 'low';
   crowdCount?: number;
   type?: 'crowd' | 'user' | 'police' | 'hotel' | 'alert' | 'geofence';
-  /** Optional explicit pin color, used by callers (e.g. the tourist map) that
-   * need a marker palette beyond the crowd/police heuristics below. */
   pinColor?: string;
   glyph?: string;
 }
@@ -30,30 +32,9 @@ interface ActualGoogleMapProps {
   onMarkerClick?: (marker: MapClusterMarker) => void;
   selectedMarkerId?: string;
   mapTypeControl?: boolean;
-  /**
-   * When true, renders edge-to-edge (no rounded corners / border) so the map
-   * can sit as a full-bleed background layer behind floating chrome (search
-   * bar, quick-action chips, SOS button, etc.) — used by the tourist map
-   * screen. Defaults to false to keep every other existing usage unchanged.
-   */
   fullBleed?: boolean;
-  /**
-   * When false, suppresses this component's own built-in overlay chrome
-   * (top info/mode bar, bottom marker-badge strip, "Open Google Maps" link)
-   * so a caller that provides its own floating search/quick-action/legend UI
-   * doesn't end up with two overlapping control layers. Defaults to true so
-   * every other existing usage is unaffected.
-   */
   chrome?: boolean;
-  /**
-   * Bump `trigger` (e.g. from a "Locate me" button) to imperatively pan the
-   * map to `target`. Ignored if unset.
-   */
   recenter?: { trigger: number; target: { lat: number; lng: number } };
-  /**
-   * Bump `ts` (with a new Date.now()-style value) to imperatively zoom the
-   * map in/out by one step. Ignored if unset.
-   */
   zoomAction?: { type: 'in' | 'out'; ts: number };
 }
 
@@ -63,204 +44,171 @@ const API_KEY =
   (globalThis as any).GOOGLE_MAPS_PLATFORM_KEY ||
   '';
 
-const hasValidKey = Boolean(API_KEY) && API_KEY !== 'YOUR_API_KEY';
+const TRAVEL_MODES = [
+  { id: 'drive', label: 'Car', googleMode: 'DRIVING', icon: Car },
+  { id: 'walk', label: 'Walk', googleMode: 'WALKING', icon: Footprints },
+  { id: 'bike', label: 'Bike', googleMode: 'BICYCLING', icon: Bike },
+  { id: 'train', label: 'Transit', googleMode: 'TRANSIT', icon: Train },
+];
 
-/** Imperatively pans the live Google Map when `recenter.trigger` changes. */
-const RecenterHandler: React.FC<{ recenter?: ActualGoogleMapProps['recenter'] }> = ({ recenter }) => {
-  const map = useMap();
-  useEffect(() => {
-    if (!map || !recenter || recenter.trigger <= 0) return;
-    map.panTo(recenter.target);
-    map.setZoom(15);
-  }, [map, recenter?.trigger]);
-  return null;
-};
-
-/** Imperatively zooms the live Google Map when `zoomAction.ts` changes. */
-const ZoomHandler: React.FC<{ zoomAction?: ActualGoogleMapProps['zoomAction'] }> = ({ zoomAction }) => {
-  const map = useMap();
-  useEffect(() => {
-    if (!map || !zoomAction) return;
-    const current = map.getZoom() ?? 14;
-    map.setZoom(zoomAction.type === 'in' ? current + 1 : current - 1);
-  }, [map, zoomAction?.ts]);
-  return null;
-};
-
-const LeafletMap: React.FC<{
-  center: { lat: number; lng: number };
-  zoom: number;
-  markers: MapClusterMarker[];
-  geofenceZones?: GeoFenceZone[];
-  activeZoneId?: string;
-  onMarkerClick?: (marker: MapClusterMarker) => void;
-  selectedMarkerId?: string;
-  recenter?: { trigger: number; target: { lat: number; lng: number } };
-  zoomAction?: { type: 'in' | 'out'; ts: number };
-  darkMode: boolean;
-  mapMode: 'm' | 'k' | 'p';
-}> = ({
-  center,
-  zoom,
-  markers,
-  geofenceZones = [],
-  activeZoneId,
-  onMarkerClick,
-  selectedMarkerId,
-  recenter,
-  zoomAction,
-  darkMode,
-  mapMode
-}) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const mapRef = useRef<any>(null);
-  const tileLayerRef = useRef<any>(null);
-  const markersGroupRef = useRef<any>(null);
-  const geofencesGroupRef = useRef<any>(null);
-
-  useEffect(() => {
-    if (!containerRef.current || !(window as any).L) return;
-    const L = (window as any).L;
-
-    const map = L.map(containerRef.current, {
-      zoomControl: false,
-      attributionControl: false,
-      scrollWheelZoom: true,
-      dragging: true,
-      touchZoom: true,
-    }).setView([center.lat, center.lng], zoom);
-
-    mapRef.current = map;
-
-    markersGroupRef.current = L.layerGroup().addTo(map);
-    geofencesGroupRef.current = L.layerGroup().addTo(map);
-
-    return () => {
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
-    };
-  }, []);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (!map || !(window as any).L) return;
-    const L = (window as any).L;
-
-    if (tileLayerRef.current) {
-      tileLayerRef.current.remove();
-    }
-
-    let tileUrl = '';
-    let attribution = '';
-
-    if (mapMode === 'k') {
-      tileUrl = 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
-      attribution = '&copy; Esri &mdash; Satellite';
-    } else if (mapMode === 'p') {
-      tileUrl = 'https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png';
-      attribution = '&copy; OpenTopoMap';
-    } else {
-      if (darkMode) {
-        tileUrl = 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png';
-        attribution = '&copy; OpenStreetMap &copy; CARTO';
-      } else {
-        tileUrl = 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png';
-        attribution = '&copy; OpenStreetMap';
-      }
-    }
-
-    tileLayerRef.current = L.tileLayer(tileUrl, { attribution, maxZoom: 19 }).addTo(map);
-  }, [mapMode, darkMode]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (map && recenter && recenter.trigger > 0) {
-      map.setView([recenter.target.lat, recenter.target.lng], 15, { animate: true });
-    }
-  }, [recenter?.trigger]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    if (map && zoomAction) {
-      const current = map.getZoom();
-      map.setZoom(zoomAction.type === 'in' ? current + 1 : current - 1, { animate: true });
-    }
-  }, [zoomAction?.ts]);
-
-  useEffect(() => {
-    const map = mapRef.current;
-    const markersGroup = markersGroupRef.current;
-    const geofencesGroup = geofencesGroupRef.current;
-    if (!map || !markersGroup || !geofencesGroup || !(window as any).L) return;
-    const L = (window as any).L;
-
-    markersGroup.clearLayers();
-    geofencesGroup.clearLayers();
-
-    geofenceZones.forEach((z) => {
-      const isActive = activeZoneId === z.id;
-      let color = '#3B82F6';
-      if (z.riskLevel === 'Unsafe') color = '#EF4444';
-      else if (z.riskLevel === 'Caution') color = '#F59E0B';
-      else if (z.riskLevel === 'Safe') color = '#10B981';
-
-      L.circle([z.center.lat, z.center.lng], {
-        color: color,
-        fillColor: color,
-        fillOpacity: isActive ? 0.35 : 0.15,
-        weight: isActive ? 3 : 1.5,
-        radius: z.radiusKm * 1000
-      }).addTo(geofencesGroup);
-    });
-
-    markers.forEach((m) => {
-      let pinColor = m.pinColor || '#3B82F6';
-      if (!m.pinColor) {
-        if (m.crowdLevel === 'extreme' || m.crowdLevel === 'high') pinColor = '#EF4444';
-        else if (m.crowdLevel === 'medium') pinColor = '#F59E0B';
-        else if (m.crowdLevel === 'low') pinColor = '#10B981';
-        if (m.type === 'police') pinColor = '#138808';
-      }
-
-      const isSelected = selectedMarkerId === m.id;
-
-      const icon = L.divIcon({
-        html: `<div style="
-          background-color: ${pinColor};
-          width: 24px;
-          height: 24px;
-          border-radius: 50%;
-          border: 2px solid ${isSelected ? '#FFFFFF' : 'rgba(255,255,255,0.8)'};
-          box-shadow: 0 2px 8px rgba(0,0,0,0.5);
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          color: white;
-          font-weight: 900;
-          font-size: 11px;
-          transform: ${isSelected ? 'scale(1.2)' : 'none'};
-          transition: transform 0.15s;
-        ">${m.glyph || ''}</div>`,
-        className: 'custom-leaflet-marker',
-        iconSize: [24, 24],
-        iconAnchor: [12, 12]
-      });
-
-      const marker = L.marker([m.lat, m.lng], { icon }).addTo(markersGroup);
-      if (onMarkerClick) {
-        marker.on('click', () => onMarkerClick(m));
-      }
-    });
-  }, [markers, geofenceZones, activeZoneId, selectedMarkerId]);
-
-  return <div ref={containerRef} className="w-full h-full z-0" />;
-};
+const darkMapStyle = [
+  {
+    "elementType": "geometry",
+    "stylers": [
+      { "color": "#212121" }
+    ]
+  },
+  {
+    "elementType": "labels.icon",
+    "stylers": [
+      { "visibility": "on" }
+    ]
+  },
+  {
+    "elementType": "labels.text.fill",
+    "stylers": [
+      { "color": "#ffffff" },
+      { "weight": 700 }
+    ]
+  },
+  {
+    "elementType": "labels.text.stroke",
+    "stylers": [
+      { "color": "#212121" },
+      { "weight": 3 }
+    ]
+  },
+  {
+    "featureType": "administrative",
+    "elementType": "geometry",
+    "stylers": [
+      { "color": "#757575" }
+    ]
+  },
+  {
+    "featureType": "administrative.country",
+    "elementType": "labels.text.fill",
+    "stylers": [
+      { "color": "#ffffff" }
+    ]
+  },
+  {
+    "featureType": "administrative.locality",
+    "elementType": "labels.text.fill",
+    "stylers": [
+      { "color": "#ffffff" }
+    ]
+  },
+  {
+    "featureType": "landscape",
+    "elementType": "geometry",
+    "stylers": [
+      { "color": "#282828" }
+    ]
+  },
+  {
+    "featureType": "poi",
+    "elementType": "geometry",
+    "stylers": [
+      { "color": "#333333" }
+    ]
+  },
+  {
+    "featureType": "poi",
+    "elementType": "labels.text.fill",
+    "stylers": [
+      { "color": "#ffffff" }
+    ]
+  },
+  {
+    "featureType": "poi.park",
+    "elementType": "geometry",
+    "stylers": [
+      { "color": "#183018" }
+    ]
+  },
+  {
+    "featureType": "poi.park",
+    "elementType": "labels.text.fill",
+    "stylers": [
+      { "color": "#a5d6a7" }
+    ]
+  },
+  {
+    "featureType": "road",
+    "elementType": "geometry.fill",
+    "stylers": [
+      { "color": "#424242" }
+    ]
+  },
+  {
+    "featureType": "road",
+    "elementType": "labels.text.fill",
+    "stylers": [
+      { "color": "#ffffff" }
+    ]
+  },
+  {
+    "featureType": "road.arterial",
+    "elementType": "geometry.fill",
+    "stylers": [
+      { "color": "#525252" }
+    ]
+  },
+  {
+    "featureType": "road.highway",
+    "elementType": "geometry.fill",
+    "stylers": [
+      { "color": "#616161" }
+    ]
+  },
+  {
+    "featureType": "road.highway.controlled_access",
+    "elementType": "geometry.fill",
+    "stylers": [
+      { "color": "#757575" }
+    ]
+  },
+  {
+    "featureType": "road.local",
+    "elementType": "geometry.fill",
+    "stylers": [
+      { "color": "#383838" }
+    ]
+  },
+  {
+    "featureType": "transit",
+    "elementType": "geometry",
+    "stylers": [
+      { "color": "#2c2c2c" }
+    ]
+  },
+  {
+    "featureType": "transit",
+    "elementType": "labels.text.fill",
+    "stylers": [
+      { "color": "#ffffff" }
+    ]
+  },
+  {
+    "featureType": "water",
+    "elementType": "geometry",
+    "stylers": [
+      { "color": "#121212" }
+    ]
+  },
+  {
+    "featureType": "water",
+    "elementType": "labels.text.fill",
+    "stylers": [
+      { "color": "#ffffff" }
+    ]
+  }
+];
 
 export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
-  center = { lat: 32.2432, lng: 77.1892 }, // Manali default
-  zoom = 12,
+  center = { lat: 18.9220, lng: 72.8347 },
+  zoom = 14,
   markers = [],
   geofenceZones = [],
   activeZoneId,
@@ -275,13 +223,27 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   recenter,
   zoomAction
 }) => {
-  const [activeMarker, setActiveMarker] = useState<MapClusterMarker | null>(null);
-  const [mapMode, setMapMode] = useState<'m' | 'k' | 'p'>('m'); // m: roadmap, k: satellite, p: terrain
-  const [fallbackCenter, setFallbackCenter] = useState(center);
-  const [fallbackZoom, setFallbackZoom] = useState(zoom);
-
-  const [leafletLoaded, setLeafletLoaded] = useState(false);
+  const [map, setMap] = useState<any>(null);
+  const [googleLoaded, setGoogleLoaded] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
+  const [activeMarker, setActiveMarker] = useState<MapClusterMarker | null>(null);
+
+  // Directions routing states
+  const [selectedPlaceInfo, setSelectedPlaceInfo] = useState<{
+    name: string;
+    address: string;
+    lat: number;
+    lng: number;
+    placeId?: string;
+  } | null>(null);
+  const [travelMode, setTravelMode] = useState<string>('DRIVING');
+  const [directionsResult, setDirectionsResult] = useState<any>(null);
+  const [routeInfo, setRouteInfo] = useState<{ distance: string; duration: string } | null>(null);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const googleMarkersRef = useRef<any[]>([]);
+  const googleCirclesRef = useRef<any[]>([]);
+  const directionsRendererRef = useRef<any>(null);
 
   // Track global dark mode changes using MutationObserver
   useEffect(() => {
@@ -292,92 +254,283 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     return () => observer.disconnect();
   }, []);
 
-  // Dynamically load Leaflet if no Google Maps key is present
+  // Dynamically load Google Maps script
   useEffect(() => {
-    if (hasValidKey) return;
-    if ((window as any).L) {
-      setLeafletLoaded(true);
+    const callback = () => setGoogleLoaded(true);
+    if ((window as any).google && (window as any).google.maps) {
+      callback();
       return;
     }
 
-    const link = document.createElement('link');
-    link.rel = 'stylesheet';
-    link.href = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.css';
-    document.head.appendChild(link);
+    const existingScript = document.getElementById('google-maps-script');
+    if (existingScript) {
+      existingScript.addEventListener('load', callback);
+      return;
+    }
 
     const script = document.createElement('script');
-    script.src = 'https://unpkg.com/leaflet@1.9.4/dist/leaflet.js';
+    script.id = 'google-maps-script';
+    script.src = `https://maps.googleapis.com/maps/api/js?${API_KEY ? `key=${API_KEY}` : ''}&libraries=places`;
     script.async = true;
-    script.onload = () => {
-      setLeafletLoaded(true);
-    };
-    document.body.appendChild(script);
+    script.defer = true;
+    script.onload = callback;
+    document.head.appendChild(script);
   }, []);
 
+  // Initialize Map
   useEffect(() => {
-    if (recenter && recenter.trigger > 0) setFallbackCenter(recenter.target);
-  }, [recenter?.trigger]);
+    if (!googleLoaded || !containerRef.current || map) return;
 
+    const mapInstance = new google.maps.Map(containerRef.current, {
+      center: center,
+      zoom: zoom,
+      styles: isDarkMode ? darkMapStyle : [],
+      mapTypeControl: false,
+      zoomControl: false,
+      streetViewControl: false,
+      fullscreenControl: false,
+      gestureHandling: 'greedy',
+    });
+
+    // Add map click listener to select real-life places or coordinate pins
+    mapInstance.addListener('click', (event: any) => {
+      if ('placeId' in event && event.placeId) {
+        event.stop(); // Stop default info popup
+        const service = new google.maps.places.PlacesService(mapInstance);
+        service.getDetails({ placeId: event.placeId }, (place: any, status: any) => {
+          if (status === google.maps.places.PlacesServiceStatus.OK && place && place.geometry?.location) {
+            setSelectedPlaceInfo({
+              name: place.name || 'Selected Destination',
+              address: place.formatted_address || 'Real-life Place',
+              lat: place.geometry.location.lat(),
+              lng: place.geometry.location.lng(),
+              placeId: event.placeId,
+            });
+          }
+        });
+      } else if (event.latLng) {
+        const lat = event.latLng.lat();
+        const lng = event.latLng.lng();
+        const geocoder = new google.maps.Geocoder();
+        geocoder.geocode({ location: { lat, lng } }, (results: any, status: any) => {
+          if (status === google.maps.GeocoderStatus.OK && results && results[0]) {
+            setSelectedPlaceInfo({
+              name: 'Dropped Pin',
+              address: results[0].formatted_address,
+              lat,
+              lng,
+            });
+          } else {
+            setSelectedPlaceInfo({
+              name: 'Dropped Pin',
+              address: `Coordinate: ${lat.toFixed(5)}, ${lng.toFixed(5)}`,
+              lat,
+              lng,
+            });
+          }
+        });
+      }
+    });
+
+    setMap(mapInstance);
+  }, [googleLoaded]);
+
+  // Apply dark mode styling updates dynamically
   useEffect(() => {
-    if (!zoomAction) return;
-    setFallbackZoom((z) => Math.max(3, Math.min(20, zoomAction.type === 'in' ? z + 1 : z - 1)));
-  }, [zoomAction?.ts]);
+    if (map) {
+      map.setOptions({ styles: isDarkMode ? darkMapStyle : [] });
+    }
+  }, [map, isDarkMode]);
 
+  // Recenter Handler
+  useEffect(() => {
+    if (map && recenter && recenter.trigger > 0) {
+      map.panTo(recenter.target);
+      map.setZoom(15);
+    }
+  }, [map, recenter?.trigger]);
+
+  // Zoom Handler
+  useEffect(() => {
+    if (map && zoomAction) {
+      const current = map.getZoom() || 14;
+      map.setZoom(zoomAction.type === 'in' ? current + 1 : current - 1);
+    }
+  }, [map, zoomAction?.ts]);
+
+  // Render/Sync Markers
+  useEffect(() => {
+    if (!map) return;
+
+    googleMarkersRef.current.forEach((m) => m.setMap(null));
+    googleMarkersRef.current = [];
+
+    markers.forEach((m) => {
+      let pinColor = m.pinColor || '#3B82F6';
+      if (!m.pinColor) {
+        if (m.crowdLevel === 'extreme' || m.crowdLevel === 'high') pinColor = '#EF4444';
+        else if (m.crowdLevel === 'medium') pinColor = '#F59E0B';
+        else if (m.crowdLevel === 'low') pinColor = '#10B981';
+        if (m.type === 'police') pinColor = '#138808';
+      }
+
+      const isSelected = selectedMarkerId === m.id || activeMarker?.id === m.id;
+
+      const marker = new google.maps.Marker({
+        position: { lat: m.lat, lng: m.lng },
+        map: map,
+        title: m.title,
+        icon: {
+          path: google.maps.SymbolPath.CIRCLE,
+          fillColor: pinColor,
+          fillOpacity: 1.0,
+          strokeColor: '#FFFFFF',
+          strokeWeight: isSelected ? 3.5 : 1.5,
+          scale: isSelected ? 12 : 8,
+        },
+      });
+
+      marker.addListener('click', () => {
+        handleSelectMarker(m);
+      });
+
+      googleMarkersRef.current.push(marker);
+    });
+  }, [map, markers, selectedMarkerId, activeMarker]);
+
+  // Render/Sync Geofences
+  useEffect(() => {
+    if (!map) return;
+
+    googleCirclesRef.current.forEach((c) => c.setMap(null));
+    googleCirclesRef.current = [];
+
+    geofenceZones.forEach((z) => {
+      const isActive = activeZoneId === z.id;
+      let color = '#3B82F6';
+      if (z.riskLevel === 'Unsafe') color = '#EF4444';
+      else if (z.riskLevel === 'Caution') color = '#F59E0B';
+      else if (z.riskLevel === 'Safe') color = '#10B981';
+
+      const circle = new google.maps.Circle({
+        strokeColor: color,
+        strokeOpacity: isActive ? 0.8 : 0.4,
+        strokeWeight: isActive ? 3 : 1.5,
+        fillColor: color,
+        fillOpacity: isActive ? 0.35 : 0.15,
+        map: map,
+        center: { lat: z.center.lat, lng: z.center.lng },
+        radius: z.radiusKm * 1000,
+      });
+
+      googleCirclesRef.current.push(circle);
+    });
+  }, [map, geofenceZones, activeZoneId]);
+
+  // Helper to handle marker select
   const handleSelectMarker = (m: MapClusterMarker) => {
     setActiveMarker(m);
     if (onMarkerClick) onMarkerClick(m);
+
+    if (m.id !== 'user-location') {
+      setSelectedPlaceInfo({
+        name: m.title,
+        address: m.subtitle || 'Tourist Point of Interest',
+        lat: m.lat,
+        lng: m.lng,
+      });
+    }
+  };
+
+  // Extract user location from markers
+  const userMarker = markers.find((m) => m.id === 'user-location' || m.type === 'user');
+  const userLocation = userMarker ? { lat: userMarker.lat, lng: userMarker.lng } : null;
+
+  // Directions calculation: Find the shortest route among alternatives
+  useEffect(() => {
+    if (!map || !selectedPlaceInfo) {
+      setDirectionsResult(null);
+      setRouteInfo(null);
+      return;
+    }
+
+    const directionsService = new google.maps.DirectionsService();
+    const startLoc = userLocation || center;
+
+    directionsService.route(
+      {
+        origin: startLoc,
+        destination: { lat: selectedPlaceInfo.lat, lng: selectedPlaceInfo.lng },
+        travelMode: travelMode as any,
+        provideRouteAlternatives: true,
+      },
+      (result: any, status: any) => {
+        if (status === google.maps.DirectionsStatus.OK && result) {
+          let shortestRoute = result.routes[0];
+          let shortestDistance = Infinity;
+          result.routes.forEach((route: any) => {
+            let distVal = 0;
+            route.legs.forEach((leg: any) => {
+              distVal += leg.distance?.value || 0;
+            });
+            if (distVal < shortestDistance) {
+              shortestDistance = distVal;
+              shortestRoute = route;
+            }
+          });
+
+          setDirectionsResult(result);
+          const leg = shortestRoute.legs[0];
+          if (leg) {
+            setRouteInfo({
+              distance: leg.distance?.text || '',
+              duration: leg.duration?.text || '',
+            });
+          }
+        } else {
+          setDirectionsResult(null);
+          setRouteInfo(null);
+        }
+      }
+    );
+  }, [map, selectedPlaceInfo, travelMode, userLocation]);
+
+  // Render directions polyline
+  useEffect(() => {
+    if (!map) return;
+
+    if (!directionsRendererRef.current) {
+      directionsRendererRef.current = new google.maps.DirectionsRenderer({
+        map: map,
+        suppressMarkers: false,
+        polylineOptions: {
+          strokeColor: '#FF9933', // Saffron / Safety Orange
+          strokeOpacity: 0.85,
+          strokeWeight: 6,
+        },
+      });
+    }
+
+    directionsRendererRef.current.setDirections(directionsResult);
+  }, [map, directionsResult]);
+
+  const handleCloseDirections = () => {
+    setSelectedPlaceInfo(null);
+    setDirectionsResult(null);
+    setRouteInfo(null);
+    if (directionsRendererRef.current) {
+      directionsRendererRef.current.setDirections({ routes: [] });
+    }
   };
 
   const wrapperClass = fullBleed
     ? 'relative w-full h-full overflow-hidden'
     : 'relative w-full rounded-2xl overflow-hidden border border-slate-300 shadow-sm';
 
-  // If valid API key is supplied, use @vis.gl/react-google-maps
-  if (hasValidKey) {
+  if (!googleLoaded) {
     return (
       <div className={wrapperClass} style={fullBleed ? undefined : { height }}>
-        <APIProvider apiKey={API_KEY} version="weekly">
-          <Map
-            defaultCenter={center}
-            defaultZoom={zoom}
-            mapId="DEMO_MAP_ID"
-            colorScheme={isDarkMode ? 'DARK' : 'LIGHT'}
-            gestureHandling="greedy"
-            internalUsageAttributionIds={['gmp_mcp_codeassist_v1_aistudio']}
-            style={{ width: '100%', height: '100%' }}
-          >
-            <RecenterHandler recenter={recenter} />
-            <ZoomHandler zoomAction={zoomAction} />
-            {markers.map((m) => {
-              let pinBg = m.pinColor || '#3B82F6';
-              if (!m.pinColor) {
-                if (m.crowdLevel === 'extreme' || m.crowdLevel === 'high') pinBg = '#EF4444';
-                else if (m.crowdLevel === 'medium') pinBg = '#F59E0B';
-                else if (m.crowdLevel === 'low') pinBg = '#10B981';
-                if (m.type === 'police') pinBg = '#138808';
-              }
-
-              return (
-                <AdvancedMarker
-                  key={m.id}
-                  position={{ lat: m.lat, lng: m.lng }}
-                  onClick={() => handleSelectMarker(m)}
-                >
-                  <Pin background={pinBg} glyphColor="#FFFFFF" glyph={m.glyph} />
-                </AdvancedMarker>
-              );
-            })}
-          </Map>
-        </APIProvider>
-      </div>
-    );
-  }
-
-  // Loading state if Leaflet resources are not yet loaded
-  if (!leafletLoaded) {
-    return (
-      <div className={wrapperClass} style={fullBleed ? undefined : { height }}>
-        <div className="w-full h-full flex items-center justify-center bg-slate-900 text-slate-400 text-sm font-medium">
+        <div className={`w-full h-full flex items-center justify-center ${isDarkMode ? 'bg-[#1e1e1e] text-slate-400' : 'bg-white text-slate-500'} text-sm font-medium`}>
           Loading safety map...
         </div>
       </div>
@@ -386,64 +539,21 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
 
   return (
     <div className={wrapperClass} style={fullBleed ? undefined : { height }}>
-      
-      {/* Interactive CDN-loaded Leaflet Map Layer */}
-      <LeafletMap
-        center={fallbackCenter}
-        zoom={fallbackZoom}
-        markers={markers}
-        geofenceZones={geofenceZones}
-        activeZoneId={activeZoneId}
-        onMarkerClick={handleSelectMarker}
-        selectedMarkerId={selectedMarkerId || activeMarker?.id}
-        recenter={recenter}
-        zoomAction={zoomAction}
-        darkMode={isDarkMode}
-        mapMode={mapMode}
-      />
+      <div ref={containerRef} className="w-full h-full z-0" />
 
       {/* Map Control Bar Top */}
       {chrome && (
-      <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between pointer-events-none">
-        <div className="pointer-events-auto flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-700 shadow-md text-white text-xs font-bold">
-          <MapPin className="w-3.5 h-3.5 text-red-500 animate-pulse" />
-          <span className="truncate max-w-[180px] sm:max-w-[280px]">
-            {destination ? `${origin || 'My Location'} ➔ ${destination}` : 'Live GIS View'}
-          </span>
-        </div>
-
-        {mapTypeControl && (
-          <div className="pointer-events-auto flex items-center bg-slate-900/90 backdrop-blur-md p-1 rounded-xl border border-slate-700 shadow-md">
-            <button
-              onClick={() => setMapMode('m')}
-              className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer ${
-                mapMode === 'm' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              Map
-            </button>
-            <button
-              onClick={() => setMapMode('k')}
-              className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer ${
-                mapMode === 'k' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              Satellite
-            </button>
-            <button
-              onClick={() => setMapMode('p')}
-              className={`px-2 py-1 text-[10px] font-black rounded-lg transition cursor-pointer ${
-                mapMode === 'p' ? 'bg-blue-600 text-white' : 'text-slate-300 hover:text-white'
-              }`}
-            >
-              Terrain
-            </button>
+        <div className="absolute top-3 left-3 right-3 z-10 flex items-center justify-between pointer-events-none">
+          <div className="pointer-events-auto flex items-center gap-1.5 bg-slate-900/90 backdrop-blur-md px-3 py-1.5 rounded-xl border border-slate-700 shadow-md text-white text-xs font-bold">
+            <MapPin className="w-3.5 h-3.5 text-red-500 animate-pulse" />
+            <span className="truncate max-w-[180px] sm:max-w-[280px]">
+              {destination ? `${origin || 'My Location'} ➔ ${destination}` : 'Live GIS View'}
+            </span>
           </div>
-        )}
-      </div>
+        </div>
       )}
 
-      {/* Interactive People Clusters Floating Overlay on the Map */}
+      {/* Interactive People Clusters Floating Overlay */}
       {chrome && (markers.length > 0 || geofenceZones.length > 0) && (
         <div className="absolute bottom-3 left-3 right-3 z-10 pointer-events-auto flex gap-2 overflow-x-auto pb-1 max-w-full scrollbar-thin">
           {geofenceZones.map((z) => {
@@ -511,17 +621,98 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
 
       {/* External Google Maps Button */}
       {chrome && (
-      <a
-        href={`https://www.google.com/maps/search/?api=1&query=${fallbackCenter.lat},${fallbackCenter.lng}`}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="absolute top-3 right-3 z-20 hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/90 hover:bg-white text-slate-900 font-extrabold text-[11px] shadow border border-slate-300 transition"
-      >
-        <span>Open Google Maps</span>
-        <ExternalLink className="w-3.5 h-3.5 text-blue-600" />
-      </a>
+        <a
+          href={`https://www.google.com/maps/search/?api=1&query=${center.lat},${center.lng}`}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="absolute top-3 right-3 z-20 hidden sm:flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-white/90 hover:bg-white text-slate-900 font-extrabold text-[11px] shadow border border-slate-300 transition"
+        >
+          <span>Open Google Maps</span>
+          <ExternalLink className="w-3.5 h-3.5 text-blue-600" />
+        </a>
       )}
 
+      {/* Shortest Directions Floating Panel Overlay */}
+      {selectedPlaceInfo && (
+        <div
+          className="absolute left-4 right-4 z-30 p-4 rounded-2xl border backdrop-blur-md shadow-2xl flex flex-col gap-3 max-w-sm sm:max-w-md mx-auto transition-all animate-sheet-up"
+          style={{
+            bottom: 84,
+            background: isDarkMode ? '#1e1e1e' : '#ffffff',
+            borderColor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+            boxShadow: isDarkMode ? '0 10px 30px rgba(0,0,0,0.5)' : '0 10px 30px rgba(0,0,0,0.08)',
+            color: isDarkMode ? '#ffffff' : '#0c2340',
+          }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0">
+              <span className="text-[10px] font-black uppercase tracking-wider text-teal-600 dark:text-teal-400">
+                Directions / मार्ग
+              </span>
+              <h4 className="text-sm font-bold truncate mt-0.5">
+                {selectedPlaceInfo.name}
+              </h4>
+              <p className="text-xs truncate opacity-60 mt-0.5">
+                {selectedPlaceInfo.address}
+              </p>
+            </div>
+            <button
+              onClick={handleCloseDirections}
+              className="w-7 h-7 rounded-full flex items-center justify-center transition-colors cursor-pointer"
+              style={{
+                background: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+                color: isDarkMode ? '#ffffff' : '#0c2340',
+              }}
+            >
+              <XIcon size={14} />
+            </button>
+          </div>
+
+          <div className="grid grid-cols-4 gap-1.5 p-1 rounded-xl bg-slate-100 dark:bg-slate-800/80">
+            {TRAVEL_MODES.map((mode) => {
+              const active = travelMode === mode.googleMode;
+              const Icon = mode.icon;
+              return (
+                <button
+                  key={mode.id}
+                  onClick={() => setTravelMode(mode.googleMode)}
+                  className={`py-2 rounded-lg flex flex-col items-center gap-1 transition-all cursor-pointer ${
+                    active
+                      ? 'bg-orange-500 text-white shadow-sm font-bold'
+                      : 'text-slate-500 dark:text-slate-400 hover:bg-slate-200/50 dark:hover:bg-slate-700/50'
+                  }`}
+                >
+                  <Icon size={16} />
+                  <span className="text-[10px] uppercase font-bold tracking-wide">
+                    {mode.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {routeInfo ? (
+            <div className="flex items-center justify-between border-t border-slate-150 dark:border-slate-800 pt-3 mt-1">
+              <div className="flex items-center gap-2">
+                <Navigation className="w-4 h-4 text-orange-500 rotate-45" />
+                <span className="text-xs font-semibold">Shortest Route</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-xs font-bold bg-orange-100 dark:bg-orange-950/60 text-orange-600 dark:text-orange-400 px-2.5 py-1 rounded-lg">
+                  {routeInfo.distance}
+                </span>
+                <span className="text-sm font-black text-slate-800 dark:text-slate-200">
+                  {routeInfo.duration}
+                </span>
+              </div>
+            </div>
+          ) : (
+            <div className="text-center text-xs opacity-50 py-2 border-t border-slate-150 dark:border-slate-800">
+              No route found for this mode
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 };

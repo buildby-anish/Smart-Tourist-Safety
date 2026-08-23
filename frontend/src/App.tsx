@@ -617,7 +617,9 @@ export default function App() {
     <div className={`h-full w-full overflow-hidden ${darkMode ? 'bg-slate-950 text-slate-100' : 'bg-[#F4F6F9] text-slate-900'} flex flex-col font-sans transition-colors duration-200`}>
       {!splashGone && (
         <div
-          className={`fixed inset-0 z-[100] flex flex-col items-center justify-center bg-[#0C2340] transition-opacity duration-300 ${
+          className={`fixed inset-0 z-[100] flex flex-col items-center justify-center ${
+            darkMode ? 'bg-[#1e1e1e]' : 'bg-white'
+          } transition-opacity duration-300 ${
             booting ? 'opacity-100' : 'opacity-0 pointer-events-none'
           }`}
           aria-hidden={!booting}
