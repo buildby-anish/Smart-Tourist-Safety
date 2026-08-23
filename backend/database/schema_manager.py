@@ -74,13 +74,21 @@ def add_column(cur, table_name: str, col_name: str, col_config: dict):
     logger.info(f"[DATABASE] Added missing column {col_name} successfully.")
 
 def unique_index_exists(cur, table_name: str, col_name: str) -> bool:
-    # A unique constraint or index is represented in pg_indexes
+    # A unique constraint or index is represented in pg_indexes.
+    # psycopg2 parses this query string for %s/%%-style placeholders, so
+    # EVERY literal '%' (including inside the LIKE patterns themselves)
+    # must be escaped as '%%' or psycopg2 miscounts them against the
+    # params tuple and raises "IndexError: tuple index out of range" —
+    # 'CREATE UNIQUE INDEX%' below previously had an unescaped literal %,
+    # which crashed schema_manager's boot-time migration pass silently
+    # (no exception detail beyond "tuple index out of range") the moment
+    # any table with a unique column was checked.
     cur.execute("""
         SELECT EXISTS (
             SELECT 1 FROM pg_indexes 
             WHERE schemaname = 'public' 
               AND tablename = %s 
-              AND indexdef LIKE 'CREATE UNIQUE INDEX%' 
+              AND indexdef LIKE 'CREATE UNIQUE INDEX%%' 
               AND indexdef LIKE '%%(' || %s || ')%%'
         );
     """, (table_name, col_name))
