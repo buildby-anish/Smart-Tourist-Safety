@@ -236,7 +236,7 @@ export default function TouristApp({
           {/* Controls Row: Search Bar + Quick Actions */}
           <div className="flex flex-col md:flex-row md:items-center gap-3 w-full md:pr-14">
             {/* Search Bar Container */}
-            <div className="w-full md:w-96 flex-shrink-0 pointer-events-auto">
+            <div className="w-full md:w-96 flex-shrink-0 pointer-events-auto pr-14 md:pr-0">
               <SearchBar darkMode={dm} onSelect={handleSearchSelect} />
             </div>
             {/* Quick Action Buttons Container */}
@@ -265,14 +265,18 @@ export default function TouristApp({
               />
             </div>
 
-            {/* Right-side map controls */}
+            {/* Right-side zoom controls */}
             <div className="absolute right-4 z-20 flex flex-col gap-2.5 pointer-events-none" style={{ top: 'calc(env(safe-area-inset-top, 0px) + 140px)' }}>
               <div className="pointer-events-auto flex flex-col gap-2.5">
                 <MapControlBtn dm={dm} onClick={() => handleZoom('in')} label="Zoom in"><Plus size={16} /></MapControlBtn>
                 <MapControlBtn dm={dm} onClick={() => handleZoom('out')} label="Zoom out"><Minus size={16} /></MapControlBtn>
-                <MapControlBtn dm={dm} onClick={handleLocateMe} label="Locate me"><Navigation size={15} /></MapControlBtn>
               </div>
-              <div className="pointer-events-auto">
+            </div>
+
+            {/* Bottom-right controls: Navigation (Locate Me) + Legend */}
+            <div className="absolute right-4 z-20 flex flex-col gap-2.5 pointer-events-none" style={{ bottom: 84 }}>
+              <div className="pointer-events-auto flex flex-col gap-2.5">
+                <MapControlBtn dm={dm} onClick={handleLocateMe} label="Locate me"><Navigation size={15} /></MapControlBtn>
                 <MapLegend darkMode={dm} />
               </div>
             </div>

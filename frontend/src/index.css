@@ -152,9 +152,5 @@ button, a, input, [role="button"] {
   -webkit-tap-highlight-color: transparent;
 }
 
-@media (max-width: 767px) {
-  button, a[role="button"] {
-    min-height: 40px;
-  }
-}
+
 
