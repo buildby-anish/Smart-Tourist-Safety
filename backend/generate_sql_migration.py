@@ -79,9 +79,38 @@ def emit_rls(table_name: str) -> str:
     )
 
 
+def emit_is_authority_function() -> str:
+    return (
+        "-- SECURITY DEFINER helper for every \"is the current user an\n"
+        "-- authority?\" RLS check. MUST be created before the policies below,\n"
+        "-- several of which call it by name. A raw\n"
+        "-- 'EXISTS (SELECT 1 FROM public.authorities ...)' subquery inlined\n"
+        "-- directly into authorities' own SELECT policy (and into every other\n"
+        "-- table's \"OR is an authority\" checks) re-triggers RLS on\n"
+        "-- authorities every time it runs, causing \"infinite recursion\n"
+        "-- detected in policy for relation \\\"authorities\\\"\". A SECURITY\n"
+        "-- DEFINER function evaluates with the function owner's privileges\n"
+        "-- instead of the calling role's, so it doesn't re-invoke that policy.\n"
+        "CREATE OR REPLACE FUNCTION public.is_authority(uid uuid)\n"
+        "RETURNS boolean\n"
+        "LANGUAGE sql\n"
+        "SECURITY DEFINER\n"
+        "SET search_path = public\n"
+        "STABLE\n"
+        "AS $$\n"
+        "    SELECT EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = uid);\n"
+        "$$;\n\n"
+    )
+
+
 def emit_policies(table_name: str, policies: list[dict]) -> str:
     out = []
     for p in policies:
+        # DROP POLICY IF EXISTS first so re-running this file against an
+        # already-migrated database replaces a stale/broken policy
+        # definition (e.g. the infinite-recursion fix below) instead of
+        # silently no-opping because a same-named policy already exists.
+        out.append(f"DROP POLICY IF EXISTS {p['name']} ON public.{table_name};\n")
         stmt = f"CREATE POLICY {p['name']} ON public.{table_name} FOR {p['cmd']} TO authenticated"
         if p.get("using"):
             stmt += f"\n    USING ({p['using']})"
@@ -173,6 +202,7 @@ def generate() -> str:
     for name in TABLES:
         out.append(emit_rls(name))
     out.append("\n")
+    out.append(emit_is_authority_function())
     for name, policies in POLICIES.items():
         out.append(emit_policies(name, policies))
     out.append("\n")

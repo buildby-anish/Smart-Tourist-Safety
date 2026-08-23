@@ -185,18 +185,55 @@ def policy_exists(cur, table_name: str, policy_name: str) -> bool:
     """, (table_name, policy_name))
     return cur.fetchone()[0]
 
+def ensure_is_authority_function(cur):
+    """
+    SECURITY DEFINER helper used by every "is the current user an
+    authority?" RLS check (see database/rls_policies.py's _IS_AUTHORITY).
+    Must be created/refreshed *before* Pass 7 recreates policies, since
+    those policies reference it by name.
+
+    Why this exists: a policy that queries public.authorities directly
+    inside its own USING/CHECK clause re-triggers RLS on authorities every
+    time it runs. On authorities' own SELECT policy that's direct
+    self-recursion; on every other table's "OR is an authority" checks it's
+    the same recursion one level removed. A SECURITY DEFINER function
+    evaluates with the function owner's privileges instead of the calling
+    role's, so it doesn't re-invoke the authorities SELECT policy at all.
+    """
+    logger.info("[DATABASE] Ensuring public.is_authority() helper function...")
+    cur.execute("""
+        CREATE OR REPLACE FUNCTION public.is_authority(uid uuid)
+        RETURNS boolean
+        LANGUAGE sql
+        SECURITY DEFINER
+        SET search_path = public
+        STABLE
+        AS $$
+            SELECT EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = uid);
+        $$;
+    """)
+    logger.info("[DATABASE] public.is_authority() verified/created.")
+
 def create_policy(cur, table_name: str, policy: dict):
     """
-    Creates one RLS policy. See database/rls_policies.py for why these
-    matter: RLS enabled with zero policies denies all access, even for a
-    role with GRANTed table privileges.
+    Creates one RLS policy, dropping any existing policy of the same name
+    first so this call is idempotent AND self-healing: if a policy's
+    definition in database/rls_policies.py changes (e.g. the infinite-
+    recursion fix that replaced a raw authorities subquery with
+    public.is_authority()), the next backend restart replaces the
+    already-deployed broken policy instead of silently leaving it in place
+    forever because a same-named policy already technically "exists". See
+    database/rls_policies.py for why these matter at all: RLS enabled with
+    zero policies denies all access, even for a role with GRANTed table
+    privileges.
     """
     name = policy["name"]
     cmd = policy["cmd"]
     using_expr = policy.get("using")
     check_expr = policy.get("check")
 
-    logger.info(f"[DATABASE] Creating RLS policy {name} ({cmd}) on {table_name}...")
+    logger.info(f"[DATABASE] Creating/refreshing RLS policy {name} ({cmd}) on {table_name}...")
+    cur.execute(f"DROP POLICY IF EXISTS {name} ON public.{table_name};")
     query = f"CREATE POLICY {name} ON public.{table_name} FOR {cmd} TO authenticated"
     if using_expr:
         query += f" USING ({using_expr})"
@@ -324,10 +361,12 @@ def run_database_schema_check():
             # 7. Pass 6: RLS policies. Without this pass, RLS-enabled tables
             # (Pass 1 above) with zero policies deny all access to the
             # `authenticated` role — see database/rls_policies.py.
+            # is_authority() must exist before any policy referencing it is
+            # (re)created below.
+            ensure_is_authority_function(cur)
             for table_name, policies in POLICIES.items():
                 for policy in policies:
-                    if not policy_exists(cur, table_name, policy["name"]):
-                        create_policy(cur, table_name, policy)
+                    create_policy(cur, table_name, policy)
 
             # 8. Pass 7: triggers
             ensure_locations_geom_trigger(cur)

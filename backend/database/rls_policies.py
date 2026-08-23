@@ -21,7 +21,18 @@
 # backend sets to `auth_user_id` — the same value stored in
 # tourist_profiles.user_id / authorities.auth_user_id.
 
-_IS_AUTHORITY = "EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid())"
+# NOTE: this used to be a raw
+# "EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid())"
+# subquery. Because it's also used *on the authorities table's own SELECT
+# policy* (below), that raw form caused Postgres to re-evaluate the
+# authorities SELECT policy every time it checked whether the row was
+# visible — infinite recursion ("infinite recursion detected in policy for
+# relation \"authorities\""). public.is_authority() (created in
+# schema_manager.py as a SECURITY DEFINER function) does the same check but
+# runs with the function owner's privileges, so it doesn't re-trigger RLS on
+# authorities. Every policy below must go through this function rather than
+# querying public.authorities directly.
+_IS_AUTHORITY = "public.is_authority(auth.uid())"
 _OWN_TOURIST_PROFILE_ID = "(SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid())"
 
 POLICIES: dict[str, list[dict]] = {
