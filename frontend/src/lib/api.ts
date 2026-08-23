@@ -121,12 +121,19 @@ async function apiRequest<T = any>(
 export async function registerUser(
   username: string,
   password: string,
-  userType: "tourist" | "authority"
+  userType: "tourist" | "authority",
+  extra?: { fullName?: string; phoneNumber?: string }
 ): Promise<any> {
   return apiRequest("/auth/register", {
     method: "POST",
     auth: false,
-    body: { username, password, user_type: userType },
+    body: {
+      username,
+      password,
+      user_type: userType,
+      full_name: extra?.fullName,
+      phone_number: extra?.phoneNumber,
+    },
   });
 }
 
@@ -454,7 +461,15 @@ export async function registerAndLoginTourist(details: {
   const primaryIdentifier = details.email || details.phone || "guest";
   const { username, password } = deriveTouristCredentials(primaryIdentifier);
   try {
-    await registerUser(username, password, "tourist");
+    // full_name/phone_number are sent as part of account creation itself
+    // (not a follow-up PATCH) so they're set atomically with the account —
+    // a separate PATCH after login is a second network call that can fail,
+    // race, or simply not fire, silently leaving full_name defaulted to
+    // the account's username/email server-side.
+    await registerUser(username, password, "tourist", {
+      fullName: details.fullName,
+      phoneNumber: details.phone,
+    });
   } catch (err: any) {
     // If the derived account already exists (e.g. re-registering the same
     // identifier), fall through to login instead of failing the whole flow.
@@ -474,18 +489,15 @@ export async function registerAndLoginTourist(details: {
 
   if (!loginResp.tourist_profile_id) return null;
 
-  const updatePayload: Record<string, any> = {
-    full_name: details.fullName,
-  };
-  if (details.phone) updatePayload.phone_number = details.phone;
-  if (details.email) updatePayload.email = details.email;
   if (details.emergencyContact) {
-    updatePayload.emergency_contacts = [{ name: null, relation: null, phone: details.emergencyContact }];
+    const updated = await updateTouristProfile(loginResp.tourist_profile_id, {
+      emergency_contacts: [{ name: null, relation: null, phone: details.emergencyContact }],
+    });
+    return { token: loginResp.access_token, tourist: updated };
   }
 
-  const updated = await updateTouristProfile(loginResp.tourist_profile_id, updatePayload);
-
-  return { token: loginResp.access_token, tourist: updated };
+  const tourist = await getTouristProfile(loginResp.tourist_profile_id);
+  return { token: loginResp.access_token, tourist };
 }
 
 /**

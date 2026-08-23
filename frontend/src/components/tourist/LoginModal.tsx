@@ -1,7 +1,7 @@
 import { useState, useRef, KeyboardEvent, useEffect } from 'react';
 import {
   X, ChevronRight, AlertCircle, CheckCircle2,
-  Loader2, ArrowLeft, WifiOff, Shield, User as UserIcon, Lock,
+  Loader2, ArrowLeft, WifiOff, Shield, User as UserIcon, Lock, Phone,
 } from 'lucide-react';
 import {
   sendOtp,
@@ -9,14 +9,19 @@ import {
   loginTouristByPhone,
   registerAndLoginTourist,
   authenticateAuthority,
+  updateTouristProfile,
+  getApiBaseUrl,
   ApiError
 } from '../../lib/api';
+import { IdentityVerification } from '../verification/IdentityVerification';
+import type { DocumentConfirmResponse } from '../../lib/verificationApi';
 
 type Step =
   | 'role_selection'
   | 'tourist_credentials'
   | 'otp'
   | 'name'
+  | 'kyc'
   | 'authority_credentials'
   | 'verifying'
   | 'success'
@@ -45,7 +50,13 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
   // Tourist details
   const [identifier, setIdentifier] = useState('');
   const [fullName, setFullName] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState('');
   const [otp, setOtp] = useState<string[]>(Array(6).fill(''));
+
+  // Set once registration succeeds, so the 'kyc' step (which runs after
+  // the account already exists) knows which profile to attach the
+  // verification to and can complete sign-in once KYC is done/skipped.
+  const [createdTourist, setCreatedTourist] = useState<{ tourist: any; token: string } | null>(null);
   
   // Authority details
   const [badgeId, setBadgeId] = useState('');
@@ -186,22 +197,55 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
   };
 
   const handleRegister = async () => {
-    if (!fullName.trim()) { setErrs({ fullName: 'Full name is required' }); return; }
-    setStep('verifying'); setGenErr('');
     const val = identifier.trim();
     const isEmail = val.includes('@');
+    const e: FieldErrors = {};
+    if (!fullName.trim()) e.fullName = 'Full name is required';
+    // Phone is only asked here for the email signup path — the phone-OTP
+    // path already collected and verified it as `identifier` earlier.
+    if (isEmail && !/^\+?[\d\s\-]{10,14}$/.test(phoneNumber.trim())) {
+      e.phone = 'Enter a valid mobile number';
+    }
+    if (Object.keys(e).length) { setErrs(e); return; }
+
+    setStep('verifying'); setGenErr('');
     try {
       const created = await registerAndLoginTourist({
         fullName: fullName.trim(),
-        phone: isEmail ? undefined : val,
+        phone: isEmail ? phoneNumber.trim() : val,
         email: isEmail ? val : undefined,
       });
       if (!created) throw new Error('Registration did not return a tourist profile.');
-      setStep('success');
-      setTimeout(() => onAuthenticated('tourist', created.tourist), 900);
+      setCreatedTourist(created);
+      setStep('kyc');
     } catch (err: any) {
       setStep('error');
       setGenErr(err instanceof ApiError ? err.message : 'Could not create your account. Please try again.');
+    }
+  };
+
+  const finishSignup = (tourist: any) => {
+    setStep('success');
+    setTimeout(() => onAuthenticated('tourist', tourist), 900);
+  };
+
+  const handleKycComplete = async (result: DocumentConfirmResponse) => {
+    if (!createdTourist) return;
+    if (result.status !== 'VERIFIED') {
+      // IdentityVerification's own COMPLETED/REJECTED view already offers
+      // a retry; stay on this step rather than forcing them out.
+      return;
+    }
+    try {
+      const updated = await updateTouristProfile(createdTourist.tourist.id, {
+        kyc_status: 'VERIFIED',
+      });
+      finishSignup(updated);
+    } catch {
+      // KYC itself succeeded even if this follow-up PATCH didn't — don't
+      // strand a successfully-registered, successfully-verified user on
+      // an error screen over it.
+      finishSignup(createdTourist.tourist);
     }
   };
 
@@ -244,11 +288,13 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
       {/* Centered Modal container */}
       <div className="fixed inset-0 z-[51] flex items-center justify-center p-4">
         <div
-          className="w-full max-w-[400px] rounded-2xl overflow-hidden animate-modal-in"
+          className={`w-full rounded-2xl overflow-hidden animate-modal-in ${step === 'kyc' ? 'max-w-[640px]' : 'max-w-[400px]'}`}
           style={{
             background: surface,
             border: `1px solid ${border}`,
-            boxShadow: `0 24px 80px rgba(0,0,0,${dm ? '0.6' : '0.25'})`
+            boxShadow: `0 24px 80px rgba(0,0,0,${dm ? '0.6' : '0.25'})`,
+            maxHeight: step === 'kyc' ? '90vh' : undefined,
+            overflowY: step === 'kyc' ? 'auto' : undefined,
           }}
           onClick={(e) => e.stopPropagation()}
         >
@@ -264,6 +310,7 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
                     {step === 'tourist_credentials' && (mode === 'login' ? 'Tourist Sign In' : 'Tourist Sign Up')}
                     {step === 'otp' && 'Verify Identity'}
                     {step === 'name' && 'Complete Profile'}
+                    {step === 'kyc' && 'Identity Verification'}
                     {step === 'authority_credentials' && 'Official Sign In'}
                     {step === 'verifying' && 'Verifying...'}
                     {step === 'success' && 'Welcome'}
@@ -273,7 +320,8 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
                     {step === 'role_selection' && 'Choose account type to continue'}
                     {step === 'tourist_credentials' && 'Access safety & tracking services'}
                     {step === 'otp' && `Enter code sent to ${identifier}`}
-                    {step === 'name' && 'Tell us your name to generate your ID'}
+                    {step === 'name' && 'Tell us your details to generate your ID'}
+                    {step === 'kyc' && 'Scan a government ID to verify your Tourist Safety ID'}
                     {step === 'authority_credentials' && 'Official access portal'}
                     {step === 'verifying' && 'Just a moment...'}
                     {step === 'success' && 'Redirecting...'}
@@ -487,7 +535,7 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
                 <div className="flex items-start gap-2.5 px-3.5 py-3 rounded-xl" style={{ background: 'rgba(255,153,51,0.08)', border: '1px solid rgba(255,153,51,0.2)' }}>
                   <CheckCircle2 size={14} style={{ color: '#FF9933', flexShrink: 0, marginTop: 1 }} />
                   <p className="text-xs leading-relaxed" style={{ color: subtle }}>
-                    Identifier verified! Enter your full name to generate your official Tourist Safety ID.
+                    Identifier verified! Enter your details to generate your official Tourist Safety ID.
                   </p>
                 </div>
 
@@ -505,12 +553,31 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
                   labelC={labelC}
                 />
 
+                {/* Phone is only asked here for email signups — the phone
+                    OTP path already collected and verified it as the
+                    identifier before this step. */}
+                {identifier.trim().includes('@') && (
+                  <Field
+                    label="Phone Number"
+                    placeholder="10-digit mobile number"
+                    value={phoneNumber}
+                    onChange={setPhoneNumber}
+                    error={errs.phone}
+                    icon={<Phone size={15} />}
+                    bg={fieldBg}
+                    bd={fieldBd}
+                    text={text}
+                    subtle={subtle}
+                    labelC={labelC}
+                  />
+                )}
+
                 <button
                   onClick={handleRegister}
                   className="w-full h-12 rounded-xl text-sm font-bold text-white flex items-center justify-center gap-2.5 transition-all hover:opacity-92 active:scale-[0.98]"
                   style={{ background: '#FF9933', boxShadow: '0 4px 20px rgba(255,153,51,0.35)' }}
                 >
-                  Create Tourist ID <ChevronRight size={16} />
+                  Continue <ChevronRight size={16} />
                 </button>
 
                 <button
@@ -519,6 +586,24 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
                   style={{ color: subtle }}
                 >
                   <ArrowLeft size={13} /> Back
+                </button>
+              </div>
+            )}
+
+            {/* ── step: KYC / Identity Verification ── */}
+            {step === 'kyc' && createdTourist && (
+              <div className="space-y-3">
+                <IdentityVerification
+                  touristId={createdTourist.tourist.id}
+                  apiUrl={`${getApiBaseUrl()}/verifications`}
+                  onVerificationComplete={handleKycComplete}
+                />
+                <button
+                  onClick={() => finishSignup(createdTourist.tourist)}
+                  className="w-full text-center text-xs transition-opacity hover:opacity-70"
+                  style={{ color: subtle }}
+                >
+                  Skip for now — verify later from your profile
                 </button>
               </div>
             )}
