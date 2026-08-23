@@ -124,6 +124,7 @@ const LeafletMap: React.FC<{
 
     const map = L.map(containerRef.current, {
       zoomControl: false,
+      attributionControl: false,
       scrollWheelZoom: true,
       dragging: true,
       touchZoom: true,
