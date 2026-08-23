@@ -242,9 +242,9 @@ CREATE INDEX IF NOT EXISTS idx_authentication_authority_id ON public.authenticat
 CREATE INDEX IF NOT EXISTS idx_points_of_interest_coords ON public.points_of_interest(latitude, longitude);
 CREATE INDEX IF NOT EXISTS idx_locations_tourist_id ON public.locations(tourist_id);
 CREATE INDEX IF NOT EXISTS idx_locations_recorded_at ON public.locations(recorded_at);
-CREATE INDEX IF NOT EXISTS idx_locations_geom ON public.locations(geom USING GIST);
+CREATE INDEX IF NOT EXISTS idx_locations_geom ON public.locations USING GIST (geom);
 CREATE INDEX IF NOT EXISTS idx_geofences_zone_type ON public.geofences(zone_type);
-CREATE INDEX IF NOT EXISTS idx_geofences_geom ON public.geofences(geom USING GIST);
+CREATE INDEX IF NOT EXISTS idx_geofences_geom ON public.geofences USING GIST (geom);
 CREATE INDEX IF NOT EXISTS idx_geofence_breaches_tourist_id ON public.geofence_breaches(tourist_id);
 CREATE INDEX IF NOT EXISTS idx_geofence_breaches_geofence_id ON public.geofence_breaches(geofence_id);
 CREATE INDEX IF NOT EXISTS idx_geofence_breaches_breach_time ON public.geofence_breaches(breach_time);
@@ -288,109 +288,64 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON public.sos_requests TO authenticated;
 ALTER TABLE public.audit_logs ENABLE ROW LEVEL SECURITY;
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.audit_logs TO authenticated;
 
--- SECURITY DEFINER helper for every "is the current user an
--- authority?" RLS check. MUST be created before the policies below,
--- several of which call it by name. A raw
--- 'EXISTS (SELECT 1 FROM public.authorities ...)' subquery inlined
--- directly into authorities' own SELECT policy (and into every other
--- table's "OR is an authority" checks) re-triggers RLS on
--- authorities every time it runs, causing "infinite recursion
--- detected in policy for relation \"authorities\"". A SECURITY
--- DEFINER function evaluates with the function owner's privileges
--- instead of the calling role's, so it doesn't re-invoke that policy.
-CREATE OR REPLACE FUNCTION public.is_authority(uid uuid)
-RETURNS boolean
-LANGUAGE sql
-SECURITY DEFINER
-SET search_path = public
-STABLE
-AS $$
-    SELECT EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = uid);
-$$;
-
-DROP POLICY IF EXISTS select_own_or_authority ON public.tourist_profiles;
 CREATE POLICY select_own_or_authority ON public.tourist_profiles FOR SELECT TO authenticated
-    USING (user_id = auth.uid() OR public.is_authority(auth.uid()));
-DROP POLICY IF EXISTS insert_own ON public.tourist_profiles;
+    USING (user_id = auth.uid() OR EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()));
 CREATE POLICY insert_own ON public.tourist_profiles FOR INSERT TO authenticated
     WITH CHECK (user_id = auth.uid());
-DROP POLICY IF EXISTS update_own ON public.tourist_profiles;
 CREATE POLICY update_own ON public.tourist_profiles FOR UPDATE TO authenticated
     USING (user_id = auth.uid())
     WITH CHECK (user_id = auth.uid());
-DROP POLICY IF EXISTS select_any_authority ON public.authorities;
 CREATE POLICY select_any_authority ON public.authorities FOR SELECT TO authenticated
-    USING (public.is_authority(auth.uid()));
-DROP POLICY IF EXISTS insert_own ON public.authorities;
+    USING (EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()));
 CREATE POLICY insert_own ON public.authorities FOR INSERT TO authenticated
     WITH CHECK (auth_user_id = auth.uid());
-DROP POLICY IF EXISTS update_own ON public.authorities;
 CREATE POLICY update_own ON public.authorities FOR UPDATE TO authenticated
     USING (auth_user_id = auth.uid())
     WITH CHECK (auth_user_id = auth.uid());
-DROP POLICY IF EXISTS select_own ON public.authentication;
 CREATE POLICY select_own ON public.authentication FOR SELECT TO authenticated
     USING (auth_user_id = auth.uid());
-DROP POLICY IF EXISTS select_all_authenticated ON public.points_of_interest;
 CREATE POLICY select_all_authenticated ON public.points_of_interest FOR SELECT TO authenticated
     USING (true);
-DROP POLICY IF EXISTS select_own_or_authority ON public.locations;
 CREATE POLICY select_own_or_authority ON public.locations FOR SELECT TO authenticated
-    USING (tourist_id = (SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid()) OR public.is_authority(auth.uid()));
-DROP POLICY IF EXISTS insert_own ON public.locations;
+    USING (tourist_id = (SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid()) OR EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()));
 CREATE POLICY insert_own ON public.locations FOR INSERT TO authenticated
     WITH CHECK (tourist_id = (SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid()));
-DROP POLICY IF EXISTS select_all_authenticated ON public.geofences;
 CREATE POLICY select_all_authenticated ON public.geofences FOR SELECT TO authenticated
     USING (true);
-DROP POLICY IF EXISTS authority_insert ON public.geofences;
 CREATE POLICY authority_insert ON public.geofences FOR INSERT TO authenticated
-    WITH CHECK (public.is_authority(auth.uid()));
-DROP POLICY IF EXISTS authority_update ON public.geofences;
+    WITH CHECK (EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()));
 CREATE POLICY authority_update ON public.geofences FOR UPDATE TO authenticated
-    USING (public.is_authority(auth.uid()))
-    WITH CHECK (public.is_authority(auth.uid()));
-DROP POLICY IF EXISTS authority_delete ON public.geofences;
+    USING (EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()))
+    WITH CHECK (EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()));
 CREATE POLICY authority_delete ON public.geofences FOR DELETE TO authenticated
-    USING (public.is_authority(auth.uid()));
-DROP POLICY IF EXISTS select_own_or_authority ON public.geofence_breaches;
+    USING (EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()));
 CREATE POLICY select_own_or_authority ON public.geofence_breaches FOR SELECT TO authenticated
-    USING (tourist_id = (SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid()) OR public.is_authority(auth.uid()));
-DROP POLICY IF EXISTS insert_own ON public.geofence_breaches;
+    USING (tourist_id = (SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid()) OR EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()));
 CREATE POLICY insert_own ON public.geofence_breaches FOR INSERT TO authenticated
     WITH CHECK (tourist_id = (SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid()));
-DROP POLICY IF EXISTS full_access_own ON public.itineraries;
 CREATE POLICY full_access_own ON public.itineraries FOR ALL TO authenticated
     USING (tourist_id = (SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid()))
     WITH CHECK (tourist_id = (SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid()));
-DROP POLICY IF EXISTS select_own_or_authority ON public.incidents;
 CREATE POLICY select_own_or_authority ON public.incidents FOR SELECT TO authenticated
-    USING (tourist_id = (SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid()) OR public.is_authority(auth.uid()));
-DROP POLICY IF EXISTS insert_own_or_authority ON public.incidents;
+    USING (tourist_id = (SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid()) OR EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()));
 CREATE POLICY insert_own_or_authority ON public.incidents FOR INSERT TO authenticated
-    WITH CHECK (tourist_id = (SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid()) OR public.is_authority(auth.uid()));
-DROP POLICY IF EXISTS authority_update ON public.incidents;
+    WITH CHECK (tourist_id = (SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid()) OR EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()));
 CREATE POLICY authority_update ON public.incidents FOR UPDATE TO authenticated
-    USING (public.is_authority(auth.uid()))
-    WITH CHECK (public.is_authority(auth.uid()));
-DROP POLICY IF EXISTS authority_only ON public.alerts;
+    USING (EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()))
+    WITH CHECK (EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()));
 CREATE POLICY authority_only ON public.alerts FOR ALL TO authenticated
-    USING (public.is_authority(auth.uid()))
-    WITH CHECK (public.is_authority(auth.uid()));
-DROP POLICY IF EXISTS authority_only ON public.responses;
+    USING (EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()))
+    WITH CHECK (EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()));
 CREATE POLICY authority_only ON public.responses FOR ALL TO authenticated
-    USING (public.is_authority(auth.uid()))
-    WITH CHECK (public.is_authority(auth.uid()));
-DROP POLICY IF EXISTS select_own_or_authority ON public.sos_requests;
+    USING (EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()))
+    WITH CHECK (EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()));
 CREATE POLICY select_own_or_authority ON public.sos_requests FOR SELECT TO authenticated
-    USING (tourist_id = (SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid()) OR public.is_authority(auth.uid()));
-DROP POLICY IF EXISTS insert_own ON public.sos_requests;
+    USING (tourist_id = (SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid()) OR EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()));
 CREATE POLICY insert_own ON public.sos_requests FOR INSERT TO authenticated
     WITH CHECK (tourist_id = (SELECT tp.id FROM public.tourist_profiles tp WHERE tp.user_id = auth.uid()));
-DROP POLICY IF EXISTS authority_only ON public.audit_logs;
 CREATE POLICY authority_only ON public.audit_logs FOR ALL TO authenticated
-    USING (public.is_authority(auth.uid()))
-    WITH CHECK (public.is_authority(auth.uid()));
+    USING (EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()))
+    WITH CHECK (EXISTS (SELECT 1 FROM public.authorities a WHERE a.auth_user_id = auth.uid()));
 
 -- ============================================================
 -- Triggers

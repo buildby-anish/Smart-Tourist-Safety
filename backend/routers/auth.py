@@ -432,9 +432,9 @@ def register(payload: RegisterRequest) -> AuthResponse:
                 id=tourist_profile_id,
                 tourist_id=None,
                 username=payload.username,
-                full_name=payload.full_name or payload.username,
-                phone_number=payload.phone_number,
-                email=_get_email_from_username(payload.username),
+                full_name=payload.username,
+                phone_number=None,
+                email=f"{payload.username}@smarttouristsafety.com",
                 emergency_contacts=[],
                 govt_id_type=None,
                 govt_id_number=None,
@@ -567,9 +567,9 @@ def register(payload: RegisterRequest) -> AuthResponse:
                 if not tourist_profile_id:
                     tourist_profile_id = uuid4()
                 cur.execute("""
-                    INSERT INTO public.tourist_profiles (id, user_id, username, full_name, phone_number, email, kyc_status, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
-                """, (tourist_profile_id, auth_user_id, payload.username, payload.full_name or payload.username, payload.phone_number, email_str, "PENDING", now))
+                    INSERT INTO public.tourist_profiles (id, user_id, username, full_name, email, kyc_status, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s);
+                """, (tourist_profile_id, auth_user_id, payload.username, payload.username, email_str, "PENDING", now))
             else:
                 if not authority_id:
                     authority_id = uuid4()

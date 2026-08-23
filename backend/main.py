@@ -4,7 +4,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from config import Config
 from database.schema_manager import run_database_schema_check
 from routers import alerts, audit_logs, auth, authority, geofences, incidents, itinerary, locations, points_of_interest, sos, tourists, ws
-from document_verification import router as document_verification_router
 
 # Execute automatic database schema check and updates
 run_database_schema_check()
@@ -50,10 +49,3 @@ app.include_router(geofences.router, prefix="/api/v1")
 app.include_router(ws.router, prefix="/api/v1")
 app.include_router(itinerary.router, prefix="/api/v1")
 app.include_router(audit_logs.router, prefix="/api/v1")
-# Standalone in-memory OCR/identity verification module (see
-# backend/document_verification/README notes): sessions live only in this
-# process's memory and are lost on restart/redeploy — there's no
-# persistent verification audit trail. What IS persisted is whatever the
-# frontend PATCHes onto tourist_profiles (kyc_status, govt_id_type) once a
-# verification completes, via the existing /tourists/{id} endpoint.
-app.include_router(document_verification_router, prefix="/api/v1/verifications")

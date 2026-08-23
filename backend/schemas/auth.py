@@ -29,14 +29,6 @@ class RegisterRequest(BaseModel):
     tourist_profile_id: UUID | None = None
     authority_id: UUID | None = None
     mfa_enabled: bool = False
-    # Collected directly at signup time so a tourist's name/phone are set
-    # atomically with account creation, rather than depending on a second
-    # PATCH /tourists/{id} call succeeding afterward (which — being a
-    # separate request — could silently fail/be skipped and leave
-    # full_name defaulted to the account's username/email, which is what
-    # was previously happening).
-    full_name: str | None = None
-    phone_number: str | None = None
 
 
 class LoginRequest(BaseModel):
