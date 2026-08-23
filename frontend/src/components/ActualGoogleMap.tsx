@@ -175,9 +175,27 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
         const data = await response.json();
         
         if (data && data.display_name) {
-          const name = data.name || data.address.road || data.address.suburb || 'Selected Location';
+          const addr = data.address || {};
+          let specificName = data.name ||
+                             addr.amenity ||
+                             addr.shop ||
+                             addr.tourism ||
+                             addr.natural ||
+                             addr.leisure ||
+                             addr.waterway ||
+                             addr.railway ||
+                             addr.building;
+          
+          if (!specificName) {
+            if (addr.house_number && addr.road) {
+              specificName = `${addr.house_number} ${addr.road}`;
+            } else {
+              specificName = addr.road || addr.place || addr.suburb || 'Selected Location';
+            }
+          }
+
           setSelectedPlaceInfo({
-            name,
+            name: specificName,
             address: data.display_name,
             lat,
             lng,
@@ -400,6 +418,28 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     const calculateRoute = async () => {
       setIsRouting(true);
 
+      if (travelMode === 'transit') {
+        // Direct track line styled as a railroad track, not following the road network
+        const coordinates = [[startLoc.lat, startLoc.lng], [selectedPlaceInfo.lat, selectedPlaceInfo.lng]];
+        const distanceVal = map.distance([startLoc.lat, startLoc.lng], [selectedPlaceInfo.lat, selectedPlaceInfo.lng]);
+        const distKm = (distanceVal / 1000).toFixed(1);
+        // Trains average 50 km/h -> 833 meters per minute
+        const durationMin = Math.max(3, Math.round(distanceVal / 833));
+
+        const transitRoute = {
+          index: 0,
+          coordinates,
+          distance: `${distKm} km`,
+          duration: `${durationMin} mins`,
+          distanceVal,
+        };
+
+        setAlternativeRoutes([transitRoute]);
+        setSelectedRouteIndex(0);
+        setIsRouting(false);
+        return;
+      }
+
       // Determine profile for OSRM
       // Options are: driving, foot, bicycle (we map transit to foot/driving with custom render)
       let osrmProfile = 'driving';
@@ -418,11 +458,6 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
             const coordinates = route.geometry.coordinates.map((coord: number[]) => [coord[1], coord[0]]); // OSRM [lng, lat] -> Leaflet [lat, lng]
             const distKm = (route.distance / 1000).toFixed(1);
             let durationMin = Math.round(route.duration / 60);
-
-            // Adjust transit stats to simulate train/bus travel
-            if (travelMode === 'transit') {
-              durationMin = Math.max(3, Math.round(durationMin * 0.75 + 4)); // simulated delay
-            }
 
             return {
               index,
@@ -529,16 +564,34 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     // Draw active path on top
     const selectedRoute = alternativeRoutes.find((r) => r.index === selectedRouteIndex);
     if (selectedRoute) {
-      const poly = L.polyline(selectedRoute.coordinates, {
-        color: '#FF9933', // Saffron / Safety Orange
-        weight: 8,
-        opacity: 0.9,
-        dashArray: travelMode === 'transit' ? '12, 12' : undefined,
-      }).addTo(map);
+      if (travelMode === 'transit') {
+        // Draw real-life track styling (solid black/grey underneath, dashed white/yellow on top)
+        const polyBase = L.polyline(selectedRoute.coordinates, {
+          color: isDarkMode ? '#f1f5f9' : '#1e293b',
+          weight: 6,
+          opacity: 0.85,
+        }).addTo(map);
 
-      routePolylineRef.current = poly;
+        const polyTrack = L.polyline(selectedRoute.coordinates, {
+          color: isDarkMode ? '#0f172a' : '#ffffff',
+          weight: 4,
+          opacity: 0.95,
+          dashArray: '8, 12',
+        }).addTo(map);
+
+        routePolylineRef.current = L.featureGroup([polyBase, polyTrack]).addTo(map);
+      } else {
+        const poly = L.polyline(selectedRoute.coordinates, {
+          color: '#FF9933', // Saffron / Safety Orange
+          weight: 8,
+          opacity: 0.9,
+          dashArray: travelMode === 'transit' ? '12, 12' : undefined,
+        }).addTo(map);
+
+        routePolylineRef.current = poly;
+      }
     }
-  }, [alternativeRoutes, selectedRouteIndex, leafletLoaded]);
+  }, [alternativeRoutes, selectedRouteIndex, travelMode, isDarkMode, leafletLoaded]);
 
   // Sync route details text
   useEffect(() => {
