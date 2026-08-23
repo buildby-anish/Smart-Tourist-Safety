@@ -253,7 +253,7 @@ export default function TouristApp({
       )}
 
       {/* ── Main content area ── */}
-      <div className="flex-1 relative overflow-hidden" style={{ marginBottom: 64 }}>
+      <div className="flex-1 relative overflow-hidden flex flex-col" style={{ marginBottom: 64 }}>
         {tab === 'map' && (
           <>
             <div className="absolute inset-0 z-0" style={{ isolation: 'isolate' }}>
