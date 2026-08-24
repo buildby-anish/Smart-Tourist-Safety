@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sparkles, X, Send, ShieldAlert, MapPin, Hospital, Phone } from 'lucide-react';
-import { listGeofences } from '../../lib/api';
+import { listGeofences, askAIChat } from '../../lib/api';
 import { getSOSLocation } from '../../lib/location';
 import { POIS } from './MapCanvas';
 import { TouristUser } from '../../types';
@@ -114,7 +114,18 @@ export default function AskAIPanel({ open, onClose, darkMode: dm, user }: Props)
     setInput('');
     setSending(true);
     try {
-      const reply = await generateReply(trimmed, userLoc);
+      let reply = "";
+      try {
+        const response = await askAIChat(trimmed, userLoc?.lat, userLoc?.lng);
+        if (response && !response.fallback && response.response) {
+          reply = response.response;
+        } else {
+          reply = await generateReply(trimmed, userLoc);
+        }
+      } catch (err) {
+        console.warn("Error calling backend askAIChat, falling back to local reply:", err);
+        reply = await generateReply(trimmed, userLoc);
+      }
       setMessages((m) => [...m, { id: `a-${Date.now()}`, role: 'ai', text: reply }]);
     } finally {
       setSending(false);

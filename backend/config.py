@@ -25,6 +25,7 @@ class Config:
     # current dev/testing workflow; set OTP_DEBUG_LOG=false in Railway once
     # real SMS delivery is wired up.
     OTP_DEBUG_LOG = os.getenv("OTP_DEBUG_LOG", "true").strip().lower() == "true"
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
     @classmethod
     def is_supabase_configured(cls) -> bool:

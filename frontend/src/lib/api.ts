@@ -686,3 +686,30 @@ export async function syncQueuedSOS(
 
   return { count: queuedRecords.length, synced: syncedCount };
 }
+
+// ---------------------------------------------------------------------------
+// Chat (backend/routers/chat.py)
+// ---------------------------------------------------------------------------
+
+export interface ChatResponse {
+  response: string;
+  fallback: boolean;
+}
+
+export async function askAIChat(
+  message: string,
+  latitude?: number | null,
+  longitude?: number | null,
+  language = "en"
+): Promise<ChatResponse> {
+  return apiRequest("/chat", {
+    method: "POST",
+    body: {
+      message,
+      latitude,
+      longitude,
+      language
+    }
+  });
+}
+
