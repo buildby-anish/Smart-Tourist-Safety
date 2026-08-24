@@ -3,11 +3,17 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import Config
 from database.schema_manager import run_database_schema_check
+from database.seed_test_data import ensure_demo_authority_account
 from routers import alerts, audit_logs, auth, authority, geofences, incidents, itinerary, locations, points_of_interest, sos, tourists, ws
+from routers import ai_assistant
 from document_verification import router as document_verification_router
 
 # Execute automatic database schema check and updates
 run_database_schema_check()
+
+# Idempotent: creates one demo authority account for testing the Official
+# Sign In page if it doesn't already exist. See database/seed_test_data.py.
+ensure_demo_authority_account()
 
 app = FastAPI(title="Smart Tourist Safety API")
 
@@ -50,6 +56,7 @@ app.include_router(geofences.router, prefix="/api/v1")
 app.include_router(ws.router, prefix="/api/v1")
 app.include_router(itinerary.router, prefix="/api/v1")
 app.include_router(audit_logs.router, prefix="/api/v1")
+app.include_router(ai_assistant.router, prefix="/api/v1")
 # Standalone in-memory OCR/identity verification module (see
 # backend/document_verification/README notes): sessions live only in this
 # process's memory and are lost on restart/redeploy — there's no
