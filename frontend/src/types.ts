@@ -221,7 +221,7 @@ export interface EmergencyContact {
 
 export interface TouristUser {
   id: string; // internal UUID PK — used for all API calls (/tourists/{id}, etc.)
-  tourist_id?: string | null; // public code, format TOUR-YYYY-[HEX], set once KYC is VERIFIED
+  tourist_id?: string | null; // public code, format TOUR-YYYY-[HEX], assigned at registration
   username: string;
   full_name?: string | null;
   phone_number?: string | null;

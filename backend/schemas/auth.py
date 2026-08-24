@@ -59,6 +59,7 @@ class AuthResponse(BaseModel):
 
 class LoginResponse(BaseModel):
     access_token: str
+    refresh_token: str | None = None
     token_type: str = "bearer"
     auth_id: UUID
     username: str
@@ -67,6 +68,16 @@ class LoginResponse(BaseModel):
     authority_id: UUID | None = None
     mfa_enabled: bool
     last_login_at: datetime | None = None
+
+
+class RefreshRequest(BaseModel):
+    refresh_token: str
+
+
+class RefreshResponse(BaseModel):
+    access_token: str
+    refresh_token: str | None = None
+    token_type: str = "bearer"
 
 
 class SessionResponse(BaseModel):

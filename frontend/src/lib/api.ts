@@ -20,6 +20,10 @@ export function getAuthToken(): string {
   return localStorage.getItem("sos_auth_token") || "";
 }
 
+export function getRefreshToken(): string {
+  return localStorage.getItem("sos_refresh_token") || "";
+}
+
 export function getTouristId(): string {
   // Storage key kept as "sos_tourist_id" for backward compatibility with
   // already-installed clients; the value stored here is the backend's
@@ -41,6 +45,7 @@ export function getUsername(): string {
 
 interface SessionInfo {
   access_token?: string;
+  refresh_token?: string | null;
   user_type?: string;
   tourist_profile_id?: string | null;
   authority_id?: string | null;
@@ -50,6 +55,7 @@ interface SessionInfo {
 /** Persists an authenticated session (token + identity) to localStorage. */
 export function storeSession(session: SessionInfo): void {
   if (session.access_token) localStorage.setItem("sos_auth_token", session.access_token);
+  if (session.refresh_token) localStorage.setItem("sos_refresh_token", session.refresh_token);
   if (session.user_type) localStorage.setItem("sos_user_type", session.user_type);
   if (session.tourist_profile_id) localStorage.setItem("sos_tourist_id", session.tourist_profile_id);
   if (session.authority_id) localStorage.setItem("sos_authority_id", session.authority_id);
@@ -59,10 +65,41 @@ export function storeSession(session: SessionInfo): void {
 /** Clears any stored session/auth data (used on logout). */
 export function clearSession(): void {
   localStorage.removeItem("sos_auth_token");
+  localStorage.removeItem("sos_refresh_token");
   localStorage.removeItem("sos_user_type");
   localStorage.removeItem("sos_tourist_id");
   localStorage.removeItem("sos_authority_id");
   localStorage.removeItem("sos_username");
+}
+
+/**
+ * Exchanges the stored refresh token for a new access token. Supabase
+ * rotates refresh tokens on every use, so the new one returned here MUST
+ * replace the stored one — reusing an already-consumed refresh token will
+ * fail on the next attempt.
+ *
+ * Returns true on success (session silently renewed), false if the
+ * refresh token itself is invalid/expired (caller should treat this as a
+ * real logout, not retry).
+ */
+export async function tryRefreshSession(): Promise<boolean> {
+  const refreshToken = getRefreshToken();
+  if (!refreshToken) return false;
+  try {
+    const resp = await fetch(`${getApiBaseUrl()}/auth/refresh`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ refresh_token: refreshToken }),
+    });
+    if (!resp.ok) return false;
+    const data = await resp.json();
+    if (!data.access_token) return false;
+    localStorage.setItem("sos_auth_token", data.access_token);
+    if (data.refresh_token) localStorage.setItem("sos_refresh_token", data.refresh_token);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -77,26 +114,49 @@ export class ApiError extends Error {
   }
 }
 
+async function doFetch(path: string, method: string, body: any, token: string): Promise<Response> {
+  const baseUrl = getApiBaseUrl();
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  if (token) headers["Authorization"] = `Bearer ${token}`;
+  return fetch(`${baseUrl}${path}`, {
+    method,
+    headers,
+    body: body !== undefined ? JSON.stringify(body) : undefined,
+  });
+}
+
 async function apiRequest<T = any>(
   path: string,
   options: { method?: string; body?: any; auth?: boolean } = {}
 ): Promise<T> {
   const { method = "GET", body, auth = true } = options;
-  const baseUrl = getApiBaseUrl();
   const token = getAuthToken();
-
-  const headers: Record<string, string> = { "Content-Type": "application/json" };
-  if (auth && token) headers["Authorization"] = `Bearer ${token}`;
 
   let response: Response;
   try {
-    response = await fetch(`${baseUrl}${path}`, {
+    response = await fetch(`${getApiBaseUrl()}${path}`, {
       method,
-      headers,
+      headers: { "Content-Type": "application/json", ...(auth && token ? { Authorization: `Bearer ${token}` } : {}) },
       body: body !== undefined ? JSON.stringify(body) : undefined,
     });
   } catch (networkErr: any) {
     throw new ApiError(0, `Network error contacting backend: ${networkErr.message || networkErr}`);
+  }
+
+  // A 401 on an authenticated request usually means the ~1hr access token
+  // expired (not that the user was ever "logged out"). Silently exchange
+  // the refresh token for a new one and retry exactly once before giving
+  // up — this is what keeps a session alive across page reloads until the
+  // person actually signs out, instead of forcing re-login every hour.
+  if (response.status === 401 && auth && token) {
+    const refreshed = await tryRefreshSession();
+    if (refreshed) {
+      try {
+        response = await doFetch(path, method, body, getAuthToken());
+      } catch (networkErr: any) {
+        throw new ApiError(0, `Network error contacting backend: ${networkErr.message || networkErr}`);
+      }
+    }
   }
 
   if (!response.ok) {
@@ -407,6 +467,7 @@ export async function authenticateAuthority(
     const loginResp = await authorityLoginRequest(badgeId, otp);
     storeSession({
       access_token: loginResp.access_token,
+      refresh_token: loginResp.refresh_token,
       user_type: loginResp.user_type,
       authority_id: loginResp.authority_id,
       username: loginResp.username,
@@ -482,6 +543,7 @@ export async function registerAndLoginTourist(details: {
   const loginResp = await loginUser(username, password);
   storeSession({
     access_token: loginResp.access_token,
+    refresh_token: loginResp.refresh_token,
     user_type: loginResp.user_type,
     tourist_profile_id: loginResp.tourist_profile_id,
     username: loginResp.username,
@@ -511,6 +573,7 @@ export async function loginTouristByPhone(phoneOrEmail: string): Promise<{ token
     const loginResp = await loginUser(username, password);
     storeSession({
       access_token: loginResp.access_token,
+      refresh_token: loginResp.refresh_token,
       user_type: loginResp.user_type,
       tourist_profile_id: loginResp.tourist_profile_id,
       username: loginResp.username,

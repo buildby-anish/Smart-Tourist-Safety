@@ -16,6 +16,8 @@ from schemas.auth import (
     AuthResponse,
     LoginRequest,
     LoginResponse,
+    RefreshRequest,
+    RefreshResponse,
     RegisterRequest,
     SendOtpRequest,
     SendOtpResponse,
@@ -30,6 +32,7 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 # Temporary in-memory stores for authentication records and active sessions (fallback mode).
 _in_memory_auth_store: dict[UUID, dict] = {}
 _in_memory_session_store: dict[str, dict] = {}
+_in_memory_refresh_store: dict[str, str] = {}  # refresh_token -> access_token, offline mode only
 
 # --- OTP store/helpers ---
 # In-memory only: DATABASE.md does not define an OTP table, and OTPs are
@@ -51,6 +54,19 @@ def _get_email_from_username(username: str) -> str:
     if "@" in username:
         return username
     return f"{username}@smarttouristsafety.com"
+
+
+def _generate_tourist_code() -> str:
+    """
+    Public-facing tourist identifier, format TOUR-YYYY-[HEX] per the
+    directive. Duplicated from routers/tourists.py (rather than imported)
+    because tourists.py imports get_current_user from this module —
+    importing back would be circular. Generated at registration time now,
+    not gated behind KYC completion, since KYC was made optional/deferred
+    to the profile screen and a tourist otherwise never got an ID at all.
+    """
+    year = datetime.now(timezone.utc).year
+    return f"TOUR-{year}-{uuid4().hex[:8].upper()}"
 
 
 def _hash_password(password: str, salt: str | None = None) -> str:
@@ -430,7 +446,7 @@ def register(payload: RegisterRequest) -> AuthResponse:
             from schemas.tourist import TouristResponse
             _in_memory_tourist_store[tourist_profile_id] = TouristResponse(
                 id=tourist_profile_id,
-                tourist_id=None,
+                tourist_id=_generate_tourist_code(),
                 username=payload.username,
                 full_name=payload.full_name or payload.username,
                 phone_number=payload.phone_number,
@@ -567,9 +583,9 @@ def register(payload: RegisterRequest) -> AuthResponse:
                 if not tourist_profile_id:
                     tourist_profile_id = uuid4()
                 cur.execute("""
-                    INSERT INTO public.tourist_profiles (id, user_id, username, full_name, phone_number, email, kyc_status, created_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
-                """, (tourist_profile_id, auth_user_id, payload.username, payload.full_name or payload.username, payload.phone_number, email_str, "PENDING", now))
+                    INSERT INTO public.tourist_profiles (id, user_id, username, full_name, phone_number, email, kyc_status, tourist_id, created_at)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s);
+                """, (tourist_profile_id, auth_user_id, payload.username, payload.full_name or payload.username, payload.phone_number, email_str, "PENDING", _generate_tourist_code(), now))
             else:
                 if not authority_id:
                     authority_id = uuid4()
@@ -624,6 +640,7 @@ def login(payload: LoginRequest) -> LoginResponse:
         target_record["last_login_at"] = now
 
         token = secrets.token_hex(32)
+        refresh_token = secrets.token_hex(32)
         session_info = {
             "auth_id": target_record["auth_id"],
             "auth_user_id": target_record["auth_user_id"],
@@ -635,9 +652,13 @@ def login(payload: LoginRequest) -> LoginResponse:
             "last_login_at": now,
         }
         _in_memory_session_store[token] = session_info
+        # Offline-mode refresh tokens just mint a fresh opaque access token
+        # for the same session record — see refresh_session() below.
+        _in_memory_refresh_store[refresh_token] = token
 
         return LoginResponse(
             access_token=token,
+            refresh_token=refresh_token,
             token_type="bearer",
             auth_id=target_record["auth_id"],
             username=target_record["username"],
@@ -702,6 +723,7 @@ def login(payload: LoginRequest) -> LoginResponse:
             
         data = resp.json()
         access_token = data.get("access_token")
+        refresh_token = data.get("refresh_token")
         sb_user = data.get("user", {})
         auth_user_id = sb_user.get("id")
         
@@ -728,9 +750,9 @@ def login(payload: LoginRequest) -> LoginResponse:
                 
                 if user_type == "tourist":
                     cur.execute("""
-                        INSERT INTO public.tourist_profiles (id, user_id, username, full_name, email, kyc_status, created_at)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s);
-                    """, (tourist_profile_id, auth_user_id, username, username, email_str, "PENDING", now))
+                        INSERT INTO public.tourist_profiles (id, user_id, username, full_name, email, kyc_status, tourist_id, created_at)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+                    """, (tourist_profile_id, auth_user_id, username, username, email_str, "PENDING", _generate_tourist_code(), now))
                 else:
                     cur.execute("""
                         INSERT INTO public.authorities (authority_id, auth_user_id, agency_name, contact_email)
@@ -760,6 +782,7 @@ def login(payload: LoginRequest) -> LoginResponse:
             
             return LoginResponse(
                 access_token=access_token,
+                refresh_token=refresh_token,
                 token_type="bearer",
                 auth_id=row[0],
                 username=row[4],
@@ -778,6 +801,51 @@ def login(payload: LoginRequest) -> LoginResponse:
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Login failed: {str(e)}"
         )
+
+
+@router.post("/refresh", response_model=RefreshResponse)
+def refresh_session(payload: RefreshRequest) -> RefreshResponse:
+    """
+    Exchanges a refresh token for a new access token, so the frontend can
+    silently re-authenticate on boot/on a 401 instead of forcing the user
+    back to the login screen every time the ~1hr Supabase access token
+    expires — previously there was no refresh mechanism at all, so any
+    page load after the access token expired hit a 401 on the profile
+    fetch and force-cleared the session.
+    """
+    # Offline/fallback mode: the "refresh token" is just a lookup key for
+    # the still-active in-memory access token (opaque tokens don't expire
+    # in this mode, so this mainly exists to keep both code paths uniform).
+    if not is_db_active():
+        access_token = _in_memory_refresh_store.get(payload.refresh_token)
+        if not access_token or access_token not in _in_memory_session_store:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or expired refresh token.")
+        return RefreshResponse(access_token=access_token, refresh_token=payload.refresh_token, token_type="bearer")
+
+    if not Config.is_supabase_configured():
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Supabase is not configured on the backend.",
+        )
+
+    refresh_url = f"{Config.SUPABASE_URL}/auth/v1/token?grant_type=refresh_token"
+    headers = {"apikey": Config.SUPABASE_ANON_KEY, "Content-Type": "application/json"}
+    try:
+        resp = requests.post(refresh_url, headers=headers, json={"refresh_token": payload.refresh_token}, timeout=10)
+        if resp.status_code != 200:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired. Please sign in again.")
+        data = resp.json()
+        return RefreshResponse(
+            access_token=data.get("access_token"),
+            # Supabase rotates refresh tokens on use — the frontend must
+            # store this new one and discard the old, or the next refresh
+            # attempt will fail even though this one succeeded.
+            refresh_token=data.get("refresh_token"),
+            token_type="bearer",
+        )
+    except requests.RequestException as e:
+        logger.error(f"Refresh token exchange failed: {e}")
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Session expired. Please sign in again.")
 
 
 @router.post("/logout")

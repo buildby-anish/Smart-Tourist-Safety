@@ -1,32 +1,75 @@
-import { useState, useRef } from 'react';
-import { Search, X, MapPin, Star, ChevronRight, Navigation } from 'lucide-react';
+import { useState, useRef, useEffect } from 'react';
+import { Search, X, MapPin, Navigation, Loader2 } from 'lucide-react';
 
-// No backend "places search" endpoint exists in this project — these
-// suggestions mirror the same static POI set used on the map (see
-// MapCanvas.tsx POIS) rather than a fabricated search backend.
-const SUGGESTIONS = [
-  { id: 'gate', label: 'Gateway of India', sub: 'Tourist attraction · Colaba', dist: '0.8 km', rating: 4.7 },
-  { id: 'colaba', label: 'Colaba Causeway', sub: 'Market · Shopping', dist: '1.9 km', rating: 4.3 },
-  { id: 'taj_m', label: 'Taj Mahal Palace', sub: 'Luxury hotel · Colaba', dist: '1.2 km', rating: 4.8 },
-  { id: 'cafe1', label: 'Café Mondegar', sub: 'Restaurant · Colaba', dist: '1.5 km', rating: 4.4 },
-  { id: 'rest2', label: 'Leopold Café', sub: 'Restaurant · Colaba', dist: '1.0 km', rating: 4.2 },
-];
+// Real place search via OpenStreetMap's Nominatim geocoding API — no API
+// key required, consistent with the rest of this app's map stack (Leaflet
+// + OpenStreetMap tiles + OSRM routing all being free/keyless already).
+// Restricted to India (countrycodes=in) to match the rest of the app.
+interface NominatimResult {
+  place_id: number;
+  display_name: string;
+  lat: string;
+  lon: string;
+  type?: string;
+  class?: string;
+}
+
+export interface SearchedPlace {
+  name: string;
+  address: string;
+  lat: number;
+  lng: number;
+}
 
 interface Props {
   darkMode: boolean;
-  onSelect: (id: string, label: string) => void;
+  onSelect: (place: SearchedPlace) => void;
 }
 
 export default function SearchBar({ darkMode: dm, onSelect }: Props) {
   const [query, setQuery] = useState('');
   const [focused, setFocused] = useState(false);
+  const [results, setResults] = useState<NominatimResult[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
+  const debounceRef = useRef<number | null>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
-  const results = query.length > 0
-    ? SUGGESTIONS.filter((s) => s.label.toLowerCase().includes(query.toLowerCase()))
-    : [];
+  useEffect(() => {
+    if (debounceRef.current) window.clearTimeout(debounceRef.current);
+    if (query.trim().length < 3) {
+      setResults([]);
+      setLoading(false);
+      setError(false);
+      return;
+    }
+    setLoading(true);
+    setError(false);
+    debounceRef.current = window.setTimeout(async () => {
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      try {
+        const url = `https://nominatim.openstreetmap.org/search?format=json&q=${encodeURIComponent(query)}&countrycodes=in&limit=8&addressdetails=0`;
+        const resp = await fetch(url, { signal: controller.signal, headers: { Accept: 'application/json' } });
+        if (!resp.ok) throw new Error(`Nominatim returned ${resp.status}`);
+        const data: NominatimResult[] = await resp.json();
+        setResults(data);
+      } catch (err: any) {
+        if (err?.name !== 'AbortError') {
+          console.warn('Place search failed:', err);
+          setError(true);
+          setResults([]);
+        }
+      } finally {
+        setLoading(false);
+      }
+    }, 350);
+    return () => { if (debounceRef.current) window.clearTimeout(debounceRef.current); };
+  }, [query]);
 
-  const showPanel = focused;
+  const showPanel = focused && query.trim().length > 0;
 
   const surface = dm ? 'rgba(10,20,40,0.95)' : 'rgba(255,255,255,0.97)';
   const text = dm ? '#f1f5f9' : '#0c2340';
@@ -34,6 +77,18 @@ export default function SearchBar({ darkMode: dm, onSelect }: Props) {
   const divider = dm ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)';
   const hoverBg = dm ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.04)';
   const borderC = focused ? '#FF9933' : dm ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.1)';
+
+  const handlePick = (r: NominatimResult) => {
+    const parts = r.display_name.split(',').map((p) => p.trim());
+    onSelect({
+      name: parts[0] || r.display_name,
+      address: r.display_name,
+      lat: parseFloat(r.lat),
+      lng: parseFloat(r.lon),
+    });
+    setQuery('');
+    setFocused(false);
+  };
 
   return (
     <div className="relative w-full">
@@ -55,7 +110,7 @@ export default function SearchBar({ darkMode: dm, onSelect }: Props) {
           onChange={(e) => setQuery(e.target.value)}
           onFocus={() => setFocused(true)}
           onBlur={() => setTimeout(() => setFocused(false), 180)}
-          placeholder="Search places, attractions, hotels..."
+          placeholder="Search places in India..."
           className="flex-1 bg-transparent text-base leading-none outline-none pl-1"
           style={{ color: text, fontFamily: 'Inter, sans-serif' }}
           aria-label="Search places"
@@ -72,19 +127,11 @@ export default function SearchBar({ darkMode: dm, onSelect }: Props) {
             <X size={15} />
           </button>
         )}
-        <Search size={17} strokeWidth={2.2} style={{ color: focused ? '#FF9933' : subtle, flexShrink: 0, transition: 'color 0.15s' }} />
-        
-        {/* Divider */}
-        <div className="w-[1px] h-5 bg-slate-200 dark:bg-slate-800 mx-1 flex-shrink-0" />
-        
-        {/* Directions Button */}
-        <button
-          type="button"
-          className="w-8 h-8 rounded-full bg-teal-600 hover:bg-teal-700 text-white flex items-center justify-center transition-all active:scale-95 shadow-xs flex-shrink-0 cursor-pointer"
-          title="Directions"
-        >
-          <Navigation size={13} className="rotate-45 fill-white" />
-        </button>
+        {loading ? (
+          <Loader2 size={17} className="animate-spin" style={{ color: '#FF9933', flexShrink: 0 }} />
+        ) : (
+          <Search size={17} strokeWidth={2.2} style={{ color: focused ? '#FF9933' : subtle, flexShrink: 0, transition: 'color 0.15s' }} />
+        )}
       </div>
 
       {showPanel && (
@@ -97,17 +144,14 @@ export default function SearchBar({ darkMode: dm, onSelect }: Props) {
             boxShadow: `0 12px 48px rgba(0,0,0,${dm ? '0.65' : '0.18'})`,
           }}
         >
-          {query.length === 0 ? (
-            <div className="py-2">
-              <SectionLabel label="Places on the map" color={subtle} />
-              {SUGGESTIONS.map((s) => (
-                <SuggestionRow key={s.id} item={s} text={text} subtle={subtle} hover={hoverBg} onSelect={onSelect} />
-              ))}
-            </div>
+          {loading && results.length === 0 ? (
+            <div className="py-10 text-center" style={{ color: subtle, fontSize: 14 }}>Searching...</div>
+          ) : error ? (
+            <div className="py-10 text-center" style={{ color: subtle, fontSize: 14 }}>Couldn't reach place search. Try again.</div>
           ) : results.length > 0 ? (
             <div className="py-2">
-              {results.map((s) => (
-                <SuggestionRow key={s.id} item={s} text={text} subtle={subtle} hover={hoverBg} onSelect={onSelect} />
+              {results.map((r) => (
+                <SuggestionRow key={r.place_id} result={r} text={text} subtle={subtle} hover={hoverBg} onSelect={() => handlePick(r)} />
               ))}
             </div>
           ) : (
@@ -121,20 +165,15 @@ export default function SearchBar({ darkMode: dm, onSelect }: Props) {
   );
 }
 
-function SectionLabel({ label, color }: { label: string; color: string }) {
-  return (
-    <p className="px-4 py-1.5 text-[11px] font-semibold uppercase tracking-widest" style={{ color, letterSpacing: '0.08em' }}>
-      {label}
-    </p>
-  );
-}
-
-function SuggestionRow({ item, text, subtle, hover, onSelect }: {
-  item: (typeof SUGGESTIONS)[0]; text: string; subtle: string; hover: string; onSelect: (id: string, label: string) => void;
+function SuggestionRow({ result, text, subtle, hover, onSelect }: {
+  result: NominatimResult; text: string; subtle: string; hover: string; onSelect: () => void;
 }) {
+  const parts = result.display_name.split(',').map((p) => p.trim());
+  const label = parts[0] || result.display_name;
+  const sub = parts.slice(1, 4).join(', ');
   return (
     <button
-      onMouseDown={() => onSelect(item.id, item.label)}
+      onMouseDown={onSelect}
       className="w-full flex items-center gap-3 px-4 py-2.5 text-left transition-colors duration-100"
       style={{ background: 'transparent' }}
       onMouseEnter={(e) => (e.currentTarget.style.background = hover)}
@@ -144,12 +183,8 @@ function SuggestionRow({ item, text, subtle, hover, onSelect }: {
         <MapPin size={13} style={{ color: '#FF9933' }} />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium truncate" style={{ color: text }}>{item.label}</p>
-        <p className="text-xs truncate mt-0.5" style={{ color: subtle }}>{item.sub} · {item.dist}</p>
-      </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
-        <Star size={11} style={{ color: '#FF9933', fill: '#FF9933' }} />
-        <span className="text-xs font-medium" style={{ color: subtle }}>{item.rating}</span>
+        <p className="text-sm font-medium truncate" style={{ color: text }}>{label}</p>
+        <p className="text-xs truncate mt-0.5" style={{ color: subtle }}>{sub}</p>
       </div>
     </button>
   );

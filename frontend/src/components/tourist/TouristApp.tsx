@@ -1,8 +1,8 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Plus, Minus, Navigation, Bell } from 'lucide-react';
+import { Navigation, Bell, Sparkles } from 'lucide-react';
 
 import MapCanvas from './MapCanvas';
-import SearchBar from './SearchBar';
+import SearchBar, { SearchedPlace } from './SearchBar';
 import QuickActions from './QuickActions';
 import SOSButton from './SOSButton';
 import PlaceCard from './PlaceCard';
@@ -13,6 +13,7 @@ import TripsPanel from './TripsPanel';
 import ProfilePanel from './ProfilePanel';
 import MapLegend from './MapLegend';
 import SafetyBanner from './SafetyBanner';
+import AskAIPanel from './AskAIPanel';
 import BrandMark from '../BrandMark';
 
 import { getSOSLocation } from '../../lib/location';
@@ -61,7 +62,6 @@ export default function TouristApp({
   const [selectedPlace, setSelectedPlace] = useState<string | null>(null);
   const [mapFilter, setMapFilter] = useState<string | null>(null);
   const [recenterTrigger, setRecenterTrigger] = useState(0);
-  const [zoomAction, setZoomAction] = useState<{ type: 'in' | 'out'; ts: number } | undefined>(undefined);
   const [geofenceAlert, setGeofenceAlert] = useState<string | null>(null);
   const [activeRouteTarget, setActiveRouteTarget] = useState<{
     lat: number;
@@ -106,10 +106,18 @@ export default function TouristApp({
   const handleProtectedTab = useCallback(() => { setShowLogin(true); }, [setShowLogin]);
 
   const handleMarkerClick = useCallback((id: string) => { setSelectedPlace(id); }, []);
-  const handleSearchSelect = useCallback((id: string) => { setSelectedPlace(id); setTab('map'); }, []);
+  const handleSearchSelect = useCallback((place: SearchedPlace) => {
+    // Real search results don't have a static POI id to look up in
+    // PlaceCard's mock DB, so route to them the same way the existing
+    // "Directions" button on PlaceCard already does — reusing the working
+    // OSRM routing path in ActualGoogleMap instead of building a second one.
+    setActiveRouteTarget(place);
+    setSelectedPlace(null);
+    setTab('map');
+  }, []);
+  const [showAskAI, setShowAskAI] = useState(false);
 
   const handleLocateMe = useCallback(() => { setRecenterTrigger((t) => t + 1); }, []);
-  const handleZoom = useCallback((type: 'in' | 'out') => { setZoomAction({ type, ts: Date.now() }); }, []);
 
   // ── Real SOS submission (location capture → offline queue → backend) ───
   const handleSOS = useCallback(async (): Promise<string> => {
@@ -266,18 +274,29 @@ export default function TouristApp({
               <MapCanvas
                 activeFilter={mapFilter}
                 recenterTrigger={recenterTrigger}
-                zoomAction={zoomAction}
                 onMarkerClick={handleMarkerClick}
                 activeRouteTarget={activeRouteTarget}
                 onClearRoute={() => setActiveRouteTarget(null)}
               />
             </div>
 
-            {/* Right-side zoom controls */}
+            {/* Right-side: Ask AI (replaces manual zoom +/- controls — the
+                map already supports pinch/scroll zoom natively; a fixed
+                button here now opens the AI assistant instead). */}
             <div className="absolute right-4 z-20 flex flex-col gap-2.5 pointer-events-none" style={{ top: 'calc(env(safe-area-inset-top, 0px) + 140px)' }}>
               <div className="pointer-events-auto flex flex-col gap-2.5">
-                <MapControlBtn dm={dm} onClick={() => handleZoom('in')} label="Zoom in"><Plus size={16} /></MapControlBtn>
-                <MapControlBtn dm={dm} onClick={() => handleZoom('out')} label="Zoom out"><Minus size={16} /></MapControlBtn>
+                <button
+                  onClick={() => setShowAskAI(true)}
+                  aria-label="Ask AI"
+                  className="w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-150 hover:scale-105 active:scale-95"
+                  style={{
+                    background: 'linear-gradient(135deg, #FF9933, #e67a0f)',
+                    boxShadow: '0 4px 16px rgba(255,153,51,0.4)',
+                    color: '#fff',
+                  }}
+                >
+                  <Sparkles size={17} />
+                </button>
               </div>
             </div>
 
@@ -330,6 +349,16 @@ export default function TouristApp({
         onProtected={handleProtectedTab}
         isAuthenticated={isAuthenticated}
         sosButton={<SOSButton onTrigger={handleSOS} />}
+      />
+
+      {/* Fixed to the viewport (not the content column above), so it sits
+          above BottomNav — covering the bottom half of the screen while
+          the nav buttons underneath stay visually present but inert. */}
+      <AskAIPanel
+        open={showAskAI}
+        onClose={() => setShowAskAI(false)}
+        darkMode={dm}
+        user={user}
       />
     </div>
   );

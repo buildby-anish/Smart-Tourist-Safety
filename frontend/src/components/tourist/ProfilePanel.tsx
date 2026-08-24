@@ -32,6 +32,7 @@ export default function ProfilePanel({
 }: Props) {
   const [notifs, setNotifs] = useState(true);
   const [locShare, setLocShare] = useState(false);
+  const [showLogoutConfirm, setShowLogoutConfirm] = useState(false);
   const [digitalId, setDigitalId] = useState<string | null>(user?.tourist_id || null);
   const [editingContact, setEditingContact] = useState(false);
   const [contactDraft, setContactDraft] = useState(user?.emergency_contacts?.[0]?.phone || '');
@@ -79,6 +80,43 @@ export default function ProfilePanel({
 
   return (
     <div className="flex-1 overflow-y-auto" style={{ background: surface, fontFamily: 'Inter, sans-serif' }}>
+      {showLogoutConfirm && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4"
+          style={{ background: 'rgba(0,0,0,0.5)' }}
+          onClick={() => setShowLogoutConfirm(false)}
+        >
+          <div
+            className="w-full max-w-[320px] rounded-2xl p-5 animate-modal-in"
+            style={{ background: surface, border: `1px solid ${border}`, boxShadow: '0 24px 80px rgba(0,0,0,0.35)' }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-11 h-11 rounded-full flex items-center justify-center mb-3" style={{ background: 'rgba(239,68,68,0.1)' }}>
+              <LogOut size={18} style={{ color: '#ef4444' }} />
+            </div>
+            <p className="text-[15px] font-bold mb-1" style={{ color: text, fontFamily: 'Outfit, sans-serif' }}>Sign out?</p>
+            <p className="text-xs mb-5" style={{ color: subtle }}>
+              You'll need to sign in again to access trip tracking, SOS, and your Tourist ID.
+            </p>
+            <div className="flex gap-2.5">
+              <button
+                onClick={() => setShowLogoutConfirm(false)}
+                className="flex-1 h-10 rounded-xl text-sm font-semibold transition-opacity hover:opacity-80"
+                style={{ background: dm ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.06)', color: text }}
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => { setShowLogoutConfirm(false); onLogout(); }}
+                className="flex-1 h-10 rounded-xl text-sm font-bold text-white transition-opacity hover:opacity-90"
+                style={{ background: '#ef4444' }}
+              >
+                Sign out
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       <div className="px-5 pt-6 pb-5" style={{ borderBottom: `1px solid ${dm ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.06)'}` }}>
         {isAuthenticated && user ? (
           <div className="flex items-center gap-4">
@@ -235,7 +273,7 @@ export default function ProfilePanel({
             <div className="rounded-xl overflow-hidden" style={{ background: card, border: `1px solid ${border}`, boxShadow: shadow }}>
               <LinkRow icon={<Lock size={16} />} label="Privacy & data" sub="How we use your data" text={text} subtle={subtle} border={border} />
               <button
-                onClick={onLogout}
+                onClick={() => setShowLogoutConfirm(true)}
                 className="w-full flex items-center gap-3 px-4 py-3.5 text-left text-sm transition-colors"
                 style={{ color: '#ef4444', borderTop: `1px solid ${border}` }}
                 onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(220,38,38,0.06)')}

@@ -150,12 +150,26 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     if (!leafletLoaded || !containerRef.current || mapRef.current) return;
     const L = (window as any).L;
 
+    // Locked to India: the app is India-only tourist safety infrastructure,
+    // so zooming/panning out to a world/continent view is not a
+    // legitimate use case here. minZoom keeps zoom-out capped at roughly
+    // country level; maxBounds (with viscosity 1.0, i.e. a hard stop
+    // rather than an elastic snap-back) keeps panning within India's
+    // bounding box, generously padded so border regions aren't clipped.
+    const INDIA_BOUNDS = L.latLngBounds([
+      [6.0, 66.5],   // SW — south of Kanyakumari, west of Gujarat coast
+      [37.5, 99.0],  // NE — north of Kashmir, east of Arunachal Pradesh
+    ]);
+
     const mapInstance = L.map(containerRef.current, {
       zoomControl: false,
       attributionControl: false,
       scrollWheelZoom: true,
       dragging: true,
       touchZoom: true,
+      minZoom: 5,
+      maxBounds: INDIA_BOUNDS,
+      maxBoundsViscosity: 1.0,
     }).setView([center.lat, center.lng], zoom);
 
     mapRef.current = mapInstance;
