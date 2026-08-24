@@ -25,7 +25,6 @@ class Config:
     # current dev/testing workflow; set OTP_DEBUG_LOG=false in Railway once
     # real SMS delivery is wired up.
     OTP_DEBUG_LOG = os.getenv("OTP_DEBUG_LOG", "true").strip().lower() == "true"
-    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
     # SMTP config for sending real email OTPs (see routers/auth.py
     # send_email_otp). Any standard SMTP relay works (SendGrid, Mailgun,

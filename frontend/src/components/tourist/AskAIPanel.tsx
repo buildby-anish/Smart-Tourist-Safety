@@ -1,10 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sparkles, X, Send, ShieldAlert, MapPin, Hospital, Phone } from 'lucide-react';
-<<<<<<< HEAD
-import { listGeofences, askAIChat } from '../../lib/api';
-=======
 import { listGeofences, askTravelAI, AIChatTurn } from '../../lib/api';
->>>>>>> 343b8828d05f6c53a466162cc573611e0f3a4e50
 import { getSOSLocation } from '../../lib/location';
 import { POIS } from './MapCanvas';
 import { TouristUser } from '../../types';
@@ -121,19 +117,6 @@ export default function AskAIPanel({ open, onClose, darkMode: dm, user }: Props)
     setInput('');
     setSending(true);
     try {
-<<<<<<< HEAD
-      let reply = "";
-      try {
-        const response = await askAIChat(trimmed, userLoc?.lat, userLoc?.lng);
-        if (response && !response.fallback && response.response) {
-          reply = response.response;
-        } else {
-          reply = await generateReply(trimmed, userLoc);
-        }
-      } catch (err) {
-        console.warn("Error calling backend askAIChat, falling back to local reply:", err);
-        reply = await generateReply(trimmed, userLoc);
-=======
       let reply: string;
       if (EMERGENCY_RE.test(trimmed)) {
         reply = await generateFallbackReply(trimmed, userLoc);
@@ -151,7 +134,6 @@ export default function AskAIPanel({ open, onClose, darkMode: dm, user }: Props)
           // too since a wrong-but-safe fallback beats a dead panel.
           reply = await generateFallbackReply(trimmed, userLoc);
         }
->>>>>>> 343b8828d05f6c53a466162cc573611e0f3a4e50
       }
       setMessages((m) => [...m, { id: `a-${Date.now()}`, role: 'ai', text: reply }]);
     } finally {
