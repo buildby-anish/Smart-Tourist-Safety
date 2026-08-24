@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { Sparkles, X, Send, ShieldAlert, MapPin, Hospital, Phone } from 'lucide-react';
+<<<<<<< HEAD
 import { listGeofences, askAIChat } from '../../lib/api';
+=======
+import { listGeofences, askTravelAI, AIChatTurn } from '../../lib/api';
+>>>>>>> 343b8828d05f6c53a466162cc573611e0f3a4e50
 import { getSOSLocation } from '../../lib/location';
 import { POIS } from './MapCanvas';
 import { TouristUser } from '../../types';
@@ -26,17 +30,15 @@ const QUICK_PROMPTS = [
 ];
 
 /**
- * Rule-based safety assistant grounded in this app's own live data
- * (geofence zones from the backend, the static POI set the map already
- * uses, and the tourist's current location) — not a wired-up external LLM.
- * No AI provider (OpenAI/Anthropic/etc.) API key exists anywhere in this
- * project's Config, so this answers what it can from real in-app data
- * rather than fabricating an integration that would silently do nothing
- * once deployed. Swapping this for a real hosted LLM later just means
- * replacing generateReply() with an actual API call — the panel/UI
- * shell around it doesn't need to change.
+ * Fallback safety assistant grounded in this app's own live data (geofence
+ * zones from the backend, the static POI set the map already uses, and
+ * the tourist's current location) — used when the real AI (askTravelAI,
+ * backed by Groq's free API) isn't configured or fails. Kept as the
+ * primary path for emergency-specific queries (hospital/police/emergency
+ * numbers) even when the real AI IS available, since deterministic
+ * answers matter more than an LLM's phrasing for those.
  */
-async function generateReply(question: string, userLoc: { lat: number; lng: number } | null): Promise<string> {
+async function generateFallbackReply(question: string, userLoc: { lat: number; lng: number } | null): Promise<string> {
   const q = question.toLowerCase();
 
   if (/hospital|medical|clinic|doctor/.test(q)) {
@@ -107,6 +109,11 @@ export default function AskAIPanel({ open, onClose, darkMode: dm, user }: Props)
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' });
   }, [messages]);
 
+  // Emergency-specific queries always use the deterministic fallback, even
+  // when the real AI is available — a hallucinated hospital name or wrong
+  // emergency number is a much worse failure mode here than everywhere else.
+  const EMERGENCY_RE = /hospital|medical|clinic|doctor|police|station|officer|emergency number|helpline/i;
+
   const send = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || sending) return;
@@ -114,6 +121,7 @@ export default function AskAIPanel({ open, onClose, darkMode: dm, user }: Props)
     setInput('');
     setSending(true);
     try {
+<<<<<<< HEAD
       let reply = "";
       try {
         const response = await askAIChat(trimmed, userLoc?.lat, userLoc?.lng);
@@ -125,6 +133,25 @@ export default function AskAIPanel({ open, onClose, darkMode: dm, user }: Props)
       } catch (err) {
         console.warn("Error calling backend askAIChat, falling back to local reply:", err);
         reply = await generateReply(trimmed, userLoc);
+=======
+      let reply: string;
+      if (EMERGENCY_RE.test(trimmed)) {
+        reply = await generateFallbackReply(trimmed, userLoc);
+      } else {
+        try {
+          const history: AIChatTurn[] = messages
+            .filter((m) => m.id !== 'welcome')
+            .slice(-6)
+            .map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.text }));
+          reply = await askTravelAI(trimmed, history);
+        } catch (err) {
+          // No GROQ_API_KEY configured (503), Groq unreachable/erroring
+          // (502), or a network error — fall back rather than show a
+          // broken chat. Genuinely unexpected errors still fall back here
+          // too since a wrong-but-safe fallback beats a dead panel.
+          reply = await generateFallbackReply(trimmed, userLoc);
+        }
+>>>>>>> 343b8828d05f6c53a466162cc573611e0f3a4e50
       }
       setMessages((m) => [...m, { id: `a-${Date.now()}`, role: 'ai', text: reply }]);
     } finally {

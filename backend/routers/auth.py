@@ -2,6 +2,7 @@ import hashlib
 import logging
 import secrets
 import random
+import re
 from datetime import datetime, timedelta, timezone
 import json
 import requests
@@ -21,9 +22,13 @@ from schemas.auth import (
     RegisterRequest,
     SendOtpRequest,
     SendOtpResponse,
+    SendEmailOtpRequest,
     SessionResponse,
+    ValidatePhoneRequest,
+    ValidatePhoneResponse,
     VerifyOtpRequest,
     VerifyOtpResponse,
+    VerifyEmailOtpRequest,
 )
 
 logger = logging.getLogger("auth")
@@ -46,8 +51,61 @@ def generate_otp() -> str:
     return f"{random.randint(0, 999999):06d}"
 
 
-def hash_otp(otp: str, phone: str) -> str:
-    return hashlib.sha256(f"{otp}:{phone}".encode()).hexdigest()
+def hash_otp(otp: str, identifier: str) -> str:
+    return hashlib.sha256(f"{otp}:{identifier}".encode()).hexdigest()
+
+
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _email_domain_exists(email: str) -> bool:
+    """
+    Best-effort "does this email actually exist" check: confirms the
+    domain has valid MX records (i.e. it's a real, mail-receiving domain),
+    not that the specific mailbox exists — there's no free/local way to
+    verify a specific mailbox without actually attempting delivery (which
+    the OTP send itself effectively does). A domain with no MX records
+    can't receive mail at all, so this catches typos and made-up domains
+    before wasting an OTP send on them.
+    """
+    if not _EMAIL_RE.match(email):
+        return False
+    domain = email.rsplit("@", 1)[-1]
+    try:
+        import dns.resolver
+        answers = dns.resolver.resolve(domain, "MX", lifetime=5)
+        return len(answers) > 0
+    except Exception:
+        return False
+
+
+def _send_email(to_email: str, subject: str, body: str) -> bool:
+    """
+    Sends a real email via SMTP if Config.is_smtp_configured(), else logs
+    it (mirroring the existing phone-OTP behavior when no SMS gateway is
+    configured — see Config.OTP_DEBUG_LOG). Returns True if the email was
+    handed off successfully (sent, or logged in debug mode); False on a
+    genuine send failure so the caller can surface an error.
+    """
+    if not Config.is_smtp_configured():
+        if Config.OTP_DEBUG_LOG:
+            logger.info(f"[EMAIL OTP DEBUG] To: {to_email} | Subject: {subject} | Body: {body}")
+        return True
+    try:
+        import smtplib
+        from email.mime.text import MIMEText
+        msg = MIMEText(body)
+        msg["Subject"] = subject
+        msg["From"] = Config.SMTP_FROM
+        msg["To"] = to_email
+        with smtplib.SMTP(Config.SMTP_HOST, Config.SMTP_PORT, timeout=10) as server:
+            server.starttls()
+            server.login(Config.SMTP_USER, Config.SMTP_PASSWORD)
+            server.sendmail(Config.SMTP_FROM, [to_email], msg.as_string())
+        return True
+    except Exception as e:
+        logger.error(f"Failed to send email to {to_email}: {e}")
+        return False
 
 
 def _get_email_from_username(username: str) -> str:
@@ -409,6 +467,84 @@ def verify_otp(payload: VerifyOtpRequest) -> VerifyOtpResponse:
     # OTP is single-use: remove it once successfully verified.
     del _otp_store[phone]
     return VerifyOtpResponse(verified=True, message="OTP verified")
+
+
+@router.post("/send-email-otp", response_model=SendOtpResponse)
+def send_email_otp(payload: SendEmailOtpRequest) -> SendOtpResponse:
+    email = payload.email.strip().lower()
+    if not _EMAIL_RE.match(email):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Enter a valid email address.")
+    if not _email_domain_exists(email):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This email's domain doesn't appear to accept mail. Please check for a typo.",
+        )
+
+    otp = generate_otp()
+    otp_key = f"email:{email}"
+    _otp_store[otp_key] = {
+        "otp_hash": hash_otp(otp, otp_key),
+        "expires_at": datetime.now(timezone.utc) + timedelta(minutes=_OTP_TTL_MINUTES),
+        "attempts": 0,
+    }
+
+    sent = _send_email(
+        email,
+        "Your Suraksha Setu verification code",
+        f"Your verification code is {otp}. It expires in {_OTP_TTL_MINUTES} minutes.\n\nIf you didn't request this, you can ignore this email.",
+    )
+    if not sent:
+        del _otp_store[otp_key]
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Couldn't send the verification email. Please try again.")
+
+    return SendOtpResponse(message="OTP sent")
+
+
+@router.post("/verify-email-otp", response_model=VerifyOtpResponse)
+def verify_email_otp(payload: VerifyEmailOtpRequest) -> VerifyOtpResponse:
+    email = payload.email.strip().lower()
+    otp = payload.otp.strip()
+    otp_key = f"email:{email}"
+
+    record = _otp_store.get(otp_key)
+    if not record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No OTP was requested for this email. Please request a new OTP.",
+        )
+    if datetime.now(timezone.utc) > record["expires_at"]:
+        del _otp_store[otp_key]
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="OTP has expired. Please request a new OTP.")
+    if record["attempts"] >= _OTP_MAX_ATTEMPTS:
+        del _otp_store[otp_key]
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Too many incorrect attempts. Please request a new OTP.")
+    if not secrets.compare_digest(hash_otp(otp, otp_key), record["otp_hash"]):
+        record["attempts"] += 1
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Incorrect OTP. Please try again.")
+
+    del _otp_store[otp_key]
+    return VerifyOtpResponse(verified=True, message="OTP verified")
+
+
+@router.post("/validate-phone", response_model=ValidatePhoneResponse)
+def validate_phone(payload: ValidatePhoneRequest) -> ValidatePhoneResponse:
+    """
+    Format/region validity check via Google's libphonenumber (the
+    phonenumbers package) — confirms the number is a plausible, correctly
+    structured number for the selected country. This is NOT a live
+    carrier lookup (e.g. Twilio Lookup), which would require a paid API
+    and isn't configured here; it catches typos, wrong digit counts, and
+    made-up numbers, but can't confirm the number is currently active/
+    reachable the way phone OTP delivery itself effectively does.
+    """
+    try:
+        import phonenumbers
+        parsed = phonenumbers.parse(payload.phone.strip(), payload.country_code.strip().upper())
+        if not phonenumbers.is_valid_number(parsed):
+            return ValidatePhoneResponse(valid=False, reason="This doesn't look like a valid phone number for the selected country.")
+        return ValidatePhoneResponse(valid=True, e164=phonenumbers.format_number(parsed, phonenumbers.PhoneNumberFormat.E164))
+    except Exception:
+        return ValidatePhoneResponse(valid=False, reason="Enter a valid phone number.")
 
 
 @router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)

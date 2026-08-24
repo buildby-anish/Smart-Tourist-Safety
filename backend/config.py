@@ -27,6 +27,33 @@ class Config:
     OTP_DEBUG_LOG = os.getenv("OTP_DEBUG_LOG", "true").strip().lower() == "true"
     GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
 
+    # SMTP config for sending real email OTPs (see routers/auth.py
+    # send_email_otp). Any standard SMTP relay works (SendGrid, Mailgun,
+    # AWS SES, Gmail app-password, etc.) — just set these on Railway. If
+    # SMTP_HOST is unset, email OTP falls back to debug-log-only mode
+    # (same pattern as phone OTP without an SMS gateway configured), so
+    # signup still works end-to-end locally without real credentials.
+    SMTP_HOST = os.getenv("SMTP_HOST", "")
+    SMTP_PORT = int(os.getenv("SMTP_PORT", "587"))
+    SMTP_USER = os.getenv("SMTP_USER", "")
+    SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
+    SMTP_FROM = os.getenv("SMTP_FROM", "") or SMTP_USER
+
+    @classmethod
+    def is_smtp_configured(cls) -> bool:
+        return bool(cls.SMTP_HOST and cls.SMTP_USER and cls.SMTP_PASSWORD)
+
+    # Groq (OpenAI-compatible) API key for the travel-assistant chat
+    # endpoint (see routers/ai_assistant.py). Free tier, no card required:
+    # https://console.groq.com. If unset, /ai/chat returns 503 and the
+    # frontend falls back to its local rule-based assistant instead of
+    # breaking the Ask AI feature entirely.
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+
+    @classmethod
+    def is_groq_configured(cls) -> bool:
+        return bool(cls.GROQ_API_KEY)
+
     @classmethod
     def is_supabase_configured(cls) -> bool:
         return bool(cls.SUPABASE_URL and cls.SUPABASE_ANON_KEY)

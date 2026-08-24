@@ -687,6 +687,7 @@ export async function syncQueuedSOS(
   return { count: queuedRecords.length, synced: syncedCount };
 }
 
+<<<<<<< HEAD
 // ---------------------------------------------------------------------------
 // Chat (backend/routers/chat.py)
 // ---------------------------------------------------------------------------
@@ -713,3 +714,25 @@ export async function askAIChat(
   });
 }
 
+=======
+export interface AIChatTurn {
+  role: 'user' | 'assistant';
+  content: string;
+}
+
+/**
+ * Calls the backend's Groq-backed travel assistant. Throws ApiError(503)
+ * if no GROQ_API_KEY is configured server-side, or ApiError(502) if Groq
+ * itself is unreachable/errors — callers (AskAIPanel) should catch and
+ * fall back to the local rule-based assistant rather than surface a raw
+ * error, since this is a nice-to-have, not safety-critical.
+ */
+export async function askTravelAI(message: string, history: AIChatTurn[] = []): Promise<string> {
+  const resp = await apiRequest<{ reply: string }>('/ai/chat', {
+    method: 'POST',
+    auth: false,
+    body: { message, history },
+  });
+  return resp.reply;
+}
+>>>>>>> 343b8828d05f6c53a466162cc573611e0f3a4e50
