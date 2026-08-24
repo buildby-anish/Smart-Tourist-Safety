@@ -22,6 +22,26 @@ class VerifyOtpResponse(BaseModel):
     message: str
 
 
+class SendEmailOtpRequest(BaseModel):
+    email: str
+
+
+class VerifyEmailOtpRequest(BaseModel):
+    email: str
+    otp: str
+
+
+class ValidatePhoneRequest(BaseModel):
+    phone: str
+    country_code: str = "IN"  # ISO 3166-1 alpha-2, e.g. "IN", "US", "GB"
+
+
+class ValidatePhoneResponse(BaseModel):
+    valid: bool
+    e164: str | None = None
+    reason: str | None = None
+
+
 class RegisterRequest(BaseModel):
     username: str
     password: str
