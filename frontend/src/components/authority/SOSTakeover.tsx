@@ -32,10 +32,10 @@ export default function SOSTakeover({
   const subtle = 'rgba(255,255,255,0.55)';
 
   return (
-    <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-6" style={{ background: 'rgba(5,10,20,0.85)', backdropFilter: 'blur(4px)' }}>
+    <div className="fixed inset-0 z-[200] flex items-center justify-center p-3 sm:p-6" style={{ background: 'rgba(9,9,11,0.85)', backdropFilter: 'blur(4px)' }}>
       <div
         className="w-full max-w-2xl max-h-[92vh] rounded-3xl overflow-hidden flex flex-col animate-modal-in"
-        style={{ background: '#0a1428', border: '1px solid rgba(220,38,38,0.4)', boxShadow: '0 0 0 4px rgba(220,38,38,0.15), 0 24px 80px rgba(0,0,0,0.6)' }}
+        style={{ background: '#18181b', border: '1px solid rgba(220,38,38,0.4)', boxShadow: '0 0 0 4px rgba(220,38,38,0.15), 0 24px 80px rgba(0,0,0,0.6)' }}
       >
         {/* Header */}
         <div className="flex items-center justify-between px-5 py-4 flex-shrink-0" style={{ background: 'rgba(220,38,38,0.15)', borderBottom: '1px solid rgba(220,38,38,0.3)' }}>

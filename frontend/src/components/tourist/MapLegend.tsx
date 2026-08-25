@@ -17,7 +17,7 @@ interface Props { darkMode: boolean }
 export default function MapLegend({ darkMode: dm }: Props) {
   const [open, setOpen] = useState(false);
 
-  const surface = dm ? '#0c1d33' : '#ffffff';
+  const surface = dm ? '#27272a' : '#ffffff';
   const border = dm ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.09)';
   const text = dm ? '#f1f5f9' : '#0c2340';
   const subtle = dm ? 'rgba(255,255,255,0.44)' : 'rgba(12,35,64,0.44)';

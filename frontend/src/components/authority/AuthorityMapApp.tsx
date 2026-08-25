@@ -196,7 +196,7 @@ export default function AuthorityMapApp({
   const patrolUnitsOnline = units.filter((u) => u.status !== 'Standby').length;
 
   return (
-    <div className="fixed inset-0 overflow-hidden" style={{ background: '#0a1428' }}>
+    <div className="fixed inset-0 overflow-hidden" style={{ background: '#09090b' }}>
       <ActualGoogleMap
         center={DEFAULT_CENTER}
         zoom={5}

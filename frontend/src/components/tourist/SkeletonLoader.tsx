@@ -4,7 +4,7 @@ const sk = (dm: boolean) => (dm ? 'skeleton' : 'skeleton-light');
 
 export function SkeletonMap({ darkMode: dm }: P) {
   return (
-    <div className="fixed inset-0 flex flex-col items-center justify-center gap-4" style={{ background: dm ? '#070f1f' : '#e8eaed', fontFamily: 'Inter, sans-serif' }}>
+    <div className="fixed inset-0 flex flex-col items-center justify-center gap-4" style={{ background: dm ? '#09090b' : '#e8eaed', fontFamily: 'Inter, sans-serif' }}>
       <div className="relative flex items-center justify-center">
         <div className="absolute w-20 h-20 rounded-full animate-ping" style={{ background: 'rgba(255,153,51,0.08)' }} />
         <div className="absolute w-14 h-14 rounded-full animate-pulse" style={{ background: 'rgba(255,153,51,0.12)' }} />

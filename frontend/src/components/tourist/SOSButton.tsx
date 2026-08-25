@@ -34,7 +34,7 @@ export default function SOSButton({ onTrigger }: Props) {
         <>
           <div
             className="fixed inset-0 z-[60] animate-fade-in"
-            style={{ background: 'rgba(7,15,31,0.7)', backdropFilter: 'blur(6px)' }}
+            style={{ background: 'rgba(18,18,18,0.7)', backdropFilter: 'blur(6px)' }}
             onClick={() => stage === 'confirm' && setStage('idle')}
           />
           <div
@@ -43,7 +43,7 @@ export default function SOSButton({ onTrigger }: Props) {
           >
             <div
               className="w-full max-w-sm rounded-2xl p-6 animate-modal-in"
-              style={{ background: '#0a1628', border: '1px solid rgba(220,38,38,0.25)', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}
+              style={{ background: '#18181b', border: '1px solid rgba(220,38,38,0.25)', boxShadow: '0 24px 64px rgba(0,0,0,0.6)' }}
             >
               {(stage === 'confirm' || stage === 'sending') && (
                 <>

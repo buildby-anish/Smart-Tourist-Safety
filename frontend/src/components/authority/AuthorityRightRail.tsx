@@ -168,7 +168,7 @@ function BroadcastComposer({
   const estimatedRecipients = Math.round(1800 * (radiusKm / 5));
   const text = dm ? '#f1f5f9' : '#0c2340';
   const subtle = dm ? 'rgba(255,255,255,0.5)' : 'rgba(12,35,64,0.5)';
-  const surface = dm ? '#0a1428' : '#ffffff';
+  const surface = dm ? '#18181b' : '#ffffff';
   const border = dm ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
 
   const handlePublish = () => {

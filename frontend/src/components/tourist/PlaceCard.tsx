@@ -144,7 +144,7 @@ interface Props {
 export default function PlaceCard({ placeId, isMobile, darkMode: dm, onClose, onStartDirections }: Props) {
   const place = placeId ? (DB[placeId] || DB.gate) : DB.gate;
 
-  const surface = dm ? '#0a1628' : '#ffffff';
+  const surface = dm ? '#18181b' : '#ffffff';
   const border = dm ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.07)';
   const text = dm ? '#f1f5f9' : '#0c2340';
   const subtle = dm ? 'rgba(255,255,255,0.48)' : 'rgba(12,35,64,0.48)';

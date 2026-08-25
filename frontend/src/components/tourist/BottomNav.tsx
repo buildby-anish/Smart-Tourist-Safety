@@ -22,7 +22,7 @@ interface Props {
 }
 
 export default function BottomNav({ active, darkMode: dm, onChange, onProtected, isAuthenticated, sosButton }: Props) {
-  const bg = dm ? '#0a1628' : '#ffffff';
+  const bg = dm ? '#18181b' : '#ffffff';
   const border = dm ? 'rgba(255,255,255,0.07)' : 'rgba(0,0,0,0.08)';
 
   const handle = (id: string, prot: boolean) => {

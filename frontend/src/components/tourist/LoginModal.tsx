@@ -72,7 +72,7 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
 
   useEffect(() => () => { if (resendTimer.current) clearInterval(resendTimer.current); }, []);
 
-  const surface = dm ? '#0a1628' : '#ffffff';
+  const surface = dm ? '#18181b' : '#ffffff';
   const border = dm ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
   const text = dm ? '#f1f5f9' : '#0c2340';
   const subtle = dm ? 'rgba(255,255,255,0.45)' : 'rgba(12,35,64,0.45)';

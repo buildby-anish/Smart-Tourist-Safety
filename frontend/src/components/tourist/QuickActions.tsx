@@ -67,7 +67,7 @@ export default function QuickActions({ darkMode: dm, active, onChange }: Props) 
           onClick={() => handleScroll('left')}
           className="absolute left-0 z-30 w-8 h-8 rounded-full border flex items-center justify-center transition-all hover:scale-105 active:scale-95 shadow-md cursor-pointer"
           style={{
-            background: dm ? '#0a1628' : '#ffffff',
+            background: dm ? '#18181b' : '#ffffff',
             borderColor: dm ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)',
             color: dm ? '#f1f5f9' : '#0c2340',
           }}
@@ -117,7 +117,7 @@ export default function QuickActions({ darkMode: dm, active, onChange }: Props) 
           onClick={() => handleScroll('right')}
           className="absolute right-0 z-30 w-8 h-8 rounded-full border flex items-center justify-center transition-all hover:scale-105 active:scale-95 shadow-md cursor-pointer"
           style={{
-            background: dm ? '#0a1628' : '#ffffff',
+            background: dm ? '#18181b' : '#ffffff',
             borderColor: dm ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.12)',
             color: dm ? '#f1f5f9' : '#0c2340',
           }}

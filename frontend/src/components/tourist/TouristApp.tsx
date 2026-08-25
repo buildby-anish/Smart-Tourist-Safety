@@ -167,7 +167,7 @@ export default function TouristApp({
     }
   }, [isAuthenticated, user, onTriggerSos]);
 
-  const bg = dm ? '#070f1f' : '#e8eaed';
+  const bg = dm ? '#09090b' : '#e8eaed';
 
   // ── Auth gate screen: rendered instead of any tourist feature until the
   // existing LoginModal (opened above via showLogin/setShowLogin, and
@@ -206,7 +206,7 @@ export default function TouristApp({
           moment a GPS ping trips a RESTRICTED zone. ── */}
       {geofenceAlert && (
         <div className="absolute inset-0 z-50 flex items-center justify-center px-6" style={{ background: 'rgba(0,0,0,0.55)' }}>
-          <div className="w-full max-w-sm rounded-2xl p-5 space-y-3" style={{ background: dm ? '#0c1d33' : '#ffffff', boxShadow: '0 10px 40px rgba(0,0,0,0.4)' }}>
+          <div className="w-full max-w-sm rounded-2xl p-5 space-y-3" style={{ background: dm ? '#27272a' : '#ffffff', boxShadow: '0 10px 40px rgba(0,0,0,0.4)' }}>
             <p className="text-sm font-bold" style={{ color: '#dc2626' }}>⚠ Restricted zone alert</p>
             <p className="text-sm" style={{ color: dm ? '#f1f5f9' : '#0c2340' }}>{geofenceAlert}</p>
             <button
@@ -371,7 +371,7 @@ function MapControlBtn({ children, onClick, label, dm }: { children: React.React
       aria-label={label}
       className="w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-150 hover:scale-105 active:scale-95"
       style={{
-        background: dm ? '#0c1d33' : '#ffffff',
+        background: dm ? '#27272a' : '#ffffff',
         border: `1px solid ${dm ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.09)'}`,
         boxShadow: '0 2px 12px rgba(0,0,0,0.25)',
         color: dm ? '#f1f5f9' : '#0c2340',
