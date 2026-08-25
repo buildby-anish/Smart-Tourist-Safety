@@ -80,6 +80,7 @@ export default function TouristApp({
     const socket = connectTouristFeed(user.id, (event) => {
       if (event.type === 'geofence.alert') {
         setGeofenceAlert(event.data?.message || 'You have entered a restricted zone. Please proceed with caution.');
+        setHasNewNotification(true);
       }
     });
     return () => socket?.close();
@@ -116,6 +117,7 @@ export default function TouristApp({
     setTab('map');
   }, []);
   const [showAskAI, setShowAskAI] = useState(false);
+  const [hasNewNotification, setHasNewNotification] = useState(false);
 
   const handleLocateMe = useCallback(() => { setRecenterTrigger((t) => t + 1); }, []);
 
@@ -220,23 +222,31 @@ export default function TouristApp({
         </div>
       )}
 
-      {/* ── Persistent top-area alerts entry point (moved out of bottom nav) ── */}
-      <button
-        onClick={() => setTab('alerts')}
-        aria-label="Alerts"
-        aria-current={tab === 'alerts' ? 'page' : undefined}
-        className="absolute z-30 w-10 h-10 rounded-full flex items-center justify-center transition-all duration-150 hover:scale-105 active:scale-95"
-        style={{
-          top: 'calc(env(safe-area-inset-top, 0px) + 12px)',
-          right: 14,
-          background: dm ? 'rgba(10,20,40,0.92)' : 'rgba(255,255,255,0.95)',
-          border: `1.5px solid ${tab === 'alerts' ? '#FF9933' : dm ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
-          boxShadow: '0 2px 14px rgba(0,0,0,0.25)',
-          backdropFilter: 'blur(16px)',
-        }}
-      >
-        <Bell size={17} strokeWidth={2.2} style={{ color: tab === 'alerts' ? '#FF9933' : dm ? '#f1f5f9' : '#0c2340' }} />
-      </button>
+      {/* ── Top-area alerts entry point (only visible on map tab) ── */}
+      {tab === 'map' && (
+        <button
+          onClick={() => {
+            setTab('alerts');
+            setHasNewNotification(false);
+          }}
+          aria-label="Alerts"
+          aria-current={tab === 'alerts' ? 'page' : undefined}
+          className="absolute z-30 w-10 h-10 rounded-full flex items-center justify-center transition-all duration-150 hover:scale-105 active:scale-95"
+          style={{
+            top: 'calc(env(safe-area-inset-top, 0px) + 12px)',
+            right: 14,
+            background: dm ? 'rgba(10,20,40,0.92)' : 'rgba(255,255,255,0.95)',
+            border: `1.5px solid ${tab === 'alerts' ? '#FF9933' : dm ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
+            boxShadow: '0 2px 14px rgba(0,0,0,0.25)',
+            backdropFilter: 'blur(16px)',
+          }}
+        >
+          {hasNewNotification && (
+            <div className="absolute inset-[-4px] rounded-full border-2 border-red-500 border-t-transparent animate-spin" />
+          )}
+          <Bell size={17} strokeWidth={2.2} style={{ color: tab === 'alerts' ? '#FF9933' : dm ? '#f1f5f9' : '#0c2340' }} />
+        </button>
+      )}
 
       {/* ── Top chrome: search + quick actions (mobile & desktop) ── */}
       {tab === 'map' && (
@@ -283,7 +293,7 @@ export default function TouristApp({
             {/* Right-side: Ask AI (replaces manual zoom +/- controls — the
                 map already supports pinch/scroll zoom natively; a fixed
                 button here now opens the AI assistant instead). */}
-            <div className="absolute right-4 z-20 flex flex-col gap-2.5 pointer-events-none" style={{ top: 'calc(env(safe-area-inset-top, 0px) + 140px)' }}>
+            <div className="absolute right-4 z-20 flex-col gap-2.5 pointer-events-none md:flex hidden" style={{ top: 'calc(env(safe-area-inset-top, 0px) + 140px)' }}>
               <div className="pointer-events-auto flex flex-col gap-2.5">
                 <button
                   onClick={() => setShowAskAI(true)}
@@ -303,6 +313,19 @@ export default function TouristApp({
             {/* Bottom-right controls: Navigation (Locate Me) + Legend */}
             <div className="absolute right-4 z-20 flex flex-col gap-2.5 pointer-events-none" style={{ bottom: 84 }}>
               <div className="pointer-events-auto flex flex-col gap-2.5">
+                {/* Ask AI button on phone view */}
+                <button
+                  onClick={() => setShowAskAI(true)}
+                  aria-label="Ask AI"
+                  className="w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-150 hover:scale-105 active:scale-95 md:hidden flex"
+                  style={{
+                    background: 'linear-gradient(135deg, #FF9933, #e67a0f)',
+                    boxShadow: '0 4px 16px rgba(255,153,51,0.4)',
+                    color: '#fff',
+                  }}
+                >
+                  <Sparkles size={17} />
+                </button>
                 <MapControlBtn dm={dm} onClick={handleLocateMe} label="Locate me"><Navigation size={15} /></MapControlBtn>
                 <MapLegend darkMode={dm} />
               </div>
