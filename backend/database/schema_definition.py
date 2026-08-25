@@ -186,7 +186,15 @@ TABLES = {
         "indexes": {
             "idx_locations_tourist_id": "tourist_id",
             "idx_locations_recorded_at": "recorded_at",
-            "idx_locations_geom": "geom USING GIST"
+            "idx_locations_geom": "geom USING GIST",
+            # Supports GET /authority/locations/live's
+            # "DISTINCT ON (tourist_id) ... ORDER BY tourist_id, recorded_at DESC"
+            # query — the two existing single-column indexes above can't
+            # satisfy that access pattern efficiently on their own; Postgres
+            # would still need a sort/scan across every row per tourist.
+            # This composite index lets it walk straight to each tourist's
+            # single latest row instead.
+            "idx_locations_tourist_recorded": "tourist_id, recorded_at DESC"
         }
     },
     "geofences": {

@@ -6,7 +6,7 @@ from routers.auth import login as auth_login, require_authority
 from schemas.auth import LoginRequest, LoginResponse, SessionResponse
 from schemas.alert import AlertResponse
 from schemas.incident import IncidentResponse
-from schemas.location import CoordinatesResponse
+from schemas.location import CoordinatesResponse, LiveTouristLocation
 from schemas.tourist import TouristResponse
 
 router = APIRouter(prefix="/authority", tags=["authority"])
@@ -177,4 +177,88 @@ def get_authority_incident_location(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve incident location: {str(e)}"
+        )
+
+
+@router.get("/locations/live", response_model=list[LiveTouristLocation])
+def get_live_tourist_locations(
+    current_user: SessionResponse = Depends(require_authority)
+) -> list[LiveTouristLocation]:
+    """
+    Every tourist's current/last-known position in one call, for the
+    authority map's initial hydration. Existing endpoints only cover one
+    tourist's full history (GET /locations/tourist/{id}) or one profile
+    (GET /authority/tourists/{id}) — neither returns "all tourists' latest
+    positions" for the map to seed markers from before the
+    /ws/authority location.ping stream starts updating them incrementally.
+    """
+    # 1. Fallback Mode
+    if not is_db_active():
+        from routers.locations import _in_memory_location_store
+        from routers.tourists import _in_memory_tourist_store
+        from routers.incidents import _in_memory_incident_store
+
+        open_tourist_ids = {
+            inc.tourist_id for inc in _in_memory_incident_store.values()
+            if (inc.status or "").upper() in ("OPEN", "INVESTIGATING")
+        }
+        results: list[LiveTouristLocation] = []
+        for tourist_id, pings in _in_memory_location_store.items():
+            if not pings:
+                continue
+            latest = max(pings, key=lambda p: p.recorded_at)
+            profile = _in_memory_tourist_store.get(tourist_id)
+            results.append(LiveTouristLocation(
+                tourist_id=tourist_id,
+                full_name=profile.full_name if profile else None,
+                latitude=latest.latitude,
+                longitude=latest.longitude,
+                speed=latest.speed,
+                heading=latest.heading,
+                recorded_at=latest.recorded_at,
+                safety_status="SOS Active" if tourist_id in open_tourist_ids else "Safe",
+            ))
+        return results
+
+    # 2. Database Mode
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id) as cur:
+            # DISTINCT ON (tourist_id) ... ORDER BY tourist_id, recorded_at DESC
+            # picks exactly one row per tourist — their most recent ping —
+            # supported by idx_locations_tourist_recorded (see
+            # database/schema_definition.py / migrations/003_live_location_index.sql).
+            # safety_status is derived per-row via a correlated EXISTS against
+            # open incidents rather than stored anywhere, so it's always
+            # current as of this call.
+            cur.execute("""
+                SELECT DISTINCT ON (l.tourist_id)
+                    l.tourist_id, tp.full_name, l.latitude, l.longitude,
+                    l.speed, l.heading, l.recorded_at,
+                    EXISTS (
+                        SELECT 1 FROM public.incidents i
+                        WHERE i.tourist_id = l.tourist_id
+                          AND i.status IN ('OPEN', 'INVESTIGATING')
+                    ) AS has_open_incident
+                FROM public.locations l
+                LEFT JOIN public.tourist_profiles tp ON tp.id = l.tourist_id
+                ORDER BY l.tourist_id, l.recorded_at DESC;
+            """)
+            rows = cur.fetchall()
+            return [
+                LiveTouristLocation(
+                    tourist_id=row[0],
+                    full_name=row[1],
+                    latitude=float(row[2]),
+                    longitude=float(row[3]),
+                    speed=float(row[4]) if row[4] is not None else None,
+                    heading=float(row[5]) if row[5] is not None else None,
+                    recorded_at=row[6],
+                    safety_status="SOS Active" if row[7] else "Safe",
+                )
+                for row in rows
+            ]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve live tourist locations: {str(e)}"
         )

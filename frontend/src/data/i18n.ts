@@ -183,7 +183,27 @@ export const i18n = {
     chatbotTitle: 'Suraksha AI Safety Assistant',
     quickContactsBtn: 'Emergency Hotlines Drawer',
     broadcastAlertTitle: 'Geofenced Safety Advisory Broadcast',
-    simulateBroadcastBtn: 'Simulate Live Area Broadcast Test'
+    simulateBroadcastBtn: 'Simulate Live Area Broadcast Test',
+
+    // Authority Command Map (new full-screen authority console)
+    authorityCommandLabel: 'AUTHORITY COMMAND',
+    touristsTracked: 'Tourists Tracked',
+    patrolUnitsOnline: 'Patrol Units',
+    filterAll: 'All',
+    filterSosActive: 'SOS Active',
+    filterWatch: 'Watch',
+    filterSafe: 'Safe',
+    activeIncidentsLabel: 'Active Incidents',
+    viewAuditLogsBtn: 'Audit Logs',
+    sosTakeoverTitle: 'ACTIVE EMERGENCY',
+    callTouristBtn: 'Call Tourist',
+    resolveBtn: 'Resolve',
+    acknowledgeBtn: 'Acknowledge',
+    noActiveIncidents: 'No active incidents',
+    noTouristsTracked: 'No tourists currently tracked',
+    lastSeenLabel: 'Last seen',
+    emergencyContactsLabel: 'Emergency Contacts',
+    closeTakeoverBtn: 'Close'
   },
   
   hi: {
@@ -368,6 +388,26 @@ export const i18n = {
     chatbotTitle: 'सुरक्षा एआई सहायक',
     quickContactsBtn: 'आपातकालीन हॉटलाइन',
     broadcastAlertTitle: 'जियोफेंस सुरक्षा चेतावनी प्रसारण',
-    simulateBroadcastBtn: 'लाइव प्रसारण परीक्षण ट्रिगर करें'
+    simulateBroadcastBtn: 'लाइव प्रसारण परीक्षण ट्रिगर करें',
+
+    // Authority Command Map
+    authorityCommandLabel: 'प्राधिकरण कमान',
+    touristsTracked: 'ट्रैक किए गए पर्यटक',
+    patrolUnitsOnline: 'गश्ती दल',
+    filterAll: 'सभी',
+    filterSosActive: 'एसओएस सक्रिय',
+    filterWatch: 'निगरानी',
+    filterSafe: 'सुरक्षित',
+    activeIncidentsLabel: 'सक्रिय घटनाएं',
+    viewAuditLogsBtn: 'ऑडिट लॉग',
+    sosTakeoverTitle: 'सक्रिय आपातकाल',
+    callTouristBtn: 'पर्यटक को कॉल करें',
+    resolveBtn: 'समाधान करें',
+    acknowledgeBtn: 'स्वीकार करें',
+    noActiveIncidents: 'कोई सक्रिय घटना नहीं',
+    noTouristsTracked: 'फिलहाल कोई पर्यटक ट्रैक नहीं हो रहा',
+    lastSeenLabel: 'अंतिम बार देखा गया',
+    emergencyContactsLabel: 'आपातकालीन संपर्क',
+    closeTakeoverBtn: 'बंद करें'
   }
 };

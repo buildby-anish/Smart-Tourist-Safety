@@ -243,6 +243,7 @@ CREATE INDEX IF NOT EXISTS idx_points_of_interest_coords ON public.points_of_int
 CREATE INDEX IF NOT EXISTS idx_locations_tourist_id ON public.locations(tourist_id);
 CREATE INDEX IF NOT EXISTS idx_locations_recorded_at ON public.locations(recorded_at);
 CREATE INDEX IF NOT EXISTS idx_locations_geom ON public.locations(geom USING GIST);
+CREATE INDEX IF NOT EXISTS idx_locations_tourist_recorded ON public.locations(tourist_id, recorded_at DESC);
 CREATE INDEX IF NOT EXISTS idx_geofences_zone_type ON public.geofences(zone_type);
 CREATE INDEX IF NOT EXISTS idx_geofences_geom ON public.geofences(geom USING GIST);
 CREATE INDEX IF NOT EXISTS idx_geofence_breaches_tourist_id ON public.geofence_breaches(tourist_id);

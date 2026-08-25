@@ -450,6 +450,17 @@ export async function getAuthorityIncidentLocation(incidentId: string): Promise<
 }
 
 /**
+ * Every tourist's current/last-known position in one call — used to seed
+ * the authority map's markers on mount. After this initial hydration,
+ * position updates arrive incrementally via the existing `location.ping`
+ * events on the authority websocket feed (connectAuthorityFeed) — this is
+ * not polled.
+ */
+export async function getLiveTouristLocations(): Promise<any[]> {
+  return apiRequest("/authority/locations/live");
+}
+
+/**
  * Connects the Gateway's existing MFA form (Badge ID + Auth Code) to the real
  * backend. The Auth Code field is already a masked "password" input in the
  * UI, so Badge ID -> username and Auth Code -> password is a direct mapping,

@@ -204,6 +204,15 @@ export interface GeoFenceZone {
   radiusKm: number;
 }
 
+export interface LiveLocationPing {
+  tourist_id: string;
+  latitude: number;
+  longitude: number;
+  speed?: number | null;
+  heading?: number | null;
+  recorded_at: string;
+}
+
 export type SosStepState = 'ready' | 'confirming' | 'sending' | 'success' | 'error' | 'active';
 
 // ---------------------------------------------------------------------------

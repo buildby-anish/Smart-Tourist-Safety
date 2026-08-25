@@ -11,26 +11,25 @@ import {
   AnomalyCluster,
   BroadcastAlert,
   AuditLog,
-  AILog
+  AILog,
+  LiveLocationPing
 } from './types';
 import {
   INITIAL_TOURISTS,
   INITIAL_INCIDENTS,
   INITIAL_PATROL_UNITS,
   POLICE_STATIONS,
+  HOSPITALS,
   ANOMALY_CLUSTERS,
   INITIAL_BROADCASTS,
   INITIAL_AUDIT_LOGS,
   INITIAL_AI_LOGS
 } from './data/mockData';
+import { i18n } from './data/i18n';
 import { Header } from './components/Header';
 import { Gateway } from './components/Gateway';
 import TouristApp from './components/tourist/TouristApp';
-import { ModuleAIHub } from './components/ModuleAIHub';
-import { ModuleTouristTracking } from './components/ModuleTouristTracking';
-import { ModuleSOSMap } from './components/ModuleSOSMap';
-import { ModuleBroadcast } from './components/ModuleBroadcast';
-import { ModuleAnalyticsAudit } from './components/ModuleAnalyticsAudit';
+import AuthorityMapApp from './components/authority/AuthorityMapApp';
 import {
   authenticateAuthority,
   getAuthorityIncidents,
@@ -88,6 +87,12 @@ export default function App() {
   const [broadcasts, setBroadcasts] = useState<BroadcastAlert[]>(INITIAL_BROADCASTS);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(INITIAL_AUDIT_LOGS);
   const [aiLogs] = useState<AILog[]>(INITIAL_AI_LOGS);
+  // Incrementally updated by location.ping events on the authority socket
+  // (see the connectAuthorityFeed effect below) — the authority map does
+  // ONE REST call (getLiveTouristLocations) on mount to hydrate initial
+  // positions, then relies entirely on this for live updates rather than
+  // polling.
+  const [liveLocations, setLiveLocations] = useState<Record<string, LiveLocationPing>>({});
 
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [prefilledTouristId, setPrefilledTouristId] = useState('');
@@ -322,6 +327,8 @@ export default function App() {
     const socket = connectAuthorityFeed((event) => {
       if (event.type === 'sos.created' || event.type === 'incident.updated' || event.type === 'geofence.breach') {
         refreshIncidentsFromBackend();
+      } else if (event.type === 'location.ping' && event.data?.tourist_id) {
+        setLiveLocations((prev) => ({ ...prev, [event.data.tourist_id]: event.data }));
       }
     });
     return () => socket?.close();
@@ -638,8 +645,10 @@ export default function App() {
       )}
 
       
-      {/* Command Header */}
-      {userRole !== 'tourist' && (
+      {/* Command Header — the authority role now renders its own
+          full-screen AuthorityHeader (see AuthorityMapApp below) instead
+          of this bar; still used for the Gateway role-picker screen. */}
+      {userRole !== 'tourist' && userRole !== 'authority' && (
         <Header
           language={language}
           onLanguageChange={setLanguage}
@@ -683,68 +692,26 @@ export default function App() {
           onLanguageChange={setLanguage}
         />
       ) : (
-        <div className="flex-1 flex flex-col max-w-[1700px] w-full mx-auto">
-          
-          {/* Module Screen Content */}
-          <main className="flex-1 p-4 sm:p-6 overflow-y-auto">
-            {activeModule === 'ai_hub' && (
-              <ModuleAIHub
-                language={language}
-                clusters={clusters}
-                aiLogs={aiLogs}
-                onInvestigateCluster={(cluster) => {
-                  setPrefilledTouristId('TR-88219');
-                  setActiveModule('tourist_tracking');
-                }}
-                onNavigateToMap={() => setActiveModule('sos_map')}
-              />
-            )}
-
-            {activeModule === 'tourist_tracking' && (
-              <ModuleTouristTracking
-                language={language}
-                tourists={tourists}
-                onLogAudit={handleLogAudit}
-                onDispatchToTourist={(tourist) => {
-                  setActiveModule('sos_map');
-                }}
-                onSendSmsToTourist={(tourist) => {
-                  setActiveModule('broadcast');
-                }}
-                onMarkSafe={handleMarkTouristSafe}
-                prefilledTouristId={prefilledTouristId}
-              />
-            )}
-
-            {activeModule === 'sos_map' && (
-              <ModuleSOSMap
-                language={language}
-                incidents={incidents}
-                units={units}
-                stations={stations}
-                onDispatchUnit={handleDispatchUnit}
-                onResolveIncident={handleResolveIncident}
-                onAddMockSos={handleAddMockSos}
-              />
-            )}
-
-            {activeModule === 'broadcast' && (
-              <ModuleBroadcast
-                language={language}
-                broadcasts={broadcasts}
-                onSendBroadcast={handleSendBroadcast}
-              />
-            )}
-
-            {activeModule === 'analytics_audit' && (
-              <ModuleAnalyticsAudit
-                language={language}
-                auditLogs={auditLogs}
-              />
-            )}
-          </main>
-
-        </div>
+        <AuthorityMapApp
+          language={language}
+          onLanguageChange={setLanguage}
+          darkMode={darkMode}
+          onToggleDarkMode={() => setDarkMode(!darkMode)}
+          onLogout={handleLogout}
+          officerName={getUsername() || i18n[language].officerName}
+          tourists={tourists}
+          incidents={incidents}
+          units={units}
+          stations={stations}
+          hospitals={HOSPITALS}
+          clusters={clusters}
+          auditLogs={auditLogs}
+          liveLocations={liveLocations}
+          onDispatchUnit={handleDispatchUnit}
+          onResolveIncident={handleResolveIncident}
+          onMarkTouristSafe={handleMarkTouristSafe}
+          onSendBroadcast={handleSendBroadcast}
+        />
       )}
 
       {showLogin && (

@@ -47,3 +47,22 @@ class LocationPingResponse(BaseModel):
 class CoordinatesResponse(BaseModel):
     latitude: float | None = None
     longitude: float | None = None
+
+
+class LiveTouristLocation(BaseModel):
+    """
+    One tourist's current/last-known position, for the authority
+    dashboard's initial map hydration (GET /authority/locations/live).
+    Deliberately mirrors LocationPingResponse's field names/types rather
+    than duplicating a divergent shape, plus full_name (for the map
+    marker label) and safety_status (derived from open incidents, not
+    stored — see routers/authority.py).
+    """
+    tourist_id: UUID
+    full_name: str | None = None
+    latitude: float
+    longitude: float
+    speed: float | None = None
+    heading: float | None = None
+    recorded_at: datetime
+    safety_status: str  # "Safe" | "SOS Active" — mirrors frontend TouristProfile['safetyStatus']
