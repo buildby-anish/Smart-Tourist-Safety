@@ -47,7 +47,8 @@ class Config:
     # https://console.groq.com. If unset, /ai/chat returns 503 and the
     # frontend falls back to its local rule-based assistant instead of
     # breaking the Ask AI feature entirely.
-    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "")
+    GROQ_API_KEY = os.getenv("GROQ_API_KEY", "").strip().strip('"').strip("'")
+    GROQ_MODEL = os.getenv("GROQ_MODEL", "llama-3.3-70b-versatile").strip().strip('"').strip("'")
 
     @classmethod
     def is_groq_configured(cls) -> bool:

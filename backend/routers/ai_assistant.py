@@ -14,7 +14,7 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 # periodically retires/renames free-tier models; this is the current
 # (Aug 2026) generally-available default.
 GROQ_CHAT_URL = "https://api.groq.com/openai/v1/chat/completions"
-GROQ_MODEL = "llama-3.3-70b-versatile"
+GROQ_MODEL = Config.GROQ_MODEL
 
 # Keeps the assistant on-topic and bounds cost/abuse. This is a system
 # prompt, not a hard filter — a sufficiently adversarial user could try to
