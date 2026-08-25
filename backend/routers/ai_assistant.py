@@ -44,7 +44,14 @@ _MAX_HISTORY_TURNS = 6  # most recent N turns only, to bound tokens per request
 
 @router.post("/chat", response_model=TravelChatResponse)
 def travel_chat(payload: TravelChatRequest) -> TravelChatResponse:
+    logger.info(f"GROQ_API_KEY configured: {Config.is_groq_configured()}")
+    if Config.is_groq_configured():
+        masked = Config.GROQ_API_KEY[:8] + "..." if len(Config.GROQ_API_KEY) > 8 else "too short"
+        logger.info(f"GROQ_API_KEY value: {masked}")
+        logger.info(f"Using GROQ_MODEL: {GROQ_MODEL}")
+
     if not Config.is_groq_configured():
+        logger.error("Request failed: Groq API key is empty or not configured.")
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="AI assistant is not configured on the server yet.",
@@ -80,11 +87,17 @@ def travel_chat(payload: TravelChatRequest) -> TravelChatResponse:
         )
     except requests.RequestException as e:
         logger.error(f"Groq request failed: {e}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Couldn't reach the AI assistant. Please try again.")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Couldn't reach the AI assistant: {str(e)}",
+        )
 
     if resp.status_code != 200:
         logger.error(f"Groq returned {resp.status_code}: {resp.text[:500]}")
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="AI assistant is temporarily unavailable.")
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"AI assistant returned error status {resp.status_code}: {resp.text[:200]}",
+        )
 
     try:
         data = resp.json()

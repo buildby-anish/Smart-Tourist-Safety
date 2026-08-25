@@ -132,6 +132,7 @@ export default function AskAIPanel({ open, onClose, darkMode: dm, user }: Props)
           // (502), or a network error — fall back rather than show a
           // broken chat. Genuinely unexpected errors still fall back here
           // too since a wrong-but-safe fallback beats a dead panel.
+          console.error("AskAI request failed:", err);
           reply = await generateFallbackReply(trimmed, userLoc);
         }
       }
