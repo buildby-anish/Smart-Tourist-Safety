@@ -78,8 +78,22 @@ def fetch_document(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="DigiLocker session not found")
 
     adapter = get_active_adapter()
+
+    # Look up the tourist's actual registered full_name so the mock
+    # adapter echoes back the real identity they signed up with, instead
+    # of an unrelated randomly-picked demo name — a real DigiLocker pull
+    # would return the identity tied to their own document, not a
+    # stranger's. Falls back to None (mock adapter then uses a generic
+    # placeholder name) if the profile lookup fails for any reason.
+    registered_name = None
     try:
-        doc = adapter.fetch_document(session["document_type"], str(session["tourist_id"]))
+        from routers.tourists import _get_tourist_or_404
+        registered_name = _get_tourist_or_404(session["tourist_id"], current_user).full_name
+    except Exception:
+        pass
+
+    try:
+        doc = adapter.fetch_document(session["document_type"], str(session["tourist_id"]), registered_name)
     except NotImplementedError as e:
         session["status"] = DigiLockerSessionStatus.FAILED
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(e))

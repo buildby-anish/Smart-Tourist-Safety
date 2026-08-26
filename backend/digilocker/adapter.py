@@ -41,7 +41,7 @@ class DigiLockerAdapter(ABC):
         raise NotImplementedError
 
     @abstractmethod
-    def fetch_document(self, document_type: DigiLockerDocType, tourist_id: str) -> DigiLockerDocument:
+    def fetch_document(self, document_type: DigiLockerDocType, tourist_id: str, registered_name: str | None = None) -> DigiLockerDocument:
         raise NotImplementedError
 
 
@@ -52,13 +52,16 @@ class MockDigiLockerAdapter(DigiLockerAdapter):
     def initiate_auth(self, tourist_id: str) -> str | None:
         return None  # mock mode: caller can go straight to fetch_document
 
-    def fetch_document(self, document_type: DigiLockerDocType, tourist_id: str) -> DigiLockerDocument:
-        # Deterministic-looking but fake — seeded off tourist_id so repeated
-        # calls in the same demo session return the same fake identity
-        # instead of a different random one each time.
+    def fetch_document(self, document_type: DigiLockerDocType, tourist_id: str, registered_name: str | None = None) -> DigiLockerDocument:
+        # The name must match what the tourist actually registered with —
+        # a real DigiLocker pull would return the identity tied to their
+        # real Aadhaar/PAN, not an unrelated fake person. Only the document
+        # number is fabricated (deterministic per tourist_id+doc_type so
+        # repeat calls in the same demo session stay consistent), since
+        # nobody actually typed in a real government ID number.
         rng = random.Random(tourist_id + document_type.value)
         digits = "".join(rng.choice(string.digits) for _ in range(12))
-        name = rng.choice(_MOCK_NAMES)
+        name = registered_name or rng.choice(_MOCK_NAMES)
 
         if document_type == DigiLockerDocType.AADHAAR:
             masked = f"XXXX XXXX {digits[-4:]}"
@@ -89,7 +92,7 @@ class DigiLockerOAuthAdapter(DigiLockerAdapter):
             f"&redirect_uri={self._redirect_uri}&state={tourist_id}&response_type=code"
         )
 
-    def fetch_document(self, document_type: DigiLockerDocType, tourist_id: str) -> DigiLockerDocument:
+    def fetch_document(self, document_type: DigiLockerDocType, tourist_id: str, registered_name: str | None = None) -> DigiLockerDocument:
         # Requires a completed OAuth code exchange (session already carries
         # an access token by the time fetch_document is reachable in the
         # router flow below) plus the actual API Setu document-pull call.
