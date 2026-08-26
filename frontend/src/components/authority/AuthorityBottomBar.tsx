@@ -1,4 +1,4 @@
-import { Radio, Send, CheckCircle2, FileText } from 'lucide-react';
+import { Radio, Send, CheckCircle2, FileText, Settings } from 'lucide-react';
 import { Language, PatrollingUnit } from '../../types';
 import { i18n } from '../../data/i18n';
 
@@ -10,6 +10,7 @@ interface Props {
   onBroadcastClick: () => void;
   onMarkSafeClick: () => void;
   onAuditLogsClick: () => void;
+  onGeofenceManagerClick: () => void;
 }
 
 const UNIT_STATUS_COLOR: Record<PatrollingUnit['status'], string> = {
@@ -20,7 +21,7 @@ const UNIT_STATUS_COLOR: Record<PatrollingUnit['status'], string> = {
 };
 
 export default function AuthorityBottomBar({
-  language, darkMode: dm, units, onDispatchClick, onBroadcastClick, onMarkSafeClick, onAuditLogsClick,
+  language, darkMode: dm, units, onDispatchClick, onBroadcastClick, onMarkSafeClick, onAuditLogsClick, onGeofenceManagerClick,
 }: Props) {
   const t = i18n[language];
   const surface = dm ? 'rgba(10,20,40,0.94)' : 'rgba(255,255,255,0.96)';
@@ -33,6 +34,7 @@ export default function AuthorityBottomBar({
     { label: t.sendBroadcastBtn, icon: Send, onClick: onBroadcastClick, color: '#FF9933' },
     { label: t.markSafeBtn, icon: CheckCircle2, onClick: onMarkSafeClick, color: '#138808' },
     { label: t.viewAuditLogsBtn, icon: FileText, onClick: onAuditLogsClick, color: '#64748b' },
+    { label: 'Manage Geofences', icon: Settings, onClick: onGeofenceManagerClick, color: '#EC4899' },
   ];
 
   return (

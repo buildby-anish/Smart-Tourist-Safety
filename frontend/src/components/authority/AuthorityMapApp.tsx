@@ -7,7 +7,7 @@ import AuthorityBottomBar from './AuthorityBottomBar';
 import SOSTakeover from './SOSTakeover';
 import { ModuleAnalyticsAudit } from '../ModuleAnalyticsAudit';
 import { X } from 'lucide-react';
-import { getLiveTouristLocations } from '../../lib/api';
+import { getLiveTouristLocations, deleteGeofence, updateGeofence } from '../../lib/api';
 import {
   Language, TouristProfile, SOSIncident, PatrollingUnit, PoliceStation,
   Hospital, AnomalyCluster, BroadcastAlert, AuditLog, LiveLocationPing, GeoFenceZone,
@@ -122,6 +122,44 @@ export default function AuthorityMapApp({
   const [selectedMarkerId, setSelectedMarkerId] = useState<string | undefined>();
   const [recenter, setRecenter] = useState<{ trigger: number; target: { lat: number; lng: number } } | undefined>();
   const [showAuditDrawer, setShowAuditDrawer] = useState(false);
+  const [showGeofenceManager, setShowGeofenceManager] = useState(false);
+  const [editingGeofenceId, setEditingGeofenceId] = useState<string | null>(null);
+  const [editName, setEditName] = useState('');
+  const [editSeverity, setEditSeverity] = useState('MEDIUM');
+  const [editWarningMessage, setEditWarningMessage] = useState('');
+
+  const handleDeleteGeofence = async (id: string) => {
+    if (!window.confirm('Are you sure you want to delete this geofence?')) return;
+    try {
+      await deleteGeofence(id);
+      if (onGeofenceCreated) onGeofenceCreated();
+    } catch (err) {
+      console.warn('Failed to delete geofence:', err);
+      alert('Failed to delete geofence.');
+    }
+  };
+
+  const handleUpdateGeofence = async (id: string) => {
+    try {
+      await updateGeofence(id, {
+        name: editName,
+        severity: editSeverity,
+        warning_message: editWarningMessage
+      });
+      setEditingGeofenceId(null);
+      if (onGeofenceCreated) onGeofenceCreated();
+    } catch (err) {
+      console.warn('Failed to update geofence:', err);
+      alert('Failed to update geofence.');
+    }
+  };
+
+  const startEditingGeofence = (z: any) => {
+    setEditingGeofenceId(z.id);
+    setEditName(z.name || '');
+    setEditSeverity(z.severity || 'MEDIUM');
+    setEditWarningMessage(z.warning_message || '');
+  };
 
   // One-time REST hydration on mount — after this, positions update
   // incrementally via the `liveLocations` prop (fed by App.tsx's existing
@@ -320,6 +358,7 @@ export default function AuthorityMapApp({
         onBroadcastClick={() => { if (visibleQueue[0]) setManualTakeoverIncident(visibleQueue[0]); }}
         onMarkSafeClick={() => { if (activeTakeoverIncident) onMarkTouristSafe(activeTakeoverIncident.touristId); }}
         onAuditLogsClick={() => setShowAuditDrawer(true)}
+        onGeofenceManagerClick={() => setShowGeofenceManager(true)}
       />
 
       {activeTakeoverIncident && (
@@ -352,6 +391,131 @@ export default function AuthorityMapApp({
             </div>
             <div className="flex-1 overflow-y-auto">
               <ModuleAnalyticsAudit language={language} auditLogs={auditLogs} />
+            </div>
+          </div>
+        </>
+      )}
+
+      {showGeofenceManager && (
+        <>
+          <div className="fixed inset-0 z-[90]" style={{ background: 'rgba(0,0,0,0.4)' }} onClick={() => setShowGeofenceManager(false)} />
+          <div
+            className="fixed inset-x-0 bottom-0 z-[95] rounded-t-3xl flex flex-col animate-slide-up"
+            style={{ height: '80vh', background: dm ? '#18181b' : '#fff', boxShadow: '0 -8px 40px rgba(0,0,0,0.35)', color: dm ? '#f1f5f9' : '#0c2340' }}
+          >
+            <div className="flex items-center justify-between px-5 py-3 flex-shrink-0 border-b" style={{ borderColor: dm ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }}>
+              <span className="text-sm font-bold">Manage Geofences / भू-घेरा प्रबंधन</span>
+              <button onClick={() => setShowGeofenceManager(false)} className="w-8 h-8 rounded-full flex items-center justify-center bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700">
+                <X size={15} className="text-slate-500 dark:text-slate-400" />
+              </button>
+            </div>
+            
+            <div className="flex-1 overflow-y-auto p-5 space-y-4">
+              {geofences.length === 0 ? (
+                <div className="text-center py-10 text-xs opacity-50">No geofences created yet. Draw a zone on the map to create one!</div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {geofences.map((z) => {
+                    const isEditing = editingGeofenceId === z.id;
+                    return (
+                      <div
+                        key={z.id}
+                        className="p-4 rounded-2xl border flex flex-col justify-between gap-3 bg-zinc-50 dark:bg-zinc-900"
+                        style={{ borderColor: dm ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)' }}
+                      >
+                        {isEditing ? (
+                          <div className="space-y-3 flex-1 text-slate-800 dark:text-slate-100">
+                            <div>
+                              <label className="text-[9px] uppercase font-bold opacity-60">Name</label>
+                              <input
+                                type="text"
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                className="w-full h-8 mt-1 rounded-lg px-2 text-xs border bg-transparent text-slate-800 dark:text-white"
+                                style={{ borderColor: dm ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)' }}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[9px] uppercase font-bold opacity-60">Severity</label>
+                              <select
+                                value={editSeverity}
+                                onChange={(e) => setEditSeverity(e.target.value)}
+                                className="w-full h-8 mt-1 rounded-lg px-1.5 text-xs border bg-white dark:bg-zinc-800 text-slate-800 dark:text-white"
+                                style={{ borderColor: dm ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)' }}
+                              >
+                                <option value="LOW">Low</option>
+                                <option value="MEDIUM">Medium</option>
+                                <option value="HIGH">High</option>
+                                <option value="CRITICAL">Critical</option>
+                              </select>
+                            </div>
+                            <div>
+                              <label className="text-[9px] uppercase font-bold opacity-60">Warning Message</label>
+                              <textarea
+                                value={editWarningMessage}
+                                onChange={(e) => setEditWarningMessage(e.target.value)}
+                                rows={2}
+                                className="w-full mt-1 p-2 text-xs border rounded-lg bg-transparent text-slate-800 dark:text-white"
+                                style={{ borderColor: dm ? 'rgba(255,255,255,0.15)' : 'rgba(0,0,0,0.15)' }}
+                              />
+                            </div>
+                            <div className="flex gap-2 pt-1">
+                              <button
+                                onClick={() => handleUpdateGeofence(z.id)}
+                                className="bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg flex-1 cursor-pointer"
+                              >
+                                Save Changes
+                              </button>
+                              <button
+                                onClick={() => setEditingGeofenceId(null)}
+                                className="bg-slate-700 hover:bg-slate-600 text-white font-bold text-[10px] px-3 py-1.5 rounded-lg flex-1 cursor-pointer"
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2">
+                                <span className="font-bold text-sm">{z.name}</span>
+                                <span className={`text-[9px] font-black uppercase px-2 py-0.5 rounded-full ${
+                                  z.severity === 'CRITICAL' ? 'bg-red-500/20 text-red-500' :
+                                  z.severity === 'HIGH' ? 'bg-orange-500/20 text-orange-500' :
+                                  'bg-yellow-500/20 text-yellow-500'
+                                }`}>
+                                  {z.severity}
+                                </span>
+                                <span className="text-[9px] font-bold opacity-50">
+                                  ({z.geometry_type})
+                                </span>
+                              </div>
+                              <p className="text-xs opacity-75">{z.warning_message || 'No custom warning message'}</p>
+                              {z.geometry_type === 'CIRCLE' && z.center_lat && z.center_lng && (
+                                <p className="text-[10px] opacity-50">Radius: {z.radius_m}m · Center: ({z.center_lat.toFixed(4)}, {z.center_lng.toFixed(4)})</p>
+                              )}
+                            </div>
+                            <div className="flex gap-2.5 pt-2 border-t" style={{ borderColor: dm ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)' }}>
+                              <button
+                                onClick={() => startEditingGeofence(z)}
+                                className="bg-blue-600 hover:bg-blue-500 text-white font-bold text-[10px] px-3.5 py-1.5 rounded-xl cursor-pointer"
+                              >
+                                Edit Zone
+                              </button>
+                              <button
+                                onClick={() => handleDeleteGeofence(z.id)}
+                                className="bg-red-600 hover:bg-red-500 text-white font-bold text-[10px] px-3.5 py-1.5 rounded-xl cursor-pointer"
+                              >
+                                Delete Zone
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
           </div>
         </>
