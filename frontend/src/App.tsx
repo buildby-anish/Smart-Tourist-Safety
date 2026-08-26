@@ -136,9 +136,10 @@ export default function App() {
       const authId = getAuthorityId();
       if (authId) {
         setUserRole('authority');
-        refreshIncidentsFromBackend();
+        refreshTouristsFromBackend().then((freshTourists) => {
+          refreshIncidentsFromBackend(freshTourists);
+        });
         refreshAuditLogsFromBackend();
-        refreshTouristsFromBackend();
         refreshGeofencesFromBackend();
       }
       finishBoot();
@@ -269,60 +270,42 @@ export default function App() {
   // from the backend and merge them into the existing local incidents state,
   // resolving tourist and location details on a best-effort basis so the
   // existing Kanban/Map UI can render them without any structural changes.
-  const refreshIncidentsFromBackend = async () => {
+  const refreshIncidentsFromBackend = async (currentTouristsList?: TouristProfile[]) => {
     try {
       const backendIncidents = await getAuthorityIncidents();
-      const mapped: SOSIncident[] = await Promise.all(
-        backendIncidents.map(async (inc: any) => {
-          let touristName = 'Registered Tourist';
-          let touristPhone = '';
-          const localTourist = tourists.find((t) => t.tourist_id === inc.tourist_id);
-          if (localTourist) {
-            touristName = localTourist.full_name || localTourist.name;
-            touristPhone = localTourist.phone;
-          } else {
-            try {
-              const backendTourist = await getAuthorityTourist(inc.tourist_id);
-              touristName = backendTourist.full_name || touristName;
-              touristPhone = backendTourist.phone_number || '';
-            } catch (e) {
-              // Tourist lookup failed (e.g. RLS/not found) — keep placeholder.
-            }
-          }
+      const activeTourists = currentTouristsList || tourists;
+      const mapped: SOSIncident[] = backendIncidents.map((inc: any) => {
+        let touristName = 'Registered Tourist';
+        let touristPhone = '';
+        const localTourist = activeTourists.find((t) => t.tourist_id === inc.tourist_id || t.id === inc.tourist_id);
+        if (localTourist) {
+          touristName = localTourist.full_name || localTourist.name;
+          touristPhone = localTourist.phone;
+        }
 
-          // Incidents carry their own latitude/longitude directly now
-          // (directive §4) — no separate location-name lookup, so the
-          // "address" shown is the incident's own description text.
-          let lat = 32.2432;
-          let lng = 77.1892;
-          const address = inc.description || `${inc.incident_type || 'Incident'} report`;
-          try {
-            const loc = await getAuthorityIncidentLocation(inc.id);
-            if (loc.latitude != null) lat = loc.latitude;
-            if (loc.longitude != null) lng = loc.longitude;
-          } catch (e) {
-            // Location lookup failed — keep defaults.
-          }
+        // Incidents carry their own latitude/longitude directly now (directive §4)
+        const lat = inc.latitude ?? 32.2432;
+        const lng = inc.longitude ?? 77.1892;
+        const address = inc.description || `${inc.incident_type || 'Incident'} report`;
 
-          const result: SOSIncident = {
-            id: `BE-${inc.id}`,
-            backendIncidentId: inc.id,
-            touristId: localTourist?.id || inc.tourist_id,
-            touristName,
-            touristPhone,
-            location: { lat, lng, address },
-            timestamp: inc.created_at
-              ? new Date(inc.created_at).toISOString().replace('T', ' ').substring(0, 19)
-              : new Date().toISOString().replace('T', ' ').substring(0, 19),
-            status: mapBackendStatus(inc.status),
-            severity: mapBackendPriority(inc.priority),
-            hazardType: inc.incident_type || 'OTHER',
-            notes: inc.description || 'Incident synced from backend.',
-            aiRiskScore: inc.ai_risk_score ?? undefined,
-          };
-          return result;
-        })
-      );
+        const result: SOSIncident = {
+          id: `BE-${inc.id}`,
+          backendIncidentId: inc.id,
+          touristId: inc.tourist_id,
+          touristName,
+          touristPhone,
+          location: { lat, lng, address },
+          timestamp: inc.created_at
+            ? new Date(inc.created_at).toISOString().replace('T', ' ').substring(0, 19)
+            : new Date().toISOString().replace('T', ' ').substring(0, 19),
+          status: mapBackendStatus(inc.status),
+          severity: mapBackendPriority(inc.priority),
+          hazardType: inc.incident_type || 'OTHER',
+          notes: inc.description || 'Incident synced from backend.',
+          aiRiskScore: inc.ai_risk_score ?? undefined,
+        };
+        return result;
+      });
 
       setIncidents(mapped);
     } catch (err) {
@@ -368,8 +351,10 @@ export default function App() {
         };
       });
       setTourists(mapped);
+      return mapped;
     } catch (err) {
       console.warn('Failed to refresh tourists from backend:', err);
+      return [];
     }
   };
 
@@ -390,8 +375,9 @@ export default function App() {
     if (userRole !== 'authority') return;
     const socket = connectAuthorityFeed((event) => {
       if (event.type === 'sos.created' || event.type === 'incident.updated' || event.type === 'geofence.breach' || event.type === 'tourist.updated') {
-        refreshIncidentsFromBackend();
-        refreshTouristsFromBackend();
+        refreshTouristsFromBackend().then((freshTourists) => {
+          refreshIncidentsFromBackend(freshTourists);
+        });
       } else if (event.type === 'location.ping' && event.data?.tourist_id) {
         setLiveLocations((prev) => ({ ...prev, [event.data.tourist_id]: event.data }));
       }
@@ -421,9 +407,10 @@ export default function App() {
       'Successful 2FA login to National Command Center'
     );
 
-    refreshIncidentsFromBackend();
+    refreshTouristsFromBackend().then((freshTourists) => {
+      refreshIncidentsFromBackend(freshTourists);
+    });
     refreshAuditLogsFromBackend();
-    refreshTouristsFromBackend();
     refreshGeofencesFromBackend();
 
     return true;
@@ -451,7 +438,9 @@ export default function App() {
         'MFA Verification',
         'Successful 2FA login to National Command Center'
       );
-      refreshIncidentsFromBackend();
+      refreshTouristsFromBackend().then((freshTourists) => {
+        refreshIncidentsFromBackend(freshTourists);
+      });
       refreshAuditLogsFromBackend();
     } else {
       setTouristUser(user);

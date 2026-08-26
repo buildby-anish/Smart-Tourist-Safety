@@ -588,31 +588,91 @@ export async function authenticateAuthority(
   }
 }
 
-/** Opens the authority realtime feed (SOS/incident/location/geofence-breach events). */
-export function connectAuthorityFeed(onEvent: (event: { type: string; data: any }) => void): WebSocket | null {
+/** Opens the authority realtime feed (SOS/incident/location/geofence-breach events) with automatic reconnection. */
+export function connectAuthorityFeed(onEvent: (event: { type: string; data: any }) => void): { close: () => void } | null {
   const token = getAuthToken();
   if (!token) return null;
-  const wsBase = getApiBaseUrl().replace(/^http/, "ws");
-  const socket = new WebSocket(`${wsBase}/ws/authority?token=${encodeURIComponent(token)}`);
-  socket.onmessage = (msg) => {
-    try { onEvent(JSON.parse(msg.data)); } catch { /* ignore malformed frame */ }
+
+  let socket: WebSocket | null = null;
+  let isClosed = false;
+  let reconnectTimeout: any = null;
+
+  function connect() {
+    if (isClosed) return;
+    const wsBase = getApiBaseUrl().replace(/^http/, "ws");
+    socket = new WebSocket(`${wsBase}/ws/authority?token=${encodeURIComponent(token)}`);
+    
+    socket.onmessage = (msg) => {
+      try { onEvent(JSON.parse(msg.data)); } catch { /* ignore */ }
+    };
+
+    socket.onclose = () => {
+      if (!isClosed) {
+        console.log("Authority WS disconnected. Reconnecting in 3s...");
+        reconnectTimeout = setTimeout(connect, 3000);
+      }
+    };
+
+    socket.onerror = (err) => {
+      console.warn("Authority WS error:", err);
+      socket?.close();
+    };
+  }
+
+  connect();
+
+  return {
+    close: () => {
+      isClosed = true;
+      clearTimeout(reconnectTimeout);
+      socket?.close();
+    }
   };
-  return socket;
 }
 
-/** Opens a tourist's own realtime feed (geofence alert popups, SOS status updates). */
+/** Opens a tourist's own realtime feed (geofence alert popups, SOS status updates) with automatic reconnection. */
 export function connectTouristFeed(
   touristId: string,
   onEvent: (event: { type: string; data: any }) => void
-): WebSocket | null {
+): { close: () => void } | null {
   const token = getAuthToken();
   if (!token || !touristId) return null;
-  const wsBase = getApiBaseUrl().replace(/^http/, "ws");
-  const socket = new WebSocket(`${wsBase}/ws/tourist/${touristId}?token=${encodeURIComponent(token)}`);
-  socket.onmessage = (msg) => {
-    try { onEvent(JSON.parse(msg.data)); } catch { /* ignore malformed frame */ }
+
+  let socket: WebSocket | null = null;
+  let isClosed = false;
+  let reconnectTimeout: any = null;
+
+  function connect() {
+    if (isClosed) return;
+    const wsBase = getApiBaseUrl().replace(/^http/, "ws");
+    socket = new WebSocket(`${wsBase}/ws/tourist/${touristId}?token=${encodeURIComponent(token)}`);
+    
+    socket.onmessage = (msg) => {
+      try { onEvent(JSON.parse(msg.data)); } catch { /* ignore */ }
+    };
+
+    socket.onclose = () => {
+      if (!isClosed) {
+        console.log("Tourist WS disconnected. Reconnecting in 3s...");
+        reconnectTimeout = setTimeout(connect, 3000);
+      }
+    };
+
+    socket.onerror = (err) => {
+      console.warn("Tourist WS error:", err);
+      socket?.close();
+    };
+  }
+
+  connect();
+
+  return {
+    close: () => {
+      isClosed = true;
+      clearTimeout(reconnectTimeout);
+      socket?.close();
+    }
   };
-  return socket;
 }
 
 /**
