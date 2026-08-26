@@ -41,6 +41,7 @@ interface ActualGoogleMapProps {
   onClearRoute?: () => void;
   enableDrawing?: boolean;
   onGeofenceCreated?: () => void;
+  lockedCity?: any;
 }
 
 const TRAVEL_MODES = [
@@ -70,6 +71,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   onClearRoute,
   enableDrawing = false,
   onGeofenceCreated,
+  lockedCity,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -121,6 +123,38 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
       setSelectedPlaceInfo(null);
     }
   }, [routeTarget]);
+
+  // Enforce lockedCity map bounds constraints
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map) return;
+    const L = (window as any).L;
+    if (!L) return;
+
+    if (lockedCity) {
+      const bounds = L.latLngBounds(lockedCity.bounds);
+      map.setMaxBounds(bounds);
+      map.setMinZoom(lockedCity.minZoom);
+      map.setView(lockedCity.center, lockedCity.minZoom + 1);
+      
+      map.options.minZoom = lockedCity.minZoom;
+      map.options.maxBounds = bounds;
+      
+      console.log(`Map locked to city: ${lockedCity.name}`);
+    } else {
+      const INDIA_BOUNDS = L.latLngBounds([
+        [6.0, 66.5],
+        [37.5, 99.0],
+      ]);
+      map.options.minZoom = 5;
+      map.options.maxBounds = INDIA_BOUNDS;
+      map.setMaxBounds(INDIA_BOUNDS);
+      map.setMinZoom(5);
+      map.setView(center, zoom);
+      
+      console.log("Map bounds reset to national India limits.");
+    }
+  }, [lockedCity, center, zoom]);
 
   // Track global dark mode changes using MutationObserver
   useEffect(() => {

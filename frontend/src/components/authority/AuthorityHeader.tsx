@@ -17,12 +17,42 @@ interface Props {
   onSearchChange: (q: string) => void;
   onExecuteSearch: () => void;
   onSosCounterClick: () => void;
+  lockedCity: any;
+  onLockCityChange: (city: any) => void;
 }
+
+export const LOCKABLE_CITIES = [
+  {
+    name: 'Manali',
+    center: { lat: 32.2396, lng: 77.1887 },
+    bounds: [[32.15, 77.12], [32.32, 77.25]],
+    minZoom: 12
+  },
+  {
+    name: 'Shimla',
+    center: { lat: 31.1048, lng: 77.1734 },
+    bounds: [[31.02, 77.08], [31.18, 77.25]],
+    minZoom: 12
+  },
+  {
+    name: 'Mumbai',
+    center: { lat: 19.0760, lng: 72.8777 },
+    bounds: [[18.88, 72.75], [19.28, 73.02]],
+    minZoom: 11
+  },
+  {
+    name: 'Lonavala',
+    center: { lat: 18.7541, lng: 73.4024 },
+    bounds: [[18.70, 73.35], [18.80, 73.45]],
+    minZoom: 12
+  }
+];
 
 export default function AuthorityHeader({
   language, onLanguageChange, darkMode: dm, onToggleDarkMode, onLogout,
   officerName, activeSosCount, touristsTrackedCount, patrolUnitsOnlineCount,
   searchQuery, onSearchChange, onExecuteSearch, onSosCounterClick,
+  lockedCity, onLockCityChange,
 }: Props) {
   const t = i18n[language];
 
@@ -34,7 +64,7 @@ export default function AuthorityHeader({
         <div className="h-full w-1/3 bg-[#138808]" />
       </div>
       <div
-        className="flex items-center gap-3 px-3 sm:px-4 h-14"
+        className="flex items-center justify-between px-3 sm:px-4 h-14"
         style={{ background: dm ? 'rgba(10,20,40,0.92)' : 'rgba(11,36,71,0.94)', backdropFilter: 'blur(12px)' }}
       >
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -67,23 +97,49 @@ export default function AuthorityHeader({
           </div>
         </div>
 
-        <div className="relative flex-1 min-w-0 hidden sm:block">
-          <input
-            type="text"
-            placeholder="Search tourist ID / incident..."
-            value={searchQuery}
-            onChange={(e) => onSearchChange(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && onExecuteSearch()}
-            className="w-full max-w-xs pl-8 pr-3 py-1.5 text-xs rounded-full bg-white/95 border border-white/20 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-[#FF9933] font-medium"
-          />
-          <Search size={13} className="text-slate-400 absolute left-2.5 top-2" />
+        <div className="relative flex-1 min-w-0 hidden sm:flex items-center gap-2">
+          <div className="relative">
+            <input
+              type="text"
+              placeholder="Search tourist ID..."
+              value={searchQuery}
+              onChange={(e) => onSearchChange(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && onExecuteSearch()}
+              className="w-full max-w-[170px] pl-8 pr-3 py-1.5 text-xs rounded-full bg-white/95 border border-white/20 text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-1 focus:ring-[#FF9933] font-medium"
+            />
+            <Search size={13} className="text-slate-400 absolute left-2.5 top-2.5" />
+          </div>
+
+          <select
+            value={lockedCity ? lockedCity.name : ''}
+            onChange={(e) => {
+              const name = e.target.value;
+              const city = LOCKABLE_CITIES.find(c => c.name === name) || null;
+              onLockCityChange(city);
+            }}
+            className="bg-white/95 border border-white/20 rounded-full px-2.5 py-1.5 text-[10px] text-slate-900 outline-none font-bold cursor-pointer"
+          >
+            <option value="">🔒 Lock City...</option>
+            {LOCKABLE_CITIES.map(c => (
+              <option key={c.name} value={c.name}>{c.name}</option>
+            ))}
+          </select>
+
+          {lockedCity && (
+            <button
+              onClick={() => onLockCityChange(null)}
+              className="bg-red-500 hover:bg-red-400 text-white font-extrabold text-[9px] px-2 py-1.5 rounded-full whitespace-nowrap transition-transform active:scale-95 cursor-pointer"
+            >
+              Reset Lock
+            </button>
+          )}
         </div>
 
         <div className="ml-auto flex items-center gap-1.5 flex-shrink-0">
           <span className="hidden xl:inline text-[11px] font-bold text-white/85 whitespace-nowrap max-w-[140px] truncate mr-1">
             {officerName}
           </span>
-          <div className="flex items-center bg-white/10 border border-white/15 rounded-md p-0.5 gap-0.5">
+          <div className="hidden sm:flex items-center bg-white/10 border border-white/15 rounded-md p-0.5 gap-0.5">
             <Globe size={11} className="text-slate-300 ml-1 hidden sm:block" />
             <button onClick={() => onLanguageChange('en')} className={`px-1.5 py-0.5 text-[10px] font-extrabold rounded ${language === 'en' ? 'bg-white text-[#0C2340]' : 'text-slate-300 hover:text-white'}`}>EN</button>
             <button onClick={() => onLanguageChange('hi')} className={`px-1.5 py-0.5 text-[10px] font-extrabold rounded ${language === 'hi' ? 'bg-white text-[#0C2340]' : 'text-slate-300 hover:text-white'}`}>हिंदी</button>

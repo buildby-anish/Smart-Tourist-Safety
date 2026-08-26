@@ -123,6 +123,7 @@ export default function AuthorityMapApp({
   const [recenter, setRecenter] = useState<{ trigger: number; target: { lat: number; lng: number } } | undefined>();
   const [showAuditDrawer, setShowAuditDrawer] = useState(false);
   const [showGeofenceManager, setShowGeofenceManager] = useState(false);
+  const [lockedCity, setLockedCity] = useState<any | null>(null);
   const [editingGeofenceId, setEditingGeofenceId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [editSeverity, setEditSeverity] = useState('MEDIUM');
@@ -316,6 +317,7 @@ export default function AuthorityMapApp({
         height="100%"
         enableDrawing={true}
         onGeofenceCreated={onGeofenceCreated}
+        lockedCity={lockedCity}
       />
 
       <AuthorityHeader
@@ -327,6 +329,8 @@ export default function AuthorityMapApp({
         patrolUnitsOnlineCount={patrolUnitsOnline}
         searchQuery={searchQuery} onSearchChange={setSearchQuery} onExecuteSearch={handleExecuteSearch}
         onSosCounterClick={() => { if (visibleQueue[0]) setManualTakeoverIncident(visibleQueue[0]); }}
+        lockedCity={lockedCity}
+        onLockCityChange={setLockedCity}
       />
 
       <AuthorityLeftRail
