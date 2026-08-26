@@ -97,7 +97,23 @@ export default function MapCanvas({
     listGeofences(true)
       .then((zones) => {
         if (cancelled || !zones?.length) return;
-        const converted: GeoFenceZone[] = zones.map((z) => {
+        const converted: GeoFenceZone[] = zones.flatMap((z) => {
+          const riskLevel = z.zone_type === 'RESTRICTED' ? 'Unsafe' : z.zone_type === 'BUFFER' ? 'Caution' : 'Safe';
+
+          // CIRCLE geometry — use center + radius directly
+          if (z.geometry_type === 'CIRCLE' && z.center_lat != null && z.center_lng != null) {
+            return [{
+              id: z.id,
+              name: z.name,
+              riskLevel,
+              description: `${z.zone_type} zone`,
+              center: { lat: z.center_lat, lng: z.center_lng },
+              radiusKm: z.radius_m ? z.radius_m / 1000 : 0.1,
+            }];
+          }
+
+          // POLYGON geometry — derive centroid + bounding radius
+          if (!z.coordinates?.length) return []; // skip malformed zones
           const lats = z.coordinates.map((c) => c[1]);
           const lngs = z.coordinates.map((c) => c[0]);
           const centerLat = lats.reduce((a, b) => a + b, 0) / lats.length;
@@ -114,17 +130,16 @@ export default function MapCanvas({
             0.05,
             ...z.coordinates.map(([lng, lat]) => haversineKm(centerLat, centerLng, lat, lng))
           );
-          const riskLevel = z.zone_type === 'RESTRICTED' ? 'Unsafe' : z.zone_type === 'BUFFER' ? 'Caution' : 'Safe';
-          return {
+          return [{
             id: z.id,
             name: z.name,
             riskLevel,
             description: `${z.zone_type} zone`,
             center: { lat: centerLat, lng: centerLng },
             radiusKm,
-          };
+          }];
         });
-        setGeofenceZones(converted);
+        if (converted.length > 0) setGeofenceZones(converted);
       })
       .catch(() => { /* keep the existing (mock) zones on failure */ });
     return () => { cancelled = true; };
