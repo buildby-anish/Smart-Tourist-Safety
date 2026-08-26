@@ -189,6 +189,23 @@ export default function TouristApp({
     };
     await queueSOSRecord(localRecord);
 
+    // Broadcast SOS over BLE mesh so nearby devices can relay it to the
+    // server even if this device has no internet. The native Android/iOS
+    // layer (MainActivity.java / AppDelegate.swift) exposes advertiseBLESOS
+    // via the Capacitor bridge. We call it fire-and-forget — failure here
+    // must never block the main SOS submission flow.
+    try {
+      const blePacket = JSON.stringify({
+        tourist_id: user.id,
+        latitude: loc.latitude,
+        longitude: loc.longitude,
+        battery_status: batteryLevel,
+        triggered_at: new Date().toISOString(),
+      });
+      (window as any).Capacitor?.Plugins?.BleSosRelay?.advertiseSOS?.({ packet: blePacket })
+        .catch?.(() => { /* BLE not available on this device — silent */ });
+    } catch { /* Ignore any BLE advertising failure */ }
+
     const locStr = `${loc.latitude?.toFixed(4) ?? '—'}, ${loc.longitude?.toFixed(4) ?? '—'}`;
 
     if (!navigator.onLine) {

@@ -15,7 +15,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
         // Setup BLE Mesh Relaying
         peripheralManager = CBPeripheralManager(delegate: self, queue: nil)
         centralManager = CBCentralManager(delegate: self, queue: nil)
+        // Listen for JS → native BLE advertise bridge calls
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleAdvertiseBLE(_:)),
+            name: NSNotification.Name("BleSosRelay_advertiseSOS"),
+            object: nil
+        )
         return true
+    }
+
+    // Called when the JS layer posts BleSosRelay_advertiseSOS via Capacitor bridge plugin file
+    @objc func handleAdvertiseBLE(_ notification: Notification) {
+        if let packet = notification.userInfo?["packet"] as? String {
+            advertiseSOS(packet: packet)
+        }
     }
 
     // MARK: - CBPeripheralManagerDelegate

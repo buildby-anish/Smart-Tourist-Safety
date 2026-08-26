@@ -1,7 +1,10 @@
+import json
+import logging
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 
 from db import is_db_active, get_db_cursor, get_authenticated_cursor
 from realtime import broadcast_sync, manager
@@ -10,7 +13,21 @@ from schemas.auth import SessionResponse
 from schemas.incident import IncidentResponse
 from schemas.sos import SOSCreate, SOSResponse
 
+logger = logging.getLogger("sos")
+
 router = APIRouter(prefix="/sos", tags=["sos"])
+
+
+class BLERelayPayload(BaseModel):
+    """
+    Received from Android MainActivity.java and iOS AppDelegate.swift when a
+    nearby device running the app picks up a Bluetooth LE SOS beacon and
+    successfully has internet connectivity to forward it. The originating
+    tourist's device may be completely offline — no auth token is available.
+    payload: JSON string encoded by the originating device, containing at
+             minimum tourist_id, latitude, longitude.
+    """
+    payload: str
 
 # Temporary in-memory storage for local API development only (fallback).
 _in_memory_sos_store: dict[UUID, SOSResponse] = {}
@@ -156,4 +173,132 @@ def create_sos(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to activate SOS alarm: {str(e)}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# BLE Mesh Relay — no auth required (originating tourist is offline)
+# Called by: Android MainActivity.java and iOS AppDelegate.swift when a
+# nearby device with internet picks up a Bluetooth LE SOS beacon hop.
+# ---------------------------------------------------------------------------
+
+@router.post("/relay", status_code=status.HTTP_200_OK)
+def relay_sos(body: BLERelayPayload):
+    """
+    Accept a Bluetooth-hopped SOS payload and record it as a new SOS incident.
+    The relaying device sends the original tourist's SOS packet (JSON string)
+    as 'payload'. We parse it and create the incident + sos_request rows using
+    a service-level DB cursor so no JWT from the (offline) tourist is needed.
+    Duplicate packets (same tourist_id within 60 s) are silently deduplicated.
+    """
+    try:
+        data = json.loads(body.payload)
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="payload must be a valid JSON string",
+        )
+
+    try:
+        tourist_id = UUID(str(data.get("tourist_id", "")))
+    except (ValueError, AttributeError):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="payload must contain a valid tourist_id UUID",
+        )
+
+    latitude = data.get("latitude") or data.get("lat")
+    longitude = data.get("longitude") or data.get("lng") or data.get("lon")
+    if latitude is None or longitude is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="payload must contain latitude and longitude",
+        )
+
+    battery_status = data.get("battery_status") or data.get("battery")
+    now = datetime.now(timezone.utc)
+
+    # Fallback mode — no DB
+    if not is_db_active():
+        from routers.incidents import _in_memory_incident_store
+        incident_id = uuid4()
+        sos_id = uuid4()
+        incident = IncidentResponse(
+            id=incident_id, incident_type="SOS", tourist_id=tourist_id,
+            latitude=float(latitude), longitude=float(longitude),
+            ai_risk_score=70, priority="CRITICAL", status="OPEN",
+            description="SOS Alarm Triggered (BLE Mesh Relay)", created_at=now,
+        )
+        _in_memory_incident_store[incident_id] = incident
+        sos = SOSResponse(
+            sos_id=sos_id, tourist_id=tourist_id, incident_id=incident_id,
+            latitude=float(latitude), longitude=float(longitude),
+            battery_status=battery_status, triggered_at=now,
+            trigger_source="BLE_RELAY", sos_status="PENDING",
+        )
+        broadcast_sync(manager.broadcast_to_authorities, "sos.created", sos.model_dump(mode="json"))
+        return {"status": "relayed", "sos_id": str(sos_id)}
+
+    # Database mode — use service cursor (no RLS, tourist has no token)
+    try:
+        with get_db_cursor(commit=True) as cur:
+            # Verify tourist exists
+            cur.execute("SELECT id FROM public.tourist_profiles WHERE id = %s;", (tourist_id,))
+            if not cur.fetchone():
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
+                                    detail="Tourist profile not found")
+
+            # Deduplicate: skip if another SOS from the same tourist in last 60 s
+            cur.execute("""
+                SELECT sos_id FROM public.sos_requests
+                WHERE tourist_id = %s
+                  AND trigger_source = 'BLE_RELAY'
+                  AND triggered_at > (NOW() - INTERVAL '60 seconds')
+                LIMIT 1;
+            """, (tourist_id,))
+            if cur.fetchone():
+                logger.info(f"[BLE Relay] Duplicate SOS from {tourist_id} — skipping")
+                return {"status": "duplicate_skipped"}
+
+            incident_id = uuid4()
+            sos_id = uuid4()
+
+            cur.execute("""
+                INSERT INTO public.incidents (
+                    id, incident_type, tourist_id, latitude, longitude,
+                    ai_risk_score, priority, status, description, created_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING id;
+            """, (incident_id, "SOS", tourist_id, float(latitude), float(longitude),
+                  70, "CRITICAL", "OPEN", "SOS Alarm Triggered (BLE Mesh Relay)", now))
+
+            cur.execute("""
+                INSERT INTO public.sos_requests (
+                    sos_id, tourist_id, incident_id, latitude, longitude,
+                    battery_status, trigger_source, sos_status, triggered_at
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING sos_id, tourist_id, incident_id, latitude, longitude,
+                          battery_status, authority_id, trigger_source, sos_status, triggered_at;
+            """, (sos_id, tourist_id, incident_id, float(latitude), float(longitude),
+                  battery_status, "BLE_RELAY", "PENDING", now))
+
+            row = cur.fetchone()
+            sos_response = SOSResponse(
+                sos_id=row[0], tourist_id=row[1], incident_id=row[2],
+                latitude=float(row[3]), longitude=float(row[4]),
+                battery_status=row[5], authority_id=row[6],
+                trigger_source=row[7], sos_status=row[8], triggered_at=row[9],
+            )
+
+        broadcast_sync(manager.broadcast_to_authorities, "sos.created", sos_response.model_dump(mode="json"))
+        logger.info(f"[BLE Relay] SOS relayed for tourist {tourist_id}, incident {incident_id}")
+        return {"status": "relayed", "sos_id": str(sos_id)}
+
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        logger.error(f"[BLE Relay] Failed: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to record relayed SOS: {str(e)}",
         )

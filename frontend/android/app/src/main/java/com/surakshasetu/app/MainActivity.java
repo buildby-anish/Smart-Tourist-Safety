@@ -16,6 +16,10 @@ import android.os.Bundle;
 import android.os.ParcelUuid;
 import android.util.Log;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.Plugin;
+import com.getcapacitor.PluginCall;
+import com.getcapacitor.PluginMethod;
+import com.getcapacitor.annotation.CapacitorPlugin;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
@@ -32,8 +36,24 @@ public class MainActivity extends BridgeActivity {
     private BluetoothLeScanner scanner;
     private final Set<String> processedSOSPackets = Collections.synchronizedSet(new HashSet<>());
 
+    // Inner Capacitor plugin so JS can call window.Capacitor.Plugins.BleSosRelay.advertiseSOS()
+    @CapacitorPlugin(name = "BleSosRelay")
+    public class BleSosRelayPlugin extends Plugin {
+        @PluginMethod
+        public void advertiseSOS(PluginCall call) {
+            String packet = call.getString("packet", "");
+            if (packet != null && !packet.isEmpty()) {
+                advertiseSOSPacket(packet);
+            }
+            call.resolve();
+        }
+    }
+
+
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        registerPlugin(BleSosRelayPlugin.class);
         super.onCreate(savedInstanceState);
         setupBLERelay();
     }
