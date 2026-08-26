@@ -23,6 +23,17 @@ export interface SOSRecord {
   synced_at?: string | null;
 }
 
+function generateSafeUUID(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 const DB_NAME = "smart_tourist_safety_sos";
 const DB_VERSION = 1;
 const STORE_LOCATION = "last_location";
@@ -95,7 +106,7 @@ export async function queueSOSRecord(sosRecord: SOSRecord): Promise<SOSRecord> {
     const tx = db.transaction(STORE_QUEUE, "readwrite");
     const store = tx.objectStore(STORE_QUEUE);
     const record: SOSRecord = {
-      local_sos_id: sosRecord.local_sos_id || crypto.randomUUID(),
+      local_sos_id: sosRecord.local_sos_id || generateSafeUUID(),
       tourist_id: sosRecord.tourist_id || null,
       triggered_at: sosRecord.triggered_at || new Date().toISOString(),
       latitude: sosRecord.latitude !== undefined ? sosRecord.latitude : null,
