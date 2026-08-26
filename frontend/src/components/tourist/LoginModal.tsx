@@ -41,11 +41,21 @@ interface Props {
    * without completing authentication. Defaults to true (existing,
    * dismissable behavior) everywhere else the modal is used. */
   dismissable?: boolean;
+  /** When set to 'tourist', skips the role_selection step entirely (goes
+   * straight to tourist login/signup) and hides every "Back to role
+   * selection" affordance. Used when the modal is opened FROM inside the
+   * tourist app's own auth gate (TouristApp.tsx) — at that point the
+   * context already establishes "this is a tourist," so re-asking
+   * "tourist or authority?" on every single sign-in prompt is redundant
+   * and was the repeated-prompt behavior reported as a bug. Omit (or leave
+   * undefined) for the general-purpose Gateway entry point, where the
+   * role genuinely hasn't been chosen yet. */
+  lockedRole?: 'tourist';
 }
 
-export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, initialMode = 'login', dismissable = true }: Props) {
+export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, initialMode = 'login', dismissable = true, lockedRole }: Props) {
   const [step, setStep] = useState<Step>(
-    initialMode === 'signup' ? 'tourist_credentials' : 'role_selection'
+    lockedRole === 'tourist' || initialMode === 'signup' ? 'tourist_credentials' : 'role_selection'
   );
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
   
@@ -445,17 +455,19 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
                 </button>
 
                 <div className="flex items-center justify-between pt-2">
-                  <button
-                    onClick={() => {
-                      setStep('role_selection');
-                      setErrs({});
-                      setGenErr('');
-                    }}
-                    className="flex items-center gap-1.5 text-xs transition-opacity hover:opacity-70"
-                    style={{ color: subtle }}
-                  >
-                    <ArrowLeft size={13} /> Back
-                  </button>
+                  {!lockedRole && (
+                    <button
+                      onClick={() => {
+                        setStep('role_selection');
+                        setErrs({});
+                        setGenErr('');
+                      }}
+                      className="flex items-center gap-1.5 text-xs transition-opacity hover:opacity-70"
+                      style={{ color: subtle }}
+                    >
+                      <ArrowLeft size={13} /> Back
+                    </button>
+                  )}
                   {mode === 'login' ? (
                     <p className="text-xs" style={{ color: subtle }}>
                       Don't have an account?{' '}

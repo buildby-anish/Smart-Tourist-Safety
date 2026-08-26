@@ -145,8 +145,17 @@ export default function App() {
             finishBoot();
           })
           .catch((err) => {
+            // Session restore failed (expired/invalid token, or the
+            // backend 500'd — e.g. a schema migration for new columns
+            // hasn't been applied yet against this database). Explicitly
+            // return to the Gateway role-picker rather than leaving
+            // userRole at its default 'tourist' value with no user —
+            // that stale combination is what made an already-logged-in
+            // person land back in the tourist app's auth gate looking
+            // like a fresh, unauthenticated visitor.
             console.warn('Session restoration failed:', err);
             clearSession();
+            setUserRole('gateway');
             finishBoot();
           });
       } else {
@@ -721,6 +730,12 @@ export default function App() {
           onClose={() => setShowLogin(false)}
           onAuthenticated={handleAuthenticated}
           dismissable={!(userRole === 'tourist' && !touristUser)}
+          // Opened from inside the tourist app's own auth gate -> we
+          // already know the context is "tourist," so skip the redundant
+          // "tourist or authority?" prompt on every sign-in. Only the
+          // general-purpose Gateway entry point (userRole === 'gateway')
+          // leaves the role genuinely open.
+          lockedRole={userRole === 'tourist' ? 'tourist' : undefined}
         />
       )}
 
