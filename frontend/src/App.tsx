@@ -742,7 +742,7 @@ export default function App() {
           // "tourist or authority?" prompt on every sign-in. Only the
           // general-purpose Gateway entry point (userRole === 'gateway')
           // leaves the role genuinely open.
-          lockedRole={loginRole}
+          lockedRole={touristUser ? 'tourist' : loginRole === 'authority' ? 'authority' : undefined}
         />
       )}
 
