@@ -7,7 +7,7 @@ export async function getLiveLocation(
     throw new Error("Geolocation API not supported by browser");
   }
 
-  return new Promise((resolve, reject) => {
+  const geoPromise = new Promise<LocationData>((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const locData: LocationData = {
@@ -32,6 +32,14 @@ export async function getLiveLocation(
       options
     );
   });
+
+  const timeoutPromise = new Promise<LocationData>((_, reject) => {
+    setTimeout(() => {
+      reject(new Error("Location request timed out (safety wrapper)"));
+    }, options.timeout + 500);
+  });
+
+  return Promise.race([geoPromise, timeoutPromise]);
 }
 
 export async function getSOSLocation(): Promise<LocationData> {

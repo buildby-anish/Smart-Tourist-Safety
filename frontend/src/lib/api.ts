@@ -719,21 +719,35 @@ export async function submitSOSOnline(sosRecord: SOSRecord): Promise<any> {
     trigger_source: "APP",
   };
 
-  const response = await fetch(`${baseUrl}/sos`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    },
-    body: JSON.stringify(payload),
-  });
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 5000);
 
-  if (!response.ok) {
-    const errText = await response.text();
-    throw new ApiError(response.status, errText || `Server returned status ${response.status}`);
+  try {
+    const response = await fetch(`${baseUrl}/sos`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    });
+
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      const errText = await response.text();
+      throw new ApiError(response.status, errText || `Server returned status ${response.status}`);
+    }
+
+    return await response.json();
+  } catch (err: any) {
+    clearTimeout(timeoutId);
+    if (err.name === 'AbortError') {
+      throw new ApiError(0, "Network timeout: Server did not respond within 5 seconds.");
+    }
+    throw err;
   }
-
-  return await response.json();
 }
 
 export async function syncQueuedSOS(
