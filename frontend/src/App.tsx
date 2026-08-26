@@ -49,6 +49,7 @@ import {
   getTouristId,
   getTouristProfile,
   connectAuthorityFeed,
+  getLiveTouristLocations,
   listAuthorityTourists,
   broadcastStateAlert,
   listGeofences

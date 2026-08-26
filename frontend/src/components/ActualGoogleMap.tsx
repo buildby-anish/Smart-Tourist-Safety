@@ -182,11 +182,23 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   }, []);
 
   // Dynamically load Leaflet resources
+  const [leafletLoadFailed, setLeafletLoadFailed] = useState(false);
   useEffect(() => {
     if ((window as any).L && (window as any).L.heatLayer) {
       setLeafletLoaded(true);
       return;
     }
+
+    let settled = false;
+    // Safety net: if the CDN scripts never fire onload/onerror (slow/
+    // blocked network), surface an error instead of spinning forever on
+    // "Loading safety map...".
+    const timeoutId = window.setTimeout(() => {
+      if (!settled) {
+        settled = true;
+        setLeafletLoadFailed(true);
+      }
+    }, 12000);
 
     const link = document.createElement('link');
     link.rel = 'stylesheet';
@@ -202,11 +214,27 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
       heatScript.src = 'https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js';
       heatScript.async = true;
       heatScript.onload = () => {
+        settled = true;
+        window.clearTimeout(timeoutId);
+        setLeafletLoaded(true);
+      };
+      heatScript.onerror = () => {
+        // Heatmap plugin failing to load shouldn't block the whole map —
+        // core Leaflet is already up, so proceed without the heat layer.
+        settled = true;
+        window.clearTimeout(timeoutId);
         setLeafletLoaded(true);
       };
       document.body.appendChild(heatScript);
     };
+    script.onerror = () => {
+      settled = true;
+      window.clearTimeout(timeoutId);
+      setLeafletLoadFailed(true);
+    };
     document.body.appendChild(script);
+
+    return () => window.clearTimeout(timeoutId);
   }, []);
 
   // Initialize Map
@@ -980,8 +1008,21 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   if (!leafletLoaded) {
     return (
       <div className={wrapperClass} style={fullBleed ? undefined : { height }}>
-        <div className={`w-full h-full flex items-center justify-center ${isDarkMode ? 'bg-[#1e1e1e] text-slate-400' : 'bg-white text-slate-500'} text-sm font-medium`}>
-          Loading safety map...
+        <div className={`w-full h-full flex flex-col items-center justify-center gap-3 ${isDarkMode ? 'bg-[#1e1e1e] text-slate-400' : 'bg-white text-slate-500'} text-sm font-medium`}>
+          {leafletLoadFailed ? (
+            <>
+              <span>Couldn't load the map. Check your connection.</span>
+              <button
+                onClick={() => window.location.reload()}
+                className="px-4 py-2 rounded-lg text-xs font-bold text-white cursor-pointer"
+                style={{ background: '#FF9933' }}
+              >
+                Retry
+              </button>
+            </>
+          ) : (
+            'Loading safety map...'
+          )}
         </div>
       </div>
     );
