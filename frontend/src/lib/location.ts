@@ -1,7 +1,7 @@
 import { saveLastKnownLocation, getLastKnownLocation, LocationData } from "./db";
 
 export async function getLiveLocation(
-  options = { timeout: 6000, maxAge: 0, enableHighAccuracy: true }
+  options = { timeout: 2000, maxAge: 10000, enableHighAccuracy: true }
 ): Promise<LocationData> {
   if (!navigator.geolocation) {
     throw new Error("Geolocation API not supported by browser");

@@ -45,6 +45,17 @@ interface Props {
   booting?: boolean;
 }
 
+function generateSafeUUID(): string {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+    const r = (Math.random() * 16) | 0;
+    const v = c === 'x' ? r : (r & 0x3) | 0x8;
+    return v.toString(16);
+  });
+}
+
 export default function TouristApp({
   darkMode: dm,
   onToggleDarkMode,
@@ -164,7 +175,7 @@ export default function TouristApp({
     } catch { /* Battery Status API unavailable — omit, not fatal */ }
 
     const localRecord = {
-      local_sos_id: crypto.randomUUID(),
+      local_sos_id: generateSafeUUID(),
       tourist_id: user.id,
       triggered_at: new Date().toISOString(),
       latitude: loc.latitude,
