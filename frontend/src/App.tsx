@@ -281,6 +281,21 @@ export default function App() {
         if (localTourist) {
           touristName = localTourist.full_name || localTourist.name;
           touristPhone = localTourist.phone;
+        } else {
+          // Dynamic best-effort background fetch to resolve actual name & phone from DB
+          getAuthorityTourist(inc.tourist_id).then((backendTourist) => {
+            if (backendTourist) {
+              const name = backendTourist.full_name || backendTourist.name || 'Registered Tourist';
+              const phone = backendTourist.phone_number || '';
+              setIncidents((prev) =>
+                prev.map((item) =>
+                  item.backendIncidentId === inc.id
+                    ? { ...item, touristName: name, touristPhone: phone }
+                    : item
+                )
+              );
+            }
+          }).catch(() => { /* ignore failed background lookups */ });
         }
 
         // Incidents carry their own latitude/longitude directly now (directive §4)
