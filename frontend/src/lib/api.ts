@@ -12,7 +12,7 @@ let isSyncing = false;
 
 export function getApiBaseUrl(): string {
   // @ts-ignore
-  const envUrl = import.meta.env?.VITE_API_BASE_URL;
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
   return localStorage.getItem("sos_api_base_url") || envUrl || "http://localhost:8000/api/v1";
 }
 

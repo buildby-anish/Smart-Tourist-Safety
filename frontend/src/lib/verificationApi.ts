@@ -101,13 +101,11 @@ const getEnvVar = (key: string): string | undefined => {
 };
 
 const DEFAULT_BASE_URL =
-  getEnvVar("VITE_VERIFICATION_API_URL") ||
-  getEnvVar("NEXT_PUBLIC_VERIFICATION_API_URL") ||
-  // Falls back to this app's own backend base URL + /verifications, the
-  // same path this module is mounted under in backend/main.py, so it
-  // works out of the box without a separate env var when the caller
-  // (LoginModal) doesn't pass an explicit apiUrl.
-  `${getEnvVar("VITE_API_BASE_URL") || "http://localhost:8000/api/v1"}/verifications`;
+  // @ts-ignore
+  (import.meta.env.VITE_VERIFICATION_API_URL ||
+   // @ts-ignore
+   import.meta.env.VITE_API_BASE_URL ||
+   "http://localhost:8000/api/v1") + "/verifications";
 
 /**
  * Upload document image or PDF for OCR processing and identity extraction.
