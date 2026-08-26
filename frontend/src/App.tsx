@@ -282,8 +282,9 @@ export default function App() {
           touristName = localTourist.full_name || localTourist.name;
           touristPhone = localTourist.phone;
         } else {
-          // Dynamic best-effort background fetch to resolve actual name & phone from DB
+          console.log(`[Incident Refresh] tourist lookup starting for inc: ${inc.id}, tourist_id: ${inc.tourist_id}`);
           getAuthorityTourist(inc.tourist_id).then((backendTourist) => {
+            console.log(`[Incident Refresh] resolved backend tourist details for ${inc.tourist_id}:`, backendTourist);
             if (backendTourist) {
               const name = backendTourist.full_name || backendTourist.name || 'Registered Tourist';
               const phone = backendTourist.phone_number || '';
@@ -295,7 +296,9 @@ export default function App() {
                 )
               );
             }
-          }).catch(() => { /* ignore failed background lookups */ });
+          }).catch((err) => {
+            console.error(`[Incident Refresh] failed background lookup for ${inc.tourist_id}:`, err);
+          });
         }
 
         // Incidents carry their own latitude/longitude directly now (directive §4)
