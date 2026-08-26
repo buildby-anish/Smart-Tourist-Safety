@@ -34,7 +34,16 @@ app = FastAPI(title="Smart Tourist Safety API")
 # origin" on preflight — surfacing to the browser as an opaque "Failed to
 # fetch" network error.
 _configured_origins = [o for o in Config.CORS_ALLOWED_ORIGINS if o != "*"]
-_cors_origins = list(dict.fromkeys(_configured_origins + ["http://localhost:3000", "http://localhost:5173"]))
+_cors_origins = list(dict.fromkeys(
+    _configured_origins + [
+        "http://localhost:3000",
+        "http://localhost:5173",
+        "http://localhost:8000",
+        "https://localhost",
+        "capacitor://localhost",
+        "ionic://localhost"
+    ]
+))
 _cors_origin_regex = r"https://.*|http://localhost(:\d+)?|http://127\.0\.0\.1(:\d+)?|capacitor://.*|ionic://.*"
 
 app.add_middleware(
