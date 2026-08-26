@@ -75,6 +75,7 @@ export default function App() {
   const [touristUser, setTouristUser] = useState<any | null>(null);
   const [showLogin, setShowLogin] = useState<boolean>(false);
   const [loginModalMode, setLoginModalMode] = useState<'login' | 'signup'>('login');
+  const [loginRole, setLoginRole] = useState<'tourist' | 'authority'>('tourist');
   const [booting, setBooting] = useState<boolean>(true);
   const [splashGone, setSplashGone] = useState<boolean>(false);
 
@@ -674,8 +675,8 @@ export default function App() {
           activeSosCount={activeSosCount}
           isAuthenticatedTourist={!!touristUser}
           touristName={touristUser?.full_name || touristUser?.name || null}
-          onLoginClick={() => { setLoginModalMode('login'); setShowLogin(true); }}
-          onSignUpClick={() => { setLoginModalMode('signup'); setShowLogin(true); }}
+          onLoginClick={() => { setLoginModalMode('login'); setLoginRole('tourist'); setShowLogin(true); }}
+          onSignUpClick={() => { setLoginModalMode('signup'); setLoginRole('tourist'); setShowLogin(true); }}
         />
       )}
 
@@ -691,11 +692,17 @@ export default function App() {
           darkMode={darkMode}
           onToggleDarkMode={() => setDarkMode(!darkMode)}
           onTriggerSos={handleTouristTriggerSos}
-          onReturnToGateway={() => setUserRole('gateway')}
+          onReturnToGateway={() => {
+            setLoginRole('authority');
+            setShowLogin(true);
+          }}
           user={touristUser}
           setUser={setTouristUser}
           showLogin={showLogin}
-          setShowLogin={setShowLogin}
+          setShowLogin={(show) => {
+            if (show) setLoginRole('tourist');
+            setShowLogin(show);
+          }}
           onLogout={handleLogout}
           language={language}
           onLanguageChange={setLanguage}
@@ -735,7 +742,7 @@ export default function App() {
           // "tourist or authority?" prompt on every sign-in. Only the
           // general-purpose Gateway entry point (userRole === 'gateway')
           // leaves the role genuinely open.
-          lockedRole={userRole === 'tourist' ? 'tourist' : undefined}
+          lockedRole={loginRole}
         />
       )}
 

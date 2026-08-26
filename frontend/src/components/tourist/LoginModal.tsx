@@ -50,12 +50,13 @@ interface Props {
    * and was the repeated-prompt behavior reported as a bug. Omit (or leave
    * undefined) for the general-purpose Gateway entry point, where the
    * role genuinely hasn't been chosen yet. */
-  lockedRole?: 'tourist';
+  lockedRole?: 'tourist' | 'authority';
 }
 
 export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, initialMode = 'login', dismissable = true, lockedRole }: Props) {
   const [step, setStep] = useState<Step>(
-    lockedRole === 'tourist' || initialMode === 'signup' ? 'tourist_credentials' : 'role_selection'
+    lockedRole === 'tourist' || initialMode === 'signup' ? 'tourist_credentials' :
+    lockedRole === 'authority' ? 'authority_credentials' : 'role_selection'
   );
   const [mode, setMode] = useState<'login' | 'signup'>(initialMode);
   
@@ -707,17 +708,19 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
                   )}
                 </button>
 
-                <button
-                  onClick={() => {
-                    setStep('role_selection');
-                    setErrs({});
-                    setGenErr('');
-                  }}
-                  className="flex items-center gap-1.5 text-xs transition-opacity hover:opacity-70"
-                  style={{ color: subtle }}
-                >
-                  <ArrowLeft size={13} /> Back
-                </button>
+                {!lockedRole && (
+                  <button
+                    onClick={() => {
+                      setStep('role_selection');
+                      setErrs({});
+                      setGenErr('');
+                    }}
+                    className="flex items-center gap-1.5 text-xs transition-opacity hover:opacity-70"
+                    style={{ color: subtle }}
+                  >
+                    <ArrowLeft size={13} /> Back
+                  </button>
+                )}
               </div>
             )}
 
@@ -758,7 +761,15 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
                   <p className="text-xs mt-1 max-w-[240px]" style={{ color: subtle }}>{generalErr || 'Please check your connection and try again.'}</p>
                 </div>
                 <button
-                  onClick={() => { setStep('role_selection'); setGenErr(''); setErrs({}); }}
+                  onClick={() => {
+                    setStep(
+                      lockedRole === 'tourist' ? 'tourist_credentials' :
+                      lockedRole === 'authority' ? 'authority_credentials' :
+                      'role_selection'
+                    );
+                    setGenErr('');
+                    setErrs({});
+                  }}
                   className="mt-2 h-11 px-6 rounded-xl text-sm font-semibold text-white transition-all hover:opacity-92 active:scale-95"
                   style={{ background: '#FF9933' }}
                 >
