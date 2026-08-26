@@ -48,7 +48,19 @@ TABLES = {
             "id_photo_url": {"type": "TEXT", "nullable": True},
             "kyc_status": {"type": "VARCHAR(50)", "default": "'PENDING'", "nullable": False},
             "preferred_language": {"type": "VARCHAR(100)", "nullable": True},
-            "created_at": {"type": "TIMESTAMPTZ", "default": "NOW()", "nullable": False}
+            "created_at": {"type": "TIMESTAMPTZ", "default": "NOW()", "nullable": False},
+            # --- KYC issuer + Sepolia blockchain anchoring (migration
+            # 004_kyc_blockchain_anchoring.sql). Additive only. Never store
+            # raw govt_id_number, DOB, or photos on-chain — only these
+            # pseudonymous fields (hash + tx reference) ever get anchored,
+            # per the zero-PII-on-chain rule. ---
+            "kyc_document_type": {"type": "VARCHAR(50)", "nullable": True},
+            "kyc_issuer": {"type": "VARCHAR(50)", "default": "'DigiLocker_Demo'", "nullable": True},
+            "kyc_verification_hash": {"type": "VARCHAR(66)", "nullable": True},
+            "kyc_salt": {"type": "VARCHAR(64)", "nullable": True},
+            "kyc_verified_at": {"type": "TIMESTAMPTZ", "nullable": True},
+            "blockchain_tx_hash": {"type": "VARCHAR(66)", "nullable": True},
+            "blockchain_block_number": {"type": "BIGINT", "nullable": True}
         },
         "primary_key": "id",
         "uniques": ["user_id", "username", "tourist_id"],
@@ -205,13 +217,34 @@ TABLES = {
             "coordinates": {"type": "JSONB", "nullable": False},
             "geom": {"type": "GEOMETRY(Polygon,4326)", "nullable": True},
             "is_active": {"type": "BOOLEAN", "default": "TRUE", "nullable": False},
-            "created_at": {"type": "TIMESTAMPTZ", "default": "NOW()", "nullable": False}
+            "created_at": {"type": "TIMESTAMPTZ", "default": "NOW()", "nullable": False},
+            # --- Merged from location-geofencing-backend-main (migration
+            # 003_geofence_engine_merge.sql). Additive only — every existing
+            # POLYGON/SAFE|BUFFER|RESTRICTED geofence row keeps working
+            # unchanged (geometry_type defaults to 'POLYGON'). ---
+            "geometry_type": {"type": "VARCHAR(16)", "default": "'POLYGON'", "nullable": False},
+            "center_lat": {"type": "DOUBLE PRECISION", "nullable": True},
+            "center_lng": {"type": "DOUBLE PRECISION", "nullable": True},
+            "radius_m": {"type": "DOUBLE PRECISION", "nullable": True},
+            "severity": {"type": "VARCHAR(16)", "default": "'MEDIUM'", "nullable": False},
+            "warning_message": {"type": "TEXT", "nullable": True},
+            "is_crowd_zone": {"type": "BOOLEAN", "default": "FALSE", "nullable": False}
         },
         "primary_key": "id",
         "uniques": [],
         "foreign_keys": [],
         "constraints": {
-            "chk_geofences_zone_type": "CHECK (zone_type IN ('SAFE','BUFFER','RESTRICTED'))"
+            # Widened (not replaced) in migration 003 to also allow Tanvi's
+            # UNSAFE/WARNING zone types alongside the original
+            # SAFE/BUFFER/RESTRICTED set — schema_manager.py only ever ADDS
+            # a constraint by name, it never edits an existing one in
+            # place, so the actual DROP+ADD for existing databases lives in
+            # the migration file, not here. This entry reflects the target
+            # state for schema_manager's on-conflict-skip check and for
+            # fresh databases created via generate_sql_migration.py.
+            "chk_geofences_zone_type": "CHECK (zone_type IN ('SAFE','BUFFER','RESTRICTED','UNSAFE','WARNING'))",
+            "chk_geofences_geometry_type": "CHECK (geometry_type IN ('CIRCLE','POLYGON'))",
+            "chk_geofences_severity": "CHECK (severity IN ('LOW','MEDIUM','HIGH','CRITICAL'))"
         },
         "indexes": {
             "idx_geofences_zone_type": "zone_type",
@@ -226,7 +259,15 @@ TABLES = {
             "latitude": {"type": "DECIMAL(10,7)", "nullable": False},
             "longitude": {"type": "DECIMAL(10,7)", "nullable": False},
             "breach_time": {"type": "TIMESTAMPTZ", "default": "NOW()", "nullable": False},
-            "sms_sent": {"type": "BOOLEAN", "default": "FALSE", "nullable": False}
+            "sms_sent": {"type": "BOOLEAN", "default": "FALSE", "nullable": False},
+            # --- Merged from Tanvi's geofence_events model (migration 003).
+            # Rather than a separate public.geofence_events table duplicating
+            # this one, breach rows now carry event_type/severity/message
+            # directly — geofence_breaches was already the single record of
+            # a tourist crossing into a hazard zone, this just enriches it. ---
+            "event_type": {"type": "VARCHAR(32)", "default": "'ENTERED'", "nullable": False},
+            "severity": {"type": "VARCHAR(16)", "default": "'MEDIUM'", "nullable": False},
+            "message": {"type": "TEXT", "nullable": True}
         },
         "primary_key": "id",
         "uniques": [],
@@ -459,5 +500,29 @@ TABLES = {
             "idx_audit_logs_authority_id": "authority_id",
             "idx_audit_logs_created_at": "created_at"
         }
+    },
+    "chain_blocks": {
+        # Offline-fallback ledger (migration 004_kyc_blockchain_anchoring.sql).
+        # Ported from location-geofencing-backend-main/app/identity/chain.py's
+        # append-only, SHA-256 hash-linked block pattern, rewritten against
+        # this table instead of a SQLAlchemy model. Used by
+        # backend/blockchain/mock_adapter.py whenever no Sepolia RPC
+        # URL/private key is configured (local dev, offline demo), so a KYC
+        # verification always gets an anchor record even without testnet
+        # access. Real Sepolia anchors (backend/blockchain/sepolia_adapter.py)
+        # write tx hash/block number directly onto tourist_profiles instead
+        # and do not use this table.
+        "columns": {
+            "block_index": {"type": "INTEGER", "nullable": False},
+            "timestamp": {"type": "TIMESTAMPTZ", "default": "NOW()", "nullable": False},
+            "data": {"type": "TEXT", "nullable": False},
+            "previous_hash": {"type": "VARCHAR(64)", "nullable": False},
+            "hash": {"type": "VARCHAR(64)", "nullable": False}
+        },
+        "primary_key": "block_index",
+        "uniques": [],
+        "foreign_keys": [],
+        "constraints": {},
+        "indexes": {}
     }
 }

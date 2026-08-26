@@ -239,5 +239,14 @@ export interface TouristUser {
   kyc_status?: 'PENDING' | 'VERIFIED' | 'REJECTED' | null;
   preferred_language?: string | null;
   created_at?: string;
+  // KYC issuer + Sepolia anchoring (backend migration 004). Populated once
+  // KYC completes via either the OCR flow or DigiLocker.
+  kyc_document_type?: string | null;
+  kyc_issuer?: string | null;
+  kyc_verification_hash?: string | null;
+  kyc_verified_at?: string | null;
+  blockchain_tx_hash?: string | null;
+  blockchain_block_number?: number | null;
 }
+
 

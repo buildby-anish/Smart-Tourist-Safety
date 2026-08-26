@@ -16,7 +16,9 @@ _in_memory_tourist_store: dict[UUID, TouristResponse] = {}
 
 _PROFILE_COLUMNS = (
     "id, tourist_id, username, full_name, phone_number, email, emergency_contacts, "
-    "govt_id_type, govt_id_number, id_photo_url, kyc_status, preferred_language, created_at"
+    "govt_id_type, govt_id_number, id_photo_url, kyc_status, preferred_language, created_at, "
+    "kyc_document_type, kyc_issuer, kyc_verification_hash, kyc_verified_at, "
+    "blockchain_tx_hash, blockchain_block_number"
 )
 
 
@@ -44,6 +46,12 @@ def _row_to_response(row) -> TouristResponse:
         kyc_status=row[10],
         preferred_language=row[11],
         created_at=row[12],
+        kyc_document_type=row[13],
+        kyc_issuer=row[14],
+        kyc_verification_hash=row[15],
+        kyc_verified_at=row[16],
+        blockchain_tx_hash=row[17],
+        blockchain_block_number=row[18],
     )
 
 

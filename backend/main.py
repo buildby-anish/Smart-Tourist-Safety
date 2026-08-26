@@ -7,6 +7,7 @@ from database.seed_test_data import ensure_demo_authority_account
 from routers import alerts, audit_logs, auth, authority, geofences, incidents, itinerary, locations, points_of_interest, sos, tourists, ws
 from routers import ai_assistant
 from document_verification import router as document_verification_router
+from digilocker.router import router as digilocker_router
 
 # Execute automatic database schema check and updates
 run_database_schema_check()
@@ -64,3 +65,7 @@ app.include_router(ai_assistant.router, prefix="/api/v1")
 # frontend PATCHes onto tourist_profiles (kyc_status, govt_id_type) once a
 # verification completes, via the existing /tourists/{id} endpoint.
 app.include_router(document_verification_router, prefix="/api/v1/verifications")
+# DigiLocker KYC — additional, swappable verification path alongside the
+# OCR upload flow above. Both end at the same tourist_profiles update path
+# (routers.tourists.update_tourist); see digilocker/router.py.
+app.include_router(digilocker_router, prefix="/api/v1")

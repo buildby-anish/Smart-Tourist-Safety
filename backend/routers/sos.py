@@ -87,12 +87,25 @@ def create_sos(
     try:
         with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
             # Verify tourist profile exists
-            cur.execute("SELECT id FROM public.tourist_profiles WHERE id = %s;", (payload.tourist_id,))
-            if not cur.fetchone():
+            cur.execute("SELECT id, kyc_status FROM public.tourist_profiles WHERE id = %s;", (payload.tourist_id,))
+            tourist_row = cur.fetchone()
+            if not tourist_row:
                 raise HTTPException(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail="Tourist profile not found",
                 )
+
+            # Deliberately NOT a hard KYC gate here (unlike itinerary
+            # creation) — refusing to raise an SOS because a tourist hasn't
+            # finished a verification flow would withhold emergency response
+            # from someone who may be in genuine danger. Instead, flag it in
+            # the incident description so authorities see "unverified
+            # identity" and can weigh that when responding, without ever
+            # blocking the alert itself.
+            kyc_status = tourist_row[1]
+            sos_description = "SOS Alarm Triggered"
+            if kyc_status != "VERIFIED":
+                sos_description += " (UNVERIFIED IDENTITY — tourist has not completed KYC)"
 
             # Create an incident record — SOS coordinates are stored
             # directly on the incident (directive §4: incidents.latitude /
@@ -105,7 +118,7 @@ def create_sos(
                 VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id;
             """, (incident_id, "SOS", payload.tourist_id, payload.latitude, payload.longitude,
-                  70, "CRITICAL", "OPEN", "SOS Alarm Triggered", now))
+                  70, "CRITICAL", "OPEN", sos_description, now))
 
             # Create the SOS request record
             cur.execute("""

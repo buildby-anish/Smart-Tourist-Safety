@@ -11,3 +11,5 @@ python-multipart
 Pillow
 dnspython
 phonenumbers
+shapely
+web3

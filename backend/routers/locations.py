@@ -77,9 +77,15 @@ def report_location(
         for b in breaches:
             breach_payload = {"tourist_id": str(current_user.tourist_profile_id), **{k: str(v) for k, v in b.items()}}
             broadcast_sync(manager.broadcast_to_authorities, "geofence.breach", breach_payload)
+            # Merged (migration 003): use the zone's own severity-aware
+            # warning_message when the engine supplied one, instead of
+            # always hardcoding "restricted zone" — b['warning_message']
+            # may be absent for older in-memory-mode breaches, hence the
+            # fallback keeps the original wording.
+            alert_message = b.get("warning_message") or f"You have entered a restricted zone: {b['geofence_name']}"
             broadcast_sync(
                 manager.send_to_tourist, current_user.tourist_profile_id, "geofence.alert",
-                {"geofence_name": b["geofence_name"], "message": f"You have entered a restricted zone: {b['geofence_name']}"}
+                {"geofence_name": b["geofence_name"], "message": alert_message, "severity": b.get("severity", "MEDIUM")}
             )
         return ping
     except Exception as e:

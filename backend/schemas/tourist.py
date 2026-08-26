@@ -33,6 +33,17 @@ class TouristUpdate(BaseModel):
     id_photo_url: str | None = None
     kyc_status: str | None = None
     preferred_language: str | None = None
+    # KYC issuer + Sepolia anchoring (migration 004) — set by
+    # backend/digilocker/router.py alongside kyc_status, never by the
+    # frontend directly for arbitrary values (the digilocker/document
+    # verification routers are the only real callers of these fields).
+    kyc_document_type: str | None = None
+    kyc_issuer: str | None = None
+    kyc_verification_hash: str | None = None
+    kyc_salt: str | None = None
+    kyc_verified_at: datetime | None = None
+    blockchain_tx_hash: str | None = None
+    blockchain_block_number: int | None = None
 
 
 class TouristResponse(BaseModel):
@@ -51,6 +62,12 @@ class TouristResponse(BaseModel):
     kyc_status: str | None = None
     preferred_language: str | None = None
     created_at: datetime
+    kyc_document_type: str | None = None
+    kyc_issuer: str | None = None
+    kyc_verification_hash: str | None = None
+    kyc_verified_at: datetime | None = None
+    blockchain_tx_hash: str | None = None
+    blockchain_block_number: int | None = None
 
 
 class DigitalIdResponse(BaseModel):

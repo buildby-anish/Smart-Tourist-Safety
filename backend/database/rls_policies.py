@@ -96,4 +96,19 @@ POLICIES: dict[str, list[dict]] = {
     "audit_logs": [
         {"name": "authority_only", "cmd": "ALL", "using": _IS_AUTHORITY, "check": _IS_AUTHORITY},
     ],
+    # chain_blocks: the offline-fallback KYC anchoring ledger (migration
+    # 004_kyc_blockchain_anchoring.sql). Append-only by design (blocks must
+    # never be edited/deleted without breaking the hash chain). A block gets
+    # appended by whichever session completes ITS OWN KYC verification — a
+    # tourist finishing their own DigiLocker/OCR flow, most commonly — so
+    # this can't be authority-gated the way audit_logs is. Every block's
+    # `data` payload is itself just a hash/tourist_id/timestamp reference
+    # (never raw PII, per the zero-PII-on-chain rule enforced in
+    # backend/blockchain/), so any authenticated user may read or append —
+    # same posture as points_of_interest's public read policy, widened to
+    # insert since this table has no owner column to scope a check against.
+    "chain_blocks": [
+        {"name": "select_all_authenticated", "cmd": "SELECT", "using": "true"},
+        {"name": "insert_all_authenticated", "cmd": "INSERT", "check": "true"},
+    ],
 }

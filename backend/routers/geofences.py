@@ -6,6 +6,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from db import is_db_active, get_authenticated_cursor
+from geofence_engine import GeofenceZone, evaluate_point, row_to_zone, BREACH_ZONE_TYPES
 from routers.auth import get_current_user, require_authority
 from schemas.auth import SessionResponse
 from schemas.geofence import (
@@ -24,7 +25,12 @@ _in_memory_breach_log: list[GeofenceBreachResponse] = []
 
 _BREACH_DEBOUNCE = timedelta(minutes=5)  # avoid re-alerting every single ping while a tourist lingers in a zone
 
-_GEOFENCE_COLUMNS = "id, name, zone_type, coordinates, is_active, created_at"
+# Column order matches geofence_engine.row_to_zone()'s expectations exactly —
+# keep these in sync if either changes.
+_GEOFENCE_COLUMNS = (
+    "id, name, zone_type, coordinates, is_active, created_at, "
+    "geometry_type, center_lat, center_lng, radius_m, severity, warning_message, is_crowd_zone"
+)
 
 
 def _ring_to_wkt(coordinates: list[list[float]]) -> str:
@@ -34,11 +40,18 @@ def _ring_to_wkt(coordinates: list[list[float]]) -> str:
 
 def _row_to_geofence(row) -> GeofenceResponse:
     coords = row[3]
-    if isinstance(coords, str):
+    if isinstance(coords, str) and coords:
         coords = json.loads(coords)
     return GeofenceResponse(
         id=row[0], name=row[1], zone_type=row[2], coordinates=coords,
         is_active=row[4], created_at=row[5],
+        geometry_type=row[6] or "POLYGON",
+        center_lat=float(row[7]) if row[7] is not None else None,
+        center_lng=float(row[8]) if row[8] is not None else None,
+        radius_m=float(row[9]) if row[9] is not None else None,
+        severity=row[10] or "MEDIUM",
+        warning_message=row[11],
+        is_crowd_zone=bool(row[12]) if row[12] is not None else False,
     )
 
 
@@ -53,20 +66,42 @@ def create_geofence(
     if not is_db_active():
         gf = GeofenceResponse(
             id=geofence_id, name=payload.name, zone_type=payload.zone_type,
-            coordinates=payload.coordinates, is_active=payload.is_active, created_at=now,
+            geometry_type=payload.geometry_type, coordinates=payload.coordinates,
+            center_lat=payload.center_lat, center_lng=payload.center_lng, radius_m=payload.radius_m,
+            severity=payload.severity, warning_message=payload.warning_message,
+            is_crowd_zone=payload.is_crowd_zone, is_active=payload.is_active, created_at=now,
         )
         _in_memory_geofence_store[geofence_id] = gf
         return gf
 
     try:
         with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
-            wkt = _ring_to_wkt(payload.coordinates)
+            if payload.geometry_type == "POLYGON":
+                wkt = _ring_to_wkt(payload.coordinates)
+                geom_expr = "ST_SetSRID(ST_GeomFromText(%s), 4326)"
+                geom_param = (wkt,)
+                coords_param = json.dumps(payload.coordinates)
+            else:
+                # CIRCLE zones don't populate `geom` (a polygon column) —
+                # the shapely engine derives the circle's geometry at query
+                # time from center_lat/center_lng/radius_m instead.
+                geom_expr = "NULL"
+                geom_param = ()
+                coords_param = None
+
             cur.execute(f"""
-                INSERT INTO public.geofences (id, name, zone_type, coordinates, geom, is_active, created_at)
-                VALUES (%s, %s, %s, %s, ST_SetSRID(ST_GeomFromText(%s), 4326), %s, %s)
+                INSERT INTO public.geofences (
+                    id, name, zone_type, coordinates, geom, is_active, created_at,
+                    geometry_type, center_lat, center_lng, radius_m, severity, warning_message, is_crowd_zone
+                )
+                VALUES (%s, %s, %s, %s, {geom_expr}, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING {_GEOFENCE_COLUMNS};
-            """, (geofence_id, payload.name, payload.zone_type, json.dumps(payload.coordinates),
-                  wkt, payload.is_active, now))
+            """, (
+                geofence_id, payload.name, payload.zone_type, coords_param, *geom_param,
+                payload.is_active, now, payload.geometry_type,
+                payload.center_lat, payload.center_lng, payload.radius_m,
+                payload.severity, payload.warning_message, payload.is_crowd_zone,
+            ))
             return _row_to_geofence(cur.fetchone())
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create geofence: {str(e)}")
@@ -116,9 +151,10 @@ def update_geofence(
     for k, v in update_data.items():
         if k == "coordinates":
             set_clauses.append("coordinates = %s")
-            params.append(json.dumps(v))
-            set_clauses.append("geom = ST_SetSRID(ST_GeomFromText(%s), 4326)")
-            params.append(_ring_to_wkt(v if v[0] == v[-1] else v + [v[0]]))
+            params.append(json.dumps(v) if v is not None else None)
+            if v:
+                set_clauses.append("geom = ST_SetSRID(ST_GeomFromText(%s), 4326)")
+                params.append(_ring_to_wkt(v if v[0] == v[-1] else v + [v[0]]))
         else:
             set_clauses.append(f"{k} = %s")
             params.append(v)
@@ -171,7 +207,8 @@ def list_breaches(
     try:
         with get_authenticated_cursor(current_user.auth_user_id) as cur:
             cur.execute("""
-                SELECT id, tourist_id, geofence_id, latitude, longitude, breach_time, sms_sent
+                SELECT id, tourist_id, geofence_id, latitude, longitude, breach_time, sms_sent,
+                       event_type, severity, message
                 FROM public.geofence_breaches
                 ORDER BY breach_time DESC
                 LIMIT 200;
@@ -181,6 +218,7 @@ def list_breaches(
                     id=row[0], tourist_id=row[1], geofence_id=row[2],
                     latitude=float(row[3]), longitude=float(row[4]),
                     breach_time=row[5], sms_sent=row[6],
+                    event_type=row[7] or "ENTERED", severity=row[8] or "MEDIUM", message=row[9],
                 )
                 for row in cur.fetchall()
             ]
@@ -190,6 +228,13 @@ def list_breaches(
 
 # ---------------------------------------------------------------------------
 # Breach detection — called from routers/locations.py on every GPS ping.
+#
+# Rewired (migration 003 merge) to use geofence_engine's shapely-based
+# matcher instead of a single ST_Contains query, so CIRCLE zones now work
+# correctly alongside POLYGON zones, and the hazard set now covers
+# RESTRICTED (original), plus UNSAFE and WARNING (merged from Tanvi's
+# module) — see geofence_engine.BREACH_ZONE_TYPES. SAFE/BUFFER zones remain
+# informational, not breach triggers, unchanged from the original scope.
 # ---------------------------------------------------------------------------
 
 def _dispatch_sms_webhook(tourist_id: UUID, geofence_name: str, zone_type: str) -> bool:
@@ -212,45 +257,45 @@ def _dispatch_sms_webhook(tourist_id: UUID, geofence_name: str, zone_type: str) 
 
 def evaluate_geofence_breaches(cur, tourist_id: UUID, latitude: float, longitude: float) -> list[dict]:
     """
-    Checks a single GPS ping against all active RESTRICTED geofences and
-    records a breach (+ a linked incident) for any match, debounced per
+    Checks a single GPS ping against all active hazard geofences (RESTRICTED
+    / UNSAFE / WARNING, CIRCLE or POLYGON) using geofence_engine's matcher,
+    and records a breach (+ a linked incident) for any match, debounced per
     tourist+geofence so a tourist standing still doesn't spam new incidents
     every ping.
 
-    NOTE (documented scope limit): this only detects entering a RESTRICTED
-    zone. Detecting "exited a SAFE zone" (the directive's other trigger)
-    needs the tourist's previous zone membership, which means either
-    tracking last-known-zone per tourist or a stateful comparison across
-    consecutive pings — a bigger, separate piece of work better done
-    alongside the dashboard's live tracker in Phase 3 rather than bolted
-    onto this ping handler.
+    NOTE (documented scope limit, unchanged from the original): this only
+    detects ENTERING a hazard zone. Detecting "exited a SAFE zone" needs
+    stateful per-tourist zone-membership tracking across consecutive pings —
+    a bigger, separate piece of work.
     """
-    cur.execute("""
-        SELECT id, name, zone_type
-        FROM public.geofences
-        WHERE is_active = TRUE AND zone_type = 'RESTRICTED'
-          AND ST_Contains(geom, ST_SetSRID(ST_MakePoint(%s, %s), 4326));
-    """, (longitude, latitude))
-    matches = cur.fetchall()
+    cur.execute(f"SELECT {_GEOFENCE_COLUMNS} FROM public.geofences WHERE is_active = TRUE;")
+    zones = [row_to_zone(row) for row in cur.fetchall()]
+
+    matches = evaluate_point(latitude, longitude, zones, zone_types=BREACH_ZONE_TYPES)
 
     created = []
     now = datetime.now(timezone.utc)
-    for geofence_id, geofence_name, zone_type in matches:
+    for match in matches:
         cur.execute("""
             SELECT 1 FROM public.geofence_breaches
             WHERE tourist_id = %s AND geofence_id = %s AND breach_time > %s
             LIMIT 1;
-        """, (tourist_id, geofence_id, now - _BREACH_DEBOUNCE))
+        """, (tourist_id, match.zone_id, now - _BREACH_DEBOUNCE))
         if cur.fetchone():
             continue  # already alerted recently for this tourist+zone
 
         breach_id = uuid4()
-        sms_sent = _dispatch_sms_webhook(tourist_id, geofence_name, zone_type)
+        sms_sent = _dispatch_sms_webhook(tourist_id, match.zone_name, match.zone_type)
         cur.execute("""
-            INSERT INTO public.geofence_breaches (id, tourist_id, geofence_id, latitude, longitude, breach_time, sms_sent)
-            VALUES (%s, %s, %s, %s, %s, %s, %s);
-        """, (breach_id, tourist_id, geofence_id, latitude, longitude, now, sms_sent))
+            INSERT INTO public.geofence_breaches (
+                id, tourist_id, geofence_id, latitude, longitude, breach_time, sms_sent,
+                event_type, severity, message
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, 'ENTERED', %s, %s);
+        """, (breach_id, tourist_id, match.zone_id, latitude, longitude, now, sms_sent,
+              match.severity, match.warning_message))
 
+        incident_priority = "CRITICAL" if match.severity == "CRITICAL" else ("HIGH" if match.severity in ("HIGH", "MEDIUM") else "MEDIUM")
         incident_id = uuid4()
         cur.execute("""
             INSERT INTO public.incidents (
@@ -259,9 +304,13 @@ def evaluate_geofence_breaches(cur, tourist_id: UUID, latitude: float, longitude
             )
             VALUES (%s, 'GEOFENCE_BREACH', %s, %s, %s, %s, %s, 'OPEN', %s, %s);
         """, (
-            incident_id, tourist_id, latitude, longitude, 55, "HIGH",
-            f"Entered restricted zone '{geofence_name}'", now
+            incident_id, tourist_id, latitude, longitude, 55, incident_priority,
+            f"Entered {match.zone_type.lower()} zone '{match.zone_name}'", now
         ))
-        created.append({"geofence_id": geofence_id, "geofence_name": geofence_name, "incident_id": incident_id})
+        created.append({
+            "geofence_id": match.zone_id, "geofence_name": match.zone_name,
+            "incident_id": incident_id, "severity": match.severity,
+            "warning_message": match.warning_message,
+        })
 
     return created

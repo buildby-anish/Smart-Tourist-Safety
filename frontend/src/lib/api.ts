@@ -289,6 +289,61 @@ export async function getDigitalId(touristId: string): Promise<any> {
 }
 
 // ---------------------------------------------------------------------------
+// DigiLocker KYC (backend/digilocker/router.py) — an additional, swappable
+// verification path alongside the OCR upload flow in lib/verificationApi.ts.
+// Both end at the same tourist_profiles update, so either result can be
+// passed to finishSignup the same way handleKycComplete already does for OCR.
+// ---------------------------------------------------------------------------
+
+export interface DigiLockerInitiateResult {
+  session_id: string;
+  status: string;
+  auth_url: string | null;
+  mock_mode: boolean;
+}
+
+export interface DigiLockerFetchResult {
+  session_id: string;
+  status: string;
+  document_type: string;
+  masked_document_number: string;
+  full_name: string;
+  mock_mode: boolean;
+}
+
+export interface DigiLockerConfirmResult {
+  session_id: string;
+  status: string;
+  tourist_id: string;
+  kyc_status: string;
+  blockchain_tx_hash: string | null;
+  blockchain_block_number: number | null;
+  blockchain_adapter: "mock" | "sepolia" | null;
+}
+
+export async function initiateDigiLocker(
+  touristId: string,
+  documentType: "AADHAAR" | "PAN" | "DRIVING_LICENCE" | "VOTER_ID"
+): Promise<DigiLockerInitiateResult> {
+  return apiRequest(`/digilocker/initiate`, {
+    method: "POST",
+    body: { tourist_id: touristId, document_type: documentType },
+  });
+}
+
+export async function fetchDigiLockerDocument(sessionId: string): Promise<DigiLockerFetchResult> {
+  return apiRequest(`/digilocker/fetch/${sessionId}`, { method: "POST" });
+}
+
+export async function confirmDigiLocker(sessionId: string): Promise<DigiLockerConfirmResult> {
+  return apiRequest(`/digilocker/confirm`, { method: "POST", body: { session_id: sessionId } });
+}
+
+export async function getDigiLockerStatus(sessionId: string): Promise<any> {
+  return apiRequest(`/digilocker/status/${sessionId}`);
+}
+
+// ---------------------------------------------------------------------------
 // Incidents (backend/routers/incidents.py)
 // ---------------------------------------------------------------------------
 
@@ -398,14 +453,45 @@ export async function getTouristLocationHistory(touristId: string, limit = 100):
 export interface GeofenceZone {
   id: string;
   name: string;
-  zone_type: "SAFE" | "BUFFER" | "RESTRICTED";
-  coordinates: [number, number][]; // [lng, lat] ring
+  zone_type: "SAFE" | "BUFFER" | "RESTRICTED" | "UNSAFE" | "WARNING";
+  geometry_type?: "CIRCLE" | "POLYGON";
+  coordinates?: [number, number][] | null; // [lng, lat] ring, POLYGON only
+  center_lat?: number | null;
+  center_lng?: number | null;
+  radius_m?: number | null;
+  severity?: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  warning_message?: string | null;
+  is_crowd_zone?: boolean;
   is_active: boolean;
   created_at: string;
 }
 
 export async function listGeofences(activeOnly = true): Promise<GeofenceZone[]> {
   return apiRequest(`/geofences?active_only=${activeOnly}`);
+}
+
+export async function createGeofence(payload: {
+  name: string;
+  zone_type: GeofenceZone["zone_type"];
+  geometry_type?: "CIRCLE" | "POLYGON";
+  coordinates?: [number, number][];
+  center_lat?: number;
+  center_lng?: number;
+  radius_m?: number;
+  severity?: GeofenceZone["severity"];
+  warning_message?: string;
+  is_crowd_zone?: boolean;
+  is_active?: boolean;
+}): Promise<GeofenceZone> {
+  return apiRequest(`/geofences`, { method: "POST", body: payload });
+}
+
+export async function updateGeofence(geofenceId: string, payload: Record<string, any>): Promise<GeofenceZone> {
+  return apiRequest(`/geofences/${geofenceId}`, { method: "PATCH", body: payload });
+}
+
+export async function deleteGeofence(geofenceId: string): Promise<void> {
+  return apiRequest(`/geofences/${geofenceId}`, { method: "DELETE" });
 }
 
 // ---------------------------------------------------------------------------

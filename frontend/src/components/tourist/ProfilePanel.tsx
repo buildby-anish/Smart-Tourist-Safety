@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import {
   User, Bell, Shield, ChevronRight,
   Moon, LogOut, Phone, Hash, Globe, HelpCircle,
-  Lock, Wifi, Loader2, Pencil, Check, X as XIcon, Landmark,
+  Lock, Wifi, Loader2, Pencil, Check, X as XIcon, Landmark, Link as LinkIcon,
 } from 'lucide-react';
 import { getDigitalId, updateTouristProfile, ApiError } from '../../lib/api';
 import { TouristUser, Language } from '../../types';
@@ -141,6 +141,15 @@ export default function ProfilePanel({
                   {user.kyc_status === 'VERIFIED' ? 'Verified tourist' : 'ID verification pending'}
                 </span>
               </div>
+              {user.kyc_status === 'VERIFIED' && user.blockchain_tx_hash && (
+                <span
+                  className="flex items-center gap-1 mt-1 text-[11px] font-mono truncate"
+                  style={{ color: subtle }}
+                  title={`On-chain KYC anchor: ${user.blockchain_tx_hash}`}
+                >
+                  <LinkIcon size={10} /> {user.blockchain_tx_hash.slice(0, 10)}…{user.blockchain_tx_hash.slice(-6)}
+                </span>
+              )}
             </div>
           </div>
         ) : (

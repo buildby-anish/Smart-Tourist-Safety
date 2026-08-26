@@ -14,7 +14,9 @@ import {
   ApiError
 } from '../../lib/api';
 import { IdentityVerification } from '../verification/IdentityVerification';
+import { DigiLockerVerify } from '../verification/DigiLockerVerify';
 import type { DocumentConfirmResponse } from '../../lib/verificationApi';
+import type { DigiLockerConfirmResult } from '../../lib/api';
 
 type Step =
   | 'role_selection'
@@ -57,6 +59,7 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
   // the account already exists) knows which profile to attach the
   // verification to and can complete sign-in once KYC is done/skipped.
   const [createdTourist, setCreatedTourist] = useState<{ tourist: any; token: string } | null>(null);
+  const [kycMethod, setKycMethod] = useState<'ocr' | 'digilocker'>('digilocker');
   
   // Authority details
   const [badgeId, setBadgeId] = useState('');
@@ -247,6 +250,15 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
       // an error screen over it.
       finishSignup(createdTourist.tourist);
     }
+  };
+
+  const handleDigiLockerComplete = (result: DigiLockerConfirmResult) => {
+    if (!createdTourist) return;
+    if (result.kyc_status !== 'VERIFIED') return;
+    // DigiLocker's /confirm endpoint already persisted kyc_status server-side
+    // (via the same update_tourist path the OCR flow uses) — no follow-up
+    // PATCH needed here, just reflect the confirmed state locally.
+    finishSignup({ ...createdTourist.tourist, kyc_status: 'VERIFIED', blockchain_tx_hash: result.blockchain_tx_hash });
   };
 
   const handleResend = () => {
@@ -593,17 +605,40 @@ export default function LoginModal({ onClose, onAuthenticated, darkMode: dm, ini
             {/* ── step: KYC / Identity Verification ── */}
             {step === 'kyc' && createdTourist && (
               <div className="space-y-3">
-                <IdentityVerification
-                  touristId={createdTourist.tourist.id}
-                  apiUrl={`${getApiBaseUrl()}/verifications`}
-                  onVerificationComplete={handleKycComplete}
-                />
+                <div className="flex rounded-lg overflow-hidden border border-slate-200 dark:border-slate-700 text-xs font-medium">
+                  <button
+                    onClick={() => setKycMethod('digilocker')}
+                    className={`flex-1 py-2 transition-colors ${kycMethod === 'digilocker' ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    DigiLocker (Instant)
+                  </button>
+                  <button
+                    onClick={() => setKycMethod('ocr')}
+                    className={`flex-1 py-2 transition-colors ${kycMethod === 'ocr' ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900' : 'hover:bg-slate-50 dark:hover:bg-slate-800'}`}
+                  >
+                    Scan ID Document
+                  </button>
+                </div>
+
+                {kycMethod === 'digilocker' ? (
+                  <DigiLockerVerify
+                    touristId={createdTourist.tourist.id}
+                    onVerificationComplete={handleDigiLockerComplete}
+                  />
+                ) : (
+                  <IdentityVerification
+                    touristId={createdTourist.tourist.id}
+                    apiUrl={`${getApiBaseUrl()}/verifications`}
+                    onVerificationComplete={handleKycComplete}
+                  />
+                )}
+
                 <button
                   onClick={() => finishSignup(createdTourist.tourist)}
                   className="w-full text-center text-xs transition-opacity hover:opacity-70"
                   style={{ color: subtle }}
                 >
-                  Skip for now — verify later from your profile
+                  Remind me later — some features (like trip planning) stay locked until verified
                 </button>
               </div>
             )}

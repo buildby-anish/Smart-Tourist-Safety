@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from db import is_db_active, get_authenticated_cursor
+from kyc_gate import require_verified_kyc
 from routers.auth import require_tourist
 from schemas.auth import SessionResponse
 from schemas.itinerary import Destination, ItineraryCreate, ItineraryResponse, ItineraryUpdate
@@ -38,6 +39,11 @@ def create_itinerary(
     current_user: SessionResponse = Depends(require_tourist)
 ) -> ItineraryResponse:
     tourist_id = current_user.tourist_profile_id
+
+    # Mandatory KYC gate (server-side — the frontend gate alone can be
+    # bypassed by calling this endpoint directly). No-ops in offline mode.
+    require_verified_kyc(tourist_id, current_user.auth_user_id)
+
     now = datetime.now(timezone.utc)
     destinations_json = json.dumps([d.model_dump(mode="json") for d in payload.destinations])
 

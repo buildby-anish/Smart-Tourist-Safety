@@ -61,3 +61,27 @@ class Config:
     @classmethod
     def has_service_role(cls) -> bool:
         return bool(cls.SUPABASE_URL and cls.SUPABASE_SERVICE_ROLE_KEY)
+
+    # Ethereum Sepolia testnet config for KYC anchoring (see
+    # backend/blockchain/). If any of these three are unset,
+    # blockchain/service.py falls back to the offline mock ledger
+    # (public.chain_blocks) instead of failing KYC verification outright —
+    # same "degrade, don't break" posture as GROQ_API_KEY/SMTP above.
+    SEPOLIA_RPC_URL = os.getenv("SEPOLIA_RPC_URL", "").strip()
+    SEPOLIA_PRIVATE_KEY = os.getenv("SEPOLIA_PRIVATE_KEY", "").strip()
+    SEPOLIA_CONTRACT_ADDRESS = os.getenv("SEPOLIA_CONTRACT_ADDRESS", "").strip()
+
+    @classmethod
+    def is_sepolia_configured(cls) -> bool:
+        return bool(cls.SEPOLIA_RPC_URL and cls.SEPOLIA_PRIVATE_KEY and cls.SEPOLIA_CONTRACT_ADDRESS)
+
+    # DigiLocker / API Setu OAuth2 config (see backend/digilocker/). Unset
+    # by default -> MockDigiLockerAdapter is used, so local/demo KYC never
+    # depends on real DigiLocker sandbox credentials being provisioned.
+    DIGILOCKER_CLIENT_ID = os.getenv("DIGILOCKER_CLIENT_ID", "").strip()
+    DIGILOCKER_CLIENT_SECRET = os.getenv("DIGILOCKER_CLIENT_SECRET", "").strip()
+    DIGILOCKER_REDIRECT_URI = os.getenv("DIGILOCKER_REDIRECT_URI", "").strip()
+
+    @classmethod
+    def is_digilocker_configured(cls) -> bool:
+        return bool(cls.DIGILOCKER_CLIENT_ID and cls.DIGILOCKER_CLIENT_SECRET and cls.DIGILOCKER_REDIRECT_URI)
