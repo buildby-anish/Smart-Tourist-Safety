@@ -196,6 +196,13 @@ export default function TouristApp({
         >
           Sign in
         </button>
+        <button
+          onClick={onReturnToGateway}
+          className="text-xs font-bold transition-opacity hover:opacity-80 mt-1"
+          style={{ color: dm ? 'rgba(255,255,255,0.6)' : 'rgba(12,35,64,0.65)' }}
+        >
+          Official Sign In →
+        </button>
       </div>
     );
   }
