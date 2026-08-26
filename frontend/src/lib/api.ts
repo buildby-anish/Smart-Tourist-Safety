@@ -13,7 +13,11 @@ let isSyncing = false;
 export function getApiBaseUrl(): string {
   // @ts-ignore
   const envUrl = import.meta.env.VITE_API_BASE_URL;
-  return localStorage.getItem("sos_api_base_url") || envUrl || "http://localhost:8000/api/v1";
+  const localUrl = localStorage.getItem("sos_api_base_url");
+  if (localUrl && !localUrl.includes("localhost") && !localUrl.includes("127.0.0.1")) {
+    return localUrl;
+  }
+  return envUrl || localUrl || "http://localhost:8000/api/v1";
 }
 
 export function getAuthToken(): string {
