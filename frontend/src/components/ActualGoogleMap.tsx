@@ -1,9 +1,10 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import {
   Car, Bike, Footprints, Train, X as XIcon, MapPin, Navigation,
   Users, ShieldCheck, AlertTriangle, ExternalLink, ShieldAlert, Shield, Flame
 } from 'lucide-react';
 import { GeoFenceZone } from '../types';
+import { createGeofence } from '../lib/api';
 
 declare var L: any;
 
@@ -38,6 +39,8 @@ interface ActualGoogleMapProps {
   zoomAction?: { type: 'in' | 'out'; ts: number };
   routeTarget?: { lat: number; lng: number; name: string; address: string } | null;
   onClearRoute?: () => void;
+  enableDrawing?: boolean;
+  onGeofenceCreated?: () => void;
 }
 
 const TRAVEL_MODES = [
@@ -64,7 +67,9 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   recenter,
   zoomAction,
   routeTarget,
-  onClearRoute
+  onClearRoute,
+  enableDrawing = false,
+  onGeofenceCreated,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -79,6 +84,15 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   const [leafletLoaded, setLeafletLoaded] = useState(false);
   const [isDarkMode, setIsDarkMode] = useState(() => document.documentElement.classList.contains('dark'));
   const [activeMarker, setActiveMarker] = useState<MapClusterMarker | null>(null);
+
+  // Drawing tools state
+  const [drawingMode, setDrawingMode] = useState<'circle' | 'polygon' | null>(null);
+  const [drawPoints, setDrawPoints] = useState<{ lat: number; lng: number }[]>([]);
+  const [drawRadius, setDrawRadius] = useState<number>(1000);
+  const [showDrawDialog, setShowDrawDialog] = useState(false);
+  const [newGeofenceName, setNewGeofenceName] = useState('');
+  const [newGeofenceSeverity, setNewGeofenceSeverity] = useState<'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'>('HIGH');
+  const drawLayerRef = useRef<any>(null);
 
   // Map settings
   const [mapMode, setMapMode] = useState<'m' | 'k' | 'p'>('m'); // m: roadmap, k: satellite, p: terrain
@@ -179,8 +193,39 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
 
     // Map click listener: select real-life places or drop pins
     mapInstance.on('click', async (event: any) => {
+      const mode = drawingModeRef.current;
       const { lat, lng } = event.latlng;
-      
+
+      if (mode) {
+        if (mode === 'circle') {
+          setDrawPoints([{ lat, lng }]);
+          if (drawLayerRef.current) {
+            drawLayerRef.current.remove();
+          }
+          drawLayerRef.current = L.circle([lat, lng], {
+            radius: drawRadiusRef.current,
+            color: '#dc2626',
+            fillColor: '#dc2626',
+            fillOpacity: 0.25,
+            weight: 2
+          }).addTo(mapInstance);
+          setShowDrawDialog(true);
+        } else if (mode === 'polygon') {
+          const newPts = [...drawPointsRef.current, { lat, lng }];
+          setDrawPoints(newPts);
+          if (drawLayerRef.current) {
+            drawLayerRef.current.remove();
+          }
+          drawLayerRef.current = L.polygon(newPts.map(p => [p.lat, p.lng]), {
+            color: '#dc2626',
+            fillColor: '#dc2626',
+            fillOpacity: 0.25,
+            weight: 2
+          }).addTo(mapInstance);
+        }
+        return; // skip reverse geocoding
+      }
+
       // Temporary loading indicator
       setSelectedPlaceInfo({
         name: 'Locating place...',
@@ -754,6 +799,103 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     }
   };
 
+  // Refs to avoid stale closures in Leaflet events
+  const drawingModeRef = useRef(drawingMode);
+  useEffect(() => {
+    drawingModeRef.current = drawingMode;
+  }, [drawingMode]);
+
+  const drawPointsRef = useRef(drawPoints);
+  useEffect(() => {
+    drawPointsRef.current = drawPoints;
+  }, [drawPoints]);
+
+  const drawRadiusRef = useRef(drawRadius);
+  useEffect(() => {
+    drawRadiusRef.current = drawRadius;
+  }, [drawRadius]);
+
+  const startDrawing = (mode: 'circle' | 'polygon') => {
+    setDrawingMode(mode);
+    setDrawPoints([]);
+    setShowDrawDialog(false);
+    if (drawLayerRef.current) {
+      drawLayerRef.current.remove();
+      drawLayerRef.current = null;
+    }
+  };
+
+  const handleCancelDrawing = () => {
+    setDrawingMode(null);
+    setDrawPoints([]);
+    setShowDrawDialog(false);
+    setNewGeofenceName('');
+    if (drawLayerRef.current) {
+      drawLayerRef.current.remove();
+      drawLayerRef.current = null;
+    }
+  };
+
+  const handleFinishPolygon = () => {
+    if (drawPoints.length < 3) return;
+    setShowDrawDialog(true);
+  };
+
+  const handleSaveGeofence = async () => {
+    if (!newGeofenceName.trim()) return;
+    
+    try {
+      let payload: any = {
+        name: newGeofenceName,
+        zone_type: 'RESTRICTED',
+        geometry_type: drawingMode === 'circle' ? 'CIRCLE' : 'POLYGON',
+        severity: newGeofenceSeverity,
+        warning_message: `DANGER: Entered ${newGeofenceName}. Proceed with caution.`,
+        is_active: true
+      };
+
+      if (drawingMode === 'circle') {
+        const centerPt = drawPoints[0];
+        payload.center_lat = centerPt.lat;
+        payload.center_lng = centerPt.lng;
+        payload.radius_m = drawRadius;
+      } else {
+        const coords = drawPoints.map(p => [p.lng, p.lat]);
+        coords.push([coords[0][0], coords[0][1]]); // Close polygon ring
+        payload.coordinates = coords;
+      }
+
+      await createGeofence(payload);
+      console.log('Geofence created successfully!');
+      
+      if (onGeofenceCreated) {
+        onGeofenceCreated();
+      }
+    } catch (err) {
+      console.warn('Failed to save geofence:', err);
+    } finally {
+      handleCancelDrawing();
+    }
+  };
+
+  // Watch radius changes for circle live preview
+  useEffect(() => {
+    if (drawingMode === 'circle' && drawPoints.length > 0 && mapRef.current) {
+      const centerPt = drawPoints[0];
+      const L = (window as any).L;
+      if (drawLayerRef.current) {
+        drawLayerRef.current.remove();
+      }
+      drawLayerRef.current = L.circle([centerPt.lat, centerPt.lng], {
+        radius: drawRadius,
+        color: '#dc2626',
+        fillColor: '#dc2626',
+        fillOpacity: 0.25,
+        weight: 2
+      }).addTo(mapRef.current);
+    }
+  }, [drawRadius, drawPoints, drawingMode]);
+
   const wrapperClass = fullBleed
     ? 'relative w-full h-full overflow-hidden'
     : 'relative w-full rounded-2xl overflow-hidden border border-slate-300 shadow-sm';
@@ -777,6 +919,120 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     <div className={wrapperClass} style={fullBleed ? undefined : { height }}>
       {/* Map Anchor container */}
       <div ref={containerRef} className="w-full h-full z-0" />
+
+      {/* Geofence Drawing Overlay */}
+      {enableDrawing && (
+        <div className="absolute top-4 right-4 z-[40] pointer-events-auto flex flex-col gap-2">
+          {drawingMode ? (
+            <div className="bg-slate-900/95 backdrop-blur-md p-3 rounded-2xl border border-slate-700 shadow-xl text-white text-xs max-w-[240px] space-y-2">
+              <div className="font-bold text-orange-400 uppercase tracking-wider text-[10px]">
+                Drawing Geofence ({drawingMode})
+              </div>
+              <p className="opacity-80 text-[10px]">
+                {drawingMode === 'circle'
+                  ? 'Click anywhere on the map to set the center of the danger circle.'
+                  : 'Click on the map to place vertices.'}
+              </p>
+              <div className="flex gap-2">
+                {drawingMode === 'polygon' && drawPoints.length >= 3 && (
+                  <button
+                    onClick={handleFinishPolygon}
+                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 py-1 rounded-lg font-bold text-white transition-transform active:scale-95 text-[10px]"
+                  >
+                    Finish
+                  </button>
+                )}
+                <button
+                  onClick={handleCancelDrawing}
+                  className="flex-1 bg-red-600 hover:bg-red-500 py-1 rounded-lg font-bold text-white transition-transform active:scale-95 text-[10px]"
+                >
+                  Cancel
+                </button>
+              </div>
+            </div>
+          ) : (
+            <div className="bg-slate-900/95 backdrop-blur-md p-1.5 rounded-2xl border border-slate-700 shadow-xl flex gap-1.5">
+              <button
+                onClick={() => startDrawing('circle')}
+                className="bg-orange-500 hover:bg-orange-400 text-white font-bold text-[9px] px-2.5 py-1.5 rounded-xl transition-transform active:scale-95 flex items-center gap-1 cursor-pointer"
+              >
+                🔴 Draw Circle Zone
+              </button>
+              <button
+                onClick={() => startDrawing('polygon')}
+                className="bg-orange-500 hover:bg-orange-400 text-white font-bold text-[9px] px-2.5 py-1.5 rounded-xl transition-transform active:scale-95 flex items-center gap-1 cursor-pointer"
+              >
+                ⬡ Draw Polygon Zone
+              </button>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Geofence Creation Form Modal */}
+      {showDrawDialog && (
+        <div className="absolute inset-0 z-[50] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm pointer-events-auto">
+          <div className="w-full max-w-xs bg-slate-900 border border-slate-700 rounded-3xl p-5 space-y-4 text-white shadow-2xl">
+            <h3 className="text-xs font-bold text-orange-400 uppercase tracking-wide">
+              Create Danger Zone / ख़तरा क्षेत्र
+            </h3>
+            <div className="space-y-3">
+              <div>
+                <label className="text-[9px] uppercase font-bold text-slate-400">Zone Name</label>
+                <input
+                  type="text"
+                  value={newGeofenceName}
+                  onChange={(e) => setNewGeofenceName(e.target.value)}
+                  placeholder="e.g. Solang River Landslide"
+                  className="w-full h-8 mt-1 bg-slate-800 border border-slate-700 rounded-lg px-2.5 text-[11px] text-white outline-none focus:border-orange-500"
+                />
+              </div>
+              
+              {drawingMode === 'circle' && (
+                <div>
+                  <label className="text-[9px] uppercase font-bold text-slate-400">Radius (meters)</label>
+                  <input
+                    type="number"
+                    value={drawRadius}
+                    onChange={(e) => setDrawRadius(Number(e.target.value))}
+                    className="w-full h-8 mt-1 bg-slate-800 border border-slate-700 rounded-lg px-2.5 text-[11px] text-white outline-none"
+                  />
+                </div>
+              )}
+
+              <div>
+                <label className="text-[9px] uppercase font-bold text-slate-400">Severity</label>
+                <select
+                  value={newGeofenceSeverity}
+                  onChange={(e) => setNewGeofenceSeverity(e.target.value as any)}
+                  className="w-full h-8 mt-1 bg-slate-800 border border-slate-700 rounded-lg px-2 text-[11px] text-white outline-none"
+                >
+                  <option value="CRITICAL">Critical (Red Zone)</option>
+                  <option value="HIGH">High (Orange Zone)</option>
+                  <option value="MEDIUM">Medium (Yellow Zone)</option>
+                  <option value="LOW">Low (Green Zone)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex gap-2 pt-1">
+              <button
+                onClick={handleSaveGeofence}
+                disabled={!newGeofenceName.trim()}
+                className="flex-1 h-9 bg-orange-500 hover:bg-orange-400 disabled:opacity-40 rounded-xl text-[10px] font-bold text-white transition-transform active:scale-95 cursor-pointer"
+              >
+                Save Zone
+              </button>
+              <button
+                onClick={handleCancelDrawing}
+                className="flex-1 h-9 bg-slate-800 hover:bg-slate-700 rounded-xl text-[10px] font-bold text-slate-300 transition-transform active:scale-95 cursor-pointer"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Map Control Bar Top */}
       {chrome && (

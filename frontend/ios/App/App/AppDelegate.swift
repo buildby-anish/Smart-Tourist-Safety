@@ -1,48 +1,118 @@
 import UIKit
 import Capacitor
+import CoreBluetooth
 
 @UIApplicationMain
-class AppDelegate: UIResponder, UIApplicationDelegate {
+class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelegate, CBCentralManagerDelegate {
 
     var window: UIWindow?
+    var peripheralManager: CBPeripheralManager?
+    var centralManager: CBCentralManager?
+    var processedSOSPackets = Set<String>()
+    let serviceUUID = CBUUID(string: "505B9110-3FA1-4E6A-913A-C4345B080001")
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Override point for customization after application launch.
+        // Setup BLE Mesh Relaying
+        peripheralManager = CBPeripheralManager(delegate: self, queue: nil)
+        centralManager = CBCentralManager(delegate: self, queue: nil)
         return true
     }
 
+    // MARK: - CBPeripheralManagerDelegate
+    func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
+        if peripheral.state == .poweredOn {
+            print("iOS BLE Advertiser ready")
+        }
+    }
+
+    func advertiseSOS(packet: String) {
+        guard let pm = peripheralManager, pm.state == .poweredOn else { return }
+        let advertisementData: [String: Any] = [
+            CBAdvertisementDataServiceUUIDsKey: [serviceUUID],
+            CBAdvertisementDataLocalNameKey: "SurakshaSOS"
+        ]
+        
+        pm.startAdvertising(advertisementData)
+        print("iOS BLE SOS advertising packet: \(packet)")
+    }
+
+    // MARK: - CBCentralManagerDelegate
+    func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        if central.state == .poweredOn {
+            central.scanForPeripherals(withServices: [serviceUUID], options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
+            print("iOS BLE SOS Scanning started")
+        }
+    }
+
+    func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+        if let serviceData = advertisementData[CBAdvertisementDataServiceDataKey] as? [CBUUID: Data],
+           let payload = serviceData[serviceUUID],
+           let packet = String(data: payload, encoding: .utf8) {
+            handleSOSPacket(packet)
+        }
+    }
+
+    func handleSOSPacket(_ packet: String) {
+        if processedSOSPackets.contains(packet) { return }
+        processedSOSPackets.insert(packet)
+        print("New SOS Packet received via iOS BLE: \(packet)")
+
+        relayToServer(packet: packet) { success in
+            if success {
+                print("SOS packet relayed to backend successfully.")
+            } else {
+                print("Relay failed. Re-advertising packet...")
+                self.advertiseSOS(packet: packet)
+            }
+        }
+    }
+
+    func relayToServer(packet: String, completion: @escaping (Bool) -> Void) {
+        guard let url = URL(string: "https://smart-tourist-safety-production.up.railway.app/api/v1/sos/relay") else {
+            completion(false)
+            return
+        }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let json: [String: Any] = ["payload": packet]
+        request.httpBody = try? JSONSerialization.data(withJSONObject: json)
+
+        let task = URLSession.shared.dataTask(with: request) { _, response, _ in
+            if let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200 || httpResponse.statusCode == 201 {
+                completion(true)
+            } else {
+                completion(false)
+            }
+        }
+        task.resume()
+    }
+
     func applicationWillResignActive(_ application: UIApplication) {
-        // Sent when the application is about to move from active to inactive state. This can occur for certain types of temporary interruptions (such as an incoming phone call or SMS message) or when the user quits the application and it begins the transition to the background state.
-        // Use this method to pause ongoing tasks, disable timers, and invalidate graphics rendering callbacks. Games should use this method to pause the game.
+        // Sent when the application is about to move from active to inactive state.
     }
 
     func applicationDidEnterBackground(_ application: UIApplication) {
-        // Use this method to release shared resources, save user data, invalidate timers, and store enough application state information to restore your application to its current state in case it is terminated later.
-        // If your application supports background execution, this method is called instead of applicationWillTerminate: when the user quits.
+        // Use this method to release shared resources, save user data, invalidate timers.
     }
 
     func applicationWillEnterForeground(_ application: UIApplication) {
-        // Called as part of the transition from the background to the active state; here you can undo many of the changes made on entering the background.
+        // Called as part of the transition from the background to the active state.
     }
 
     func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused (or not yet started) while the application was inactive. If the application was previously in the background, optionally refresh the user interface.
+        // Restart any tasks that were paused while the application was inactive.
     }
 
     func applicationWillTerminate(_ application: UIApplication) {
-        // Called when the application is about to terminate. Save data if appropriate. See also applicationDidEnterBackground:.
+        // Called when the application is about to terminate.
     }
 
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
-        // Called when the app was launched with a url. Feel free to add additional processing here,
-        // but if you want the App API to support tracking app url opens, make sure to keep this call
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
     }
 
     func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
-        // Called when the app was launched with an activity, including Universal Links.
-        // Feel free to add additional processing here, but if you want the App API to support
-        // tracking app url opens, make sure to keep this call
         return ApplicationDelegateProxy.shared.application(application, continue: userActivity, restorationHandler: restorationHandler)
     }
 

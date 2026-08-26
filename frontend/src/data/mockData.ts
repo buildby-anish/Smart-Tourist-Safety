@@ -555,6 +555,22 @@ export const MOCK_GEOFENCE_ZONES: GeoFenceZone[] = [
     description: 'Monitored safe tourist corridor with 24/7 Police Helpdesk & active PCR coverage.',
     center: { lat: 32.2396, lng: 77.1887 },
     radiusKm: 3.0
+  },
+  {
+    id: 'zone-hp-danger',
+    name: 'Himachal Pradesh Danger Zone (High Risk Avalanche & Landslide Area)',
+    riskLevel: 'Unsafe',
+    description: 'Extremely dangerous slope area with active landslide history and weak cellular connectivity.',
+    center: { lat: 31.1048, lng: 77.1734 },
+    radiusKm: 8.0
+  },
+  {
+    id: 'zone-mh-danger',
+    name: 'Maharashtra Western Ghats Landslide Corridor',
+    riskLevel: 'Unsafe',
+    description: 'Heavy rainfall landslide danger corridor. Trekking restricted during monsoon seasons.',
+    center: { lat: 18.7500, lng: 73.4000 },
+    radiusKm: 10.0
   }
 ];
 

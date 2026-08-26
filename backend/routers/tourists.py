@@ -5,6 +5,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from db import is_db_active, get_db_cursor, get_authenticated_cursor
+from realtime import broadcast_sync, manager
 from routers.auth import get_current_user
 from schemas.auth import SessionResponse
 from schemas.tourist import DigitalIdResponse, EmergencyContact, TouristCreate, TouristResponse, TouristUpdate
@@ -214,6 +215,7 @@ def update_tourist(
             update_data["tourist_id"] = _generate_tourist_code()
         updated = tourist.model_copy(update=update_data)
         _in_memory_tourist_store[profile_id] = updated
+        broadcast_sync(manager.broadcast_to_authorities, "tourist.updated", updated.model_dump(mode="json"))
         return updated
 
     # 2. Database Mode
@@ -252,7 +254,9 @@ def update_tourist(
         with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
             cur.execute(query, tuple(params))
             row = cur.fetchone()
-            return _row_to_response(row)
+            updated_resp = _row_to_response(row)
+            broadcast_sync(manager.broadcast_to_authorities, "tourist.updated", updated_resp.model_dump(mode="json"))
+            return updated_resp
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

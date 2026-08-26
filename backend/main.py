@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import Config
 from database.schema_manager import run_database_schema_check
-from database.seed_test_data import ensure_demo_authority_account
+from database.seed_test_data import ensure_demo_authority_account, ensure_default_geofences
 from routers import alerts, audit_logs, auth, authority, geofences, incidents, itinerary, locations, points_of_interest, sos, tourists, ws
 from routers import ai_assistant
 from document_verification import router as document_verification_router
@@ -15,6 +15,7 @@ run_database_schema_check()
 # Idempotent: creates one demo authority account for testing the Official
 # Sign In page if it doesn't already exist. See database/seed_test_data.py.
 ensure_demo_authority_account()
+ensure_default_geofences()
 
 app = FastAPI(title="Smart Tourist Safety API")
 

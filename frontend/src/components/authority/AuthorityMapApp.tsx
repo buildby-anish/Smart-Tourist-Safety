@@ -29,6 +29,8 @@ interface Props {
   clusters: AnomalyCluster[];
   auditLogs: AuditLog[];
   liveLocations: Record<string, LiveLocationPing>;
+  geofences: any[];
+  onGeofenceCreated?: () => void;
 
   onDispatchUnit: (incidentId: string, unitId: string) => void;
   onResolveIncident: (incidentId: string) => void;
@@ -54,9 +56,61 @@ function clustersToZones(clusters: AnomalyCluster[]): GeoFenceZone[] {
 
 export default function AuthorityMapApp({
   language, onLanguageChange, darkMode: dm, onToggleDarkMode, onLogout, officerName,
-  tourists, incidents, units, stations, hospitals, clusters, auditLogs, liveLocations,
+  tourists, incidents, units, stations, hospitals, clusters, auditLogs, liveLocations, geofences, onGeofenceCreated,
   onDispatchUnit, onResolveIncident, onMarkTouristSafe, onSendBroadcast,
 }: Props) {
+  const convertedGeofenceZones = useMemo<GeoFenceZone[]>(() => {
+    return geofences.map((z) => {
+      if (z.geometry_type === 'CIRCLE') {
+        const riskLevel = z.zone_type === 'RESTRICTED' ? 'Unsafe' : z.zone_type === 'BUFFER' ? 'Caution' : 'Safe';
+        return {
+          id: z.id,
+          name: z.name,
+          riskLevel,
+          description: z.warning_message || `${z.zone_type} zone`,
+          center: { lat: z.center_lat, lng: z.center_lng },
+          radiusKm: (z.radius_m || 1000) / 1000,
+        };
+      }
+      const coords = Array.isArray(z.coordinates) ? z.coordinates : [];
+      if (coords.length === 0) {
+        return {
+          id: z.id,
+          name: z.name,
+          riskLevel: 'Unsafe',
+          description: z.name,
+          center: { lat: 20.5937, lng: 78.9629 },
+          radiusKm: 1,
+        };
+      }
+      const lats = coords.map((c) => c[1]);
+      const lngs = coords.map((c) => c[0]);
+      const centerLat = lats.reduce((a, b) => a + b, 0) / lats.length;
+      const centerLng = lngs.reduce((a, b) => a + b, 0) / lngs.length;
+      const toRad = (d: number) => (d * Math.PI) / 180;
+      const haversineKm = (lat1: number, lng1: number, lat2: number, lng2: number) => {
+        const R = 6371;
+        const dLat = toRad(lat2 - lat1);
+        const dLng = toRad(lng2 - lng1);
+        const a = Math.sin(dLat / 2) ** 2 + Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
+        return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      };
+      const radiusKm = Math.max(
+        0.05,
+        ...coords.map(([lng, lat]) => haversineKm(centerLat, centerLng, lat, lng))
+      );
+      const riskLevel = z.zone_type === 'RESTRICTED' ? 'Unsafe' : z.zone_type === 'BUFFER' ? 'Caution' : 'Safe';
+      return {
+        id: z.id,
+        name: z.name,
+        riskLevel,
+        description: z.warning_message || `${z.zone_type} zone`,
+        center: { lat: centerLat, lng: centerLng },
+        radiusKm,
+      };
+    });
+  }, [geofences]);
+
   const [layers, setLayers] = useState<LayerToggles>({
     showSosLayer: true,
     showRespondersLayer: true,
@@ -215,13 +269,15 @@ export default function AuthorityMapApp({
         center={DEFAULT_CENTER}
         zoom={5}
         markers={markers}
-        geofenceZones={layers.showHeatmapLayer ? clustersToZones(clusters) : []}
+        geofenceZones={[...convertedGeofenceZones, ...(layers.showHeatmapLayer ? clustersToZones(clusters) : [])]}
         onMarkerClick={handleMarkerClick}
         selectedMarkerId={selectedMarkerId}
         fullBleed
         chrome={false}
         recenter={recenter}
         height="100%"
+        enableDrawing={true}
+        onGeofenceCreated={onGeofenceCreated}
       />
 
       <AuthorityHeader

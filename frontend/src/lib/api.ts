@@ -450,6 +450,10 @@ export async function getTouristLocationHistory(touristId: string, limit = 100):
   return apiRequest(`/locations/tourist/${touristId}?limit=${limit}`);
 }
 
+export async function broadcastStateAlert(payload: { state: string; message: string; severity: string }): Promise<any> {
+  return apiRequest("/alerts/broadcast-state", { method: "POST", body: payload });
+}
+
 // ---------------------------------------------------------------------------
 // Geofences (backend/routers/geofences.py)
 // ---------------------------------------------------------------------------

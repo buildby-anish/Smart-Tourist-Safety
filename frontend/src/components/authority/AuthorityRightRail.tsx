@@ -159,7 +159,7 @@ function BroadcastComposer({
   onSendBroadcast: (newAlert: Omit<BroadcastAlert, 'id' | 'timestamp' | 'deliveredCount' | 'status'>) => void;
 }) {
   const t = i18n[language];
-  const [region, setRegion] = useState('Himachal Pradesh (Solang Valley & Rohtang Sector)');
+  const [region, setRegion] = useState('All');
   const [radiusKm, setRadiusKm] = useState(10);
   const [severity, setSeverity] = useState<AlertSeverity>('Critical');
   const [titleEn, setTitleEn] = useState('');
@@ -193,7 +193,16 @@ function BroadcastComposer({
             <X size={13} style={{ color: subtle }} />
           </button>
         </div>
-        <input value={region} onChange={(e) => setRegion(e.target.value)} placeholder="Region" className="w-full h-10 rounded-xl px-3 text-xs" style={{ background: dm ? 'rgba(255,255,255,0.06)' : 'rgba(12,35,64,0.05)', color: text }} />
+        <select
+          value={region}
+          onChange={(e) => setRegion(e.target.value)}
+          className="w-full h-10 rounded-xl px-3 text-xs"
+          style={{ background: dm ? 'rgba(255,255,255,0.06)' : 'rgba(12,35,64,0.05)', color: text }}
+        >
+          <option value="All">All States / Regions</option>
+          <option value="Himachal Pradesh">Himachal Pradesh</option>
+          <option value="Maharashtra">Maharashtra</option>
+        </select>
         <div className="flex items-center gap-2">
           <input type="number" value={radiusKm} onChange={(e) => setRadiusKm(Number(e.target.value))} className="w-20 h-10 rounded-xl px-3 text-xs" style={{ background: dm ? 'rgba(255,255,255,0.06)' : 'rgba(12,35,64,0.05)', color: text }} />
           <span className="text-xs" style={{ color: subtle }}>km radius · ~{estimatedRecipients.toLocaleString()} devices</span>

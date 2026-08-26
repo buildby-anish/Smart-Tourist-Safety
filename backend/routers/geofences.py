@@ -87,7 +87,7 @@ def create_geofence(
                 # time from center_lat/center_lng/radius_m instead.
                 geom_expr = "NULL"
                 geom_param = ()
-                coords_param = None
+                coords_param = json.dumps([[payload.center_lng or 0.0, payload.center_lat or 0.0]])
 
             cur.execute(f"""
                 INSERT INTO public.geofences (

@@ -21,6 +21,7 @@ import { queueSOSRecord } from '../../lib/db';
 import {
   submitSOSOnline, syncQueuedSOS, getTouristProfile, getTouristId,
   getAuthToken, clearSession, logoutUser, ApiError, connectTouristFeed,
+  reportLocationPing,
 } from '../../lib/api';
 import { TouristUser, Language } from '../../types';
 
@@ -41,6 +42,7 @@ interface Props {
   onLogout: () => void;
   language: Language;
   onLanguageChange: (lang: Language) => void;
+  booting?: boolean;
 }
 
 export default function TouristApp({
@@ -54,7 +56,8 @@ export default function TouristApp({
   setShowLogin,
   onLogout,
   language,
-  onLanguageChange
+  onLanguageChange,
+  booting
 }: Props) {
   const [tab, setTab] = useState<Tab>('map');
   const isAuthenticated = !!user;
@@ -94,15 +97,41 @@ export default function TouristApp({
     return () => window.removeEventListener('online', trySync);
   }, []);
 
+  // ── Periodic location ping to backend (Live Tourist Tracking) ──
+  useEffect(() => {
+    if (!isAuthenticated || !user?.id) return;
+    
+    const sendPing = async () => {
+      try {
+        const loc = await getSOSLocation();
+        if (loc.latitude != null && loc.longitude != null) {
+          await reportLocationPing({
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+            speed: 0,
+            heading: 0,
+          });
+        }
+      } catch (err) {
+        console.warn('Failed to report location ping:', err);
+      }
+    };
+
+    sendPing();
+    const intervalId = setInterval(sendPing, 10000);
+    return () => clearInterval(intervalId);
+  }, [isAuthenticated, user?.id]);
+
   // ── Auth gate: the tourist portal (map/explore/trips/alerts/profile) is
   // never shown until sign-in completes. Existing auth logic/backend flow is
   // untouched — this only opens the existing LoginModal (rendered by App.tsx)
   // automatically and keeps it open while unauthenticated. ──
   useEffect(() => {
+    if (booting) return;
     if (!isAuthenticated && !showLogin) {
       setShowLogin(true);
     }
-  }, [isAuthenticated, showLogin, setShowLogin]);
+  }, [isAuthenticated, showLogin, setShowLogin, booting]);
 
   const handleProtectedTab = useCallback(() => { setShowLogin(true); }, [setShowLogin]);
 
@@ -216,7 +245,9 @@ export default function TouristApp({
       {geofenceAlert && (
         <div className="absolute inset-0 z-50 flex items-center justify-center px-6" style={{ background: 'rgba(0,0,0,0.55)' }}>
           <div className="w-full max-w-sm rounded-2xl p-5 space-y-3" style={{ background: dm ? '#27272a' : '#ffffff', boxShadow: '0 10px 40px rgba(0,0,0,0.4)' }}>
-            <p className="text-sm font-bold" style={{ color: '#dc2626' }}>⚠ Restricted zone alert</p>
+            <p className="text-sm font-bold" style={{ color: '#dc2626' }}>
+              {geofenceAlert.includes("Emergency") || geofenceAlert.includes("Broadcast") || geofenceAlert.includes("State") || geofenceAlert.includes("Warning") ? "📢 Emergency Broadcast Alert" : "⚠ Restricted Zone Alert"}
+            </p>
             <p className="text-sm" style={{ color: dm ? '#f1f5f9' : '#0c2340' }}>{geofenceAlert}</p>
             <button
               onClick={() => setGeofenceAlert(null)}

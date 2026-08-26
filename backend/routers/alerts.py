@@ -3,7 +3,7 @@ from uuid import UUID, uuid4
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from db import is_db_active, get_db_cursor, get_authenticated_cursor
-from routers.auth import get_current_user
+from routers.auth import get_current_user, require_authority
 from schemas.auth import SessionResponse
 from schemas.alert import AlertCreate, AlertResponse
 
@@ -114,3 +114,70 @@ def list_alerts(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve alerts: {str(e)}"
         )
+
+
+def get_state_by_coordinates(lat: float, lng: float) -> str:
+    # Bounding boxes for HP and MH
+    if 30.38 <= lat <= 33.22 and 75.58 <= lng <= 79.07:
+        return "Himachal Pradesh"
+    if 15.6 <= lat <= 22.0 and 72.6 <= lng <= 80.9:
+        return "Maharashtra"
+    return "Other"
+
+
+@router.post("/broadcast-state")
+def broadcast_state_alert(
+    payload: dict,
+    current_user: SessionResponse = Depends(require_authority)
+):
+    state = payload.get("state", "All")
+    message = payload.get("message", "")
+    severity = payload.get("severity", "HIGH")
+    
+    if not message:
+        raise HTTPException(status_code=400, detail="Message is required")
+        
+    from realtime import broadcast_sync, manager
+    from db import is_db_active, get_db_cursor
+    from uuid import UUID
+    import logging
+    
+    logger = logging.getLogger("alerts")
+    matching_tourists = []
+    
+    if not is_db_active():
+        from routers.locations import _in_memory_location_store
+        for t_id, pings in _in_memory_location_store.items():
+            if pings:
+                latest = pings[-1]
+                t_state = get_state_by_coordinates(latest.latitude, latest.longitude)
+                if state == "All" or t_state.lower() == state.lower():
+                    matching_tourists.append(t_id)
+    else:
+        try:
+            with get_db_cursor() as cur:
+                cur.execute("""
+                    SELECT DISTINCT ON (tourist_id) tourist_id, latitude, longitude
+                    FROM public.locations
+                    ORDER BY tourist_id, recorded_at DESC;
+                """)
+                rows = cur.fetchall()
+                for row in rows:
+                    t_id, lat, lng = row[0], row[1], row[2]
+                    t_state = get_state_by_coordinates(lat, lng)
+                    if state == "All" or t_state.lower() == state.lower():
+                        matching_tourists.append(t_id)
+        except Exception as e:
+            logger.error(f"Failed to query locations for broadcast: {e}")
+            raise HTTPException(status_code=500, detail=f"Database query failed: {str(e)}")
+            
+    # Send to matching tourists via WebSocket
+    for t_id in matching_tourists:
+        broadcast_sync(
+            manager.send_to_tourist,
+            t_id,
+            "geofence.alert",
+            {"message": f"[{severity} BROADCAST] {message}", "severity": severity, "state": state}
+        )
+        
+    return {"status": "success", "recipient_count": len(matching_tourists)}

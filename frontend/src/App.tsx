@@ -49,7 +49,9 @@ import {
   getTouristId,
   getTouristProfile,
   connectAuthorityFeed,
-  listAuthorityTourists
+  listAuthorityTourists,
+  broadcastStateAlert,
+  listGeofences
 } from './lib/api';
 import LoginModal from './components/tourist/LoginModal';
 
@@ -95,6 +97,7 @@ export default function App() {
   // positions, then relies entirely on this for live updates rather than
   // polling.
   const [liveLocations, setLiveLocations] = useState<Record<string, LiveLocationPing>>({});
+  const [geofences, setGeofences] = useState<any[]>([]);
 
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [prefilledTouristId, setPrefilledTouristId] = useState('');
@@ -136,6 +139,7 @@ export default function App() {
         refreshIncidentsFromBackend();
         refreshAuditLogsFromBackend();
         refreshTouristsFromBackend();
+        refreshGeofencesFromBackend();
       }
       finishBoot();
     } else {
@@ -369,6 +373,15 @@ export default function App() {
     }
   };
 
+  const refreshGeofencesFromBackend = async () => {
+    try {
+      const list = await listGeofences(false);
+      setGeofences(list);
+    } catch (err) {
+      console.warn('Failed to refresh geofences from backend:', err);
+    }
+  };
+
   // Realtime authority feed (directive §B.1, §B.3, §B.2): connects once the
   // dashboard is authenticated as an authority, and refreshes incidents the
   // moment the backend pushes an sos.created / incident.updated /
@@ -376,8 +389,9 @@ export default function App() {
   useEffect(() => {
     if (userRole !== 'authority') return;
     const socket = connectAuthorityFeed((event) => {
-      if (event.type === 'sos.created' || event.type === 'incident.updated' || event.type === 'geofence.breach') {
+      if (event.type === 'sos.created' || event.type === 'incident.updated' || event.type === 'geofence.breach' || event.type === 'tourist.updated') {
         refreshIncidentsFromBackend();
+        refreshTouristsFromBackend();
       } else if (event.type === 'location.ping' && event.data?.tourist_id) {
         setLiveLocations((prev) => ({ ...prev, [event.data.tourist_id]: event.data }));
       }
@@ -407,11 +421,10 @@ export default function App() {
       'Successful 2FA login to National Command Center'
     );
 
-    // Populate the dashboard with real backend incidents (in addition to the
-    // existing local demo data) now that we have an authenticated session.
     refreshIncidentsFromBackend();
     refreshAuditLogsFromBackend();
     refreshTouristsFromBackend();
+    refreshGeofencesFromBackend();
 
     return true;
   };
@@ -616,6 +629,17 @@ export default function App() {
 
     setBroadcasts((prev) => [createdAlert, ...prev]);
 
+    // Call backend API to broadcast alert to tourists in selected state/region
+    broadcastStateAlert({
+      state: newAlert.region,
+      message: `${newAlert.titleEn}: ${newAlert.bodyEn}`,
+      severity: newAlert.severity.toUpperCase(),
+    }).then((res) => {
+      console.log('State alert broadcast sent successfully:', res);
+    }).catch((err) => {
+      console.warn('Failed to send backend state alert:', err);
+    });
+
     // The backend's `alerts` table models a notification tied to one
     // incident + one recipient/channel — there is no backend concept of a
     // region-wide broadcast campaign (see DATABASE.md §5.7). As the closest
@@ -748,6 +772,7 @@ export default function App() {
           onLogout={handleLogout}
           language={language}
           onLanguageChange={setLanguage}
+          booting={booting}
         />
       ) : (
         <AuthorityMapApp
@@ -765,6 +790,8 @@ export default function App() {
           clusters={clusters}
           auditLogs={auditLogs}
           liveLocations={liveLocations}
+          geofences={geofences}
+          onGeofenceCreated={refreshGeofencesFromBackend}
           onDispatchUnit={handleDispatchUnit}
           onResolveIncident={handleResolveIncident}
           onMarkTouristSafe={handleMarkTouristSafe}
