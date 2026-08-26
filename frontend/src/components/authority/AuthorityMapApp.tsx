@@ -139,8 +139,9 @@ export default function AuthorityMapApp({
       const lat = live?.latitude ?? tr.currentLocation?.lat;
       const lng = live?.longitude ?? tr.currentLocation?.lng;
       if (lat != null && lng != null) {
-        const color = tr.safetyStatus === 'SOS Active' ? '#dc2626' : tr.safetyStatus === 'Watch' ? '#f59e0b' : '#138808';
-        list.push({ id: `tourist-${tr.id}`, lat, lng, title: tr.full_name || tr.name, subtitle: tr.safetyStatus, type: 'user', pinColor: color });
+        const color = '#7C3AED'; // Purple dot for tourists
+        const subtitle = `Safety: ${tr.safetyStatus} | Phone: ${tr.phone} | Emergency: ${tr.emergencyContact} (${tr.emergencyRelation}) | Lang: ${tr.nationality}`;
+        list.push({ id: `tourist-${tr.id}`, lat, lng, title: tr.full_name || tr.name, subtitle, type: 'user', pinColor: color });
       }
     }
 

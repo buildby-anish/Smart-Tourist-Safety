@@ -355,6 +355,30 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
       });
 
       const marker = L.marker([m.lat, m.lng], { icon }).addTo(markersGroup);
+
+      if (m.title) {
+        // Tooltip for hover
+        marker.bindTooltip(`
+          <div style="font-family: sans-serif; font-size: 11px; padding: 2px;">
+            <strong>${m.title}</strong>
+            ${m.subtitle ? `<div style="opacity: 0.85; margin-top: 2px;">${m.subtitle.split('|')[0]}</div>` : ''}
+          </div>
+        `, { direction: 'top', offset: [0, -10] });
+
+        // Popup for click
+        const details = m.subtitle ? m.subtitle.split('|').map(s => s.trim()).join('<br/>') : '';
+        marker.bindPopup(`
+          <div style="font-family: sans-serif; font-size: 12px; color: #1e293b; padding: 4px; min-width: 180px;">
+            <h4 style="margin: 0 0 6px 0; font-size: 13px; font-weight: bold; border-bottom: 1px solid #e2e8f0; padding-bottom: 4px; color: #7c3aed;">
+              ${m.title}
+            </h4>
+            <div style="line-height: 1.4;">
+              ${details || 'No details available.'}
+            </div>
+          </div>
+        `);
+      }
+
       marker.on('click', (e: any) => {
         L.DomEvent.stopPropagation(e);
         handleSelectMarker(m);
