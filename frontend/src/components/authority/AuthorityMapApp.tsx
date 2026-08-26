@@ -132,14 +132,16 @@ export default function AuthorityMapApp({
   const markers: MapClusterMarker[] = useMemo(() => {
     const list: MapClusterMarker[] = [];
 
-    // Demo/known tourist profiles — colored by safetyStatus, position
+     // Demo/known tourist profiles — colored by safetyStatus, position
     // overridden by a live ping when one exists for that tourist.
     for (const tr of tourists) {
       const live = mergedLive[tr.tourist_id || ''] || mergedLive[tr.id];
-      const lat = live?.latitude ?? tr.currentLocation.lat;
-      const lng = live?.longitude ?? tr.currentLocation.lng;
-      const color = tr.safetyStatus === 'SOS Active' ? '#dc2626' : tr.safetyStatus === 'Watch' ? '#f59e0b' : '#138808';
-      list.push({ id: `tourist-${tr.id}`, lat, lng, title: tr.full_name || tr.name, subtitle: tr.safetyStatus, type: 'user', pinColor: color });
+      const lat = live?.latitude ?? tr.currentLocation?.lat;
+      const lng = live?.longitude ?? tr.currentLocation?.lng;
+      if (lat != null && lng != null) {
+        const color = tr.safetyStatus === 'SOS Active' ? '#dc2626' : tr.safetyStatus === 'Watch' ? '#f59e0b' : '#138808';
+        list.push({ id: `tourist-${tr.id}`, lat, lng, title: tr.full_name || tr.name, subtitle: tr.safetyStatus, type: 'user', pinColor: color });
+      }
     }
 
     // Any live-pinging tourist not already represented by a demo profile
@@ -187,8 +189,19 @@ export default function AuthorityMapApp({
     const q = searchQuery.trim();
     if (!q) return;
     const tr = tourists.find((t) => t.tourist_id === q || t.id === q || (t.full_name || t.name).toLowerCase().includes(q.toLowerCase()));
-    if (tr) { flyTo(tr.currentLocation.lat, tr.currentLocation.lng); setSelectedMarkerId(`tourist-${tr.id}`); return; }
-    const inc = incidents.find((i) => i.id === q);
+    if (tr) {
+      const live = mergedLive[tr.tourist_id || ''] || mergedLive[tr.id];
+      const lat = live?.latitude ?? tr.currentLocation?.lat;
+      const lng = live?.longitude ?? tr.currentLocation?.lng;
+      if (lat != null && lng != null) {
+        flyTo(lat, lng);
+        setSelectedMarkerId(`tourist-${tr.id}`);
+      } else {
+        alert(`Tourist "${tr.full_name || tr.name}" is offline and has no recorded location.`);
+      }
+      return;
+    }
+    const inc = incidents.find((i) => i.id === q || i.backendIncidentId === q);
     if (inc) { flyTo(inc.location.lat, inc.location.lng); setSelectedMarkerId(`incident-${inc.id}`); }
   };
 
@@ -224,7 +237,17 @@ export default function AuthorityMapApp({
       <AuthorityLeftRail
         language={language} darkMode={dm} tourists={tourists} layers={layers}
         onToggleLayer={(key) => setLayers((prev) => ({ ...prev, [key]: !prev[key] }))}
-        onFlyToTourist={(tr) => { flyTo(tr.currentLocation.lat, tr.currentLocation.lng); setSelectedMarkerId(`tourist-${tr.id}`); }}
+        onFlyToTourist={(tr) => {
+          const live = mergedLive[tr.tourist_id || ''] || mergedLive[tr.id];
+          const lat = live?.latitude ?? tr.currentLocation?.lat;
+          const lng = live?.longitude ?? tr.currentLocation?.lng;
+          if (lat != null && lng != null) {
+            flyTo(lat, lng);
+            setSelectedMarkerId(`tourist-${tr.id}`);
+          } else {
+            alert(`Tourist "${tr.full_name || tr.name}" is offline and has no recorded location.`);
+          }
+        }}
       />
 
       <AuthorityRightRail

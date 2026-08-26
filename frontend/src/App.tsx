@@ -48,7 +48,8 @@ import {
   getUserType,
   getTouristId,
   getTouristProfile,
-  connectAuthorityFeed
+  connectAuthorityFeed,
+  listAuthorityTourists
 } from './lib/api';
 import LoginModal from './components/tourist/LoginModal';
 
@@ -80,14 +81,14 @@ export default function App() {
   const [splashGone, setSplashGone] = useState<boolean>(false);
 
   // Master Data State
-  const [tourists, setTourists] = useState<TouristProfile[]>(INITIAL_TOURISTS);
-  const [incidents, setIncidents] = useState<SOSIncident[]>(INITIAL_INCIDENTS);
-  const [units, setUnits] = useState<PatrollingUnit[]>(INITIAL_PATROL_UNITS);
+  const [tourists, setTourists] = useState<TouristProfile[]>([]);
+  const [incidents, setIncidents] = useState<SOSIncident[]>([]);
+  const [units, setUnits] = useState<PatrollingUnit[]>([]);
   const [stations] = useState<PoliceStation[]>(POLICE_STATIONS);
-  const [clusters] = useState<AnomalyCluster[]>(ANOMALY_CLUSTERS);
-  const [broadcasts, setBroadcasts] = useState<BroadcastAlert[]>(INITIAL_BROADCASTS);
-  const [auditLogs, setAuditLogs] = useState<AuditLog[]>(INITIAL_AUDIT_LOGS);
-  const [aiLogs] = useState<AILog[]>(INITIAL_AI_LOGS);
+  const [clusters] = useState<AnomalyCluster[]>([]);
+  const [broadcasts, setBroadcasts] = useState<BroadcastAlert[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AuditLog[]>([]);
+  const [aiLogs] = useState<AILog[]>([]);
   // Incrementally updated by location.ping events on the authority socket
   // (see the connectAuthorityFeed effect below) — the authority map does
   // ONE REST call (getLiveTouristLocations) on mount to hydrate initial
@@ -134,6 +135,7 @@ export default function App() {
         setUserRole('authority');
         refreshIncidentsFromBackend();
         refreshAuditLogsFromBackend();
+        refreshTouristsFromBackend();
       }
       finishBoot();
     } else {
@@ -318,13 +320,52 @@ export default function App() {
         })
       );
 
-      setIncidents((prev) => {
-        const backendIds = new Set(mapped.map((m) => m.backendIncidentId));
-        const localOnly = prev.filter((p) => !p.backendIncidentId || !backendIds.has(p.backendIncidentId));
-        return [...mapped, ...localOnly];
-      });
+      setIncidents(mapped);
     } catch (err) {
       console.warn('Failed to refresh incidents from backend:', err);
+    }
+  };
+
+  const refreshTouristsFromBackend = async () => {
+    try {
+      const [backendTourists, livePings] = await Promise.all([
+        listAuthorityTourists(),
+        getLiveTouristLocations()
+      ]);
+
+      const pingMap: Record<string, any> = {};
+      for (const ping of livePings) {
+        pingMap[ping.tourist_id] = ping;
+      }
+
+      const mapped: TouristProfile[] = backendTourists.map((t: any) => {
+        const ping = pingMap[t.id] || pingMap[t.tourist_id];
+        return {
+          id: t.id,
+          tourist_id: t.tourist_id || t.id,
+          name: t.full_name,
+          full_name: t.full_name,
+          nationality: t.preferred_language || 'India',
+          passportHash: t.govt_id_number ? `${t.govt_id_type}: ${t.govt_id_number}` : 'N/A',
+          phone: t.phone_number || '',
+          email: t.email || '',
+          emergencyContact: t.emergency_contacts?.[0]?.phone || '',
+          emergencyRelation: t.emergency_contacts?.[0]?.relationship || '',
+          hotel: 'N/A',
+          batteryLevel: 100,
+          safetyStatus: t.kyc_status === 'VERIFIED' ? 'Safe' : 'Watch',
+          lastSeenTime: ping ? 'Online' : 'Offline',
+          currentLocation: ping ? {
+            lat: ping.latitude,
+            lng: ping.longitude,
+            address: 'Live Location',
+          } : undefined,
+          kyc_verified: t.kyc_status === 'VERIFIED',
+        };
+      });
+      setTourists(mapped);
+    } catch (err) {
+      console.warn('Failed to refresh tourists from backend:', err);
     }
   };
 
@@ -370,6 +411,7 @@ export default function App() {
     // existing local demo data) now that we have an authenticated session.
     refreshIncidentsFromBackend();
     refreshAuditLogsFromBackend();
+    refreshTouristsFromBackend();
 
     return true;
   };

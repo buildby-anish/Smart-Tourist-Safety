@@ -546,6 +546,10 @@ export async function getLiveTouristLocations(): Promise<any[]> {
   return apiRequest("/authority/locations/live");
 }
 
+export async function listAuthorityTourists(): Promise<any[]> {
+  return apiRequest("/authority/tourists");
+}
+
 /**
  * Connects the Gateway's existing MFA form (Badge ID + Auth Code) to the real
  * backend. The Auth Code field is already a masked "password" input in the

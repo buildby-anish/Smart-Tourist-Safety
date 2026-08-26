@@ -262,3 +262,30 @@ def get_live_tourist_locations(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to retrieve live tourist locations: {str(e)}"
         )
+
+
+@router.get("/tourists", response_model=list[TouristResponse])
+def get_all_tourist_profiles(
+    current_user: SessionResponse = Depends(require_authority)
+) -> list[TouristResponse]:
+    # 1. Fallback Mode
+    if not is_db_active():
+        from routers.tourists import _in_memory_tourist_store
+        return list(_in_memory_tourist_store.values())
+
+    # 2. Database Mode
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id) as cur:
+            from routers.tourists import _PROFILE_COLUMNS, _row_to_response
+            cur.execute(f"""
+                SELECT {_PROFILE_COLUMNS}
+                FROM public.tourist_profiles
+                ORDER BY created_at DESC;
+            """)
+            rows = cur.fetchall()
+            return [_row_to_response(row) for row in rows]
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve tourist profiles: {str(e)}"
+        )
