@@ -94,7 +94,11 @@ export default function MapCanvas({
   // has none defined yet or the request fails (e.g. offline).
   useEffect(() => {
     let cancelled = false;
-    listGeofences(true)
+
+    // Pulled into its own function and polled below — previously this ran
+    // once on mount only, so a geofence an authority officer drew after the
+    // tourist's app had already loaded never appeared until a full reload.
+    const fetchZones = () => listGeofences(true)
       .then((zones) => {
         if (cancelled || !zones?.length) return;
         const converted: GeoFenceZone[] = zones.flatMap((z) => {
@@ -142,7 +146,13 @@ export default function MapCanvas({
         if (converted.length > 0) setGeofenceZones(converted);
       })
       .catch(() => { /* keep the existing (mock) zones on failure */ });
-    return () => { cancelled = true; };
+
+    fetchZones();
+    // Poll rather than a one-shot fetch, so a zone an authority officer
+    // draws mid-session shows up here within ~15s instead of only after
+    // the tourist reloads the app.
+    const intervalId = setInterval(fetchZones, 15000);
+    return () => { cancelled = true; clearInterval(intervalId); };
   }, []);
 
   // Resolve a real device location once on mount (falls back to the last

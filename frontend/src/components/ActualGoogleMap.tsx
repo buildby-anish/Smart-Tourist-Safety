@@ -42,6 +42,11 @@ interface ActualGoogleMapProps {
   enableDrawing?: boolean;
   onGeofenceCreated?: () => void;
   lockedCity?: any;
+  /** When false, clicking an empty spot on the map no longer reverse-geocodes
+   * and shows the Directions popup — used to keep the authority dashboard's
+   * map click-to-pan/select behavior free of the tourist-facing directions
+   * flow. Defaults to true (existing behavior) for the tourist map. */
+  enableDirectionsOnClick?: boolean;
 }
 
 const TRAVEL_MODES = [
@@ -72,6 +77,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   enableDrawing = false,
   onGeofenceCreated,
   lockedCity,
+  enableDirectionsOnClick = true,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -94,6 +100,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   const [showDrawDialog, setShowDrawDialog] = useState(false);
   const [newGeofenceName, setNewGeofenceName] = useState('');
   const [newGeofenceSeverity, setNewGeofenceSeverity] = useState<'LOW' | 'MEDIUM' | 'HIGH' | 'CRITICAL'>('HIGH');
+  const [savingGeofence, setSavingGeofence] = useState(false);
   const drawLayerRef = useRef<any>(null);
 
   // Map settings
@@ -102,6 +109,15 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
 
   // Directions routing states
   const [selectedPlaceInfo, setSelectedPlaceInfo] = useState<{
+    name: string;
+    address: string;
+    lat: number;
+    lng: number;
+  } | null>(null);
+  // Place tapped on the map but not yet confirmed for directions — shown as
+  // a lightweight "Start Direction?" prompt before the full route/estimated
+  // time panel (selectedPlaceInfo) takes over.
+  const [pendingPlace, setPendingPlace] = useState<{
     name: string;
     address: string;
     lat: number;
@@ -260,8 +276,15 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
         return; // skip reverse geocoding
       }
 
+      // Authority dashboard: a plain map click is for panning/selecting,
+      // not for requesting directions — skip the reverse-geocode + popup
+      // entirely rather than showing the tourist-facing directions flow.
+      if (!enableDirectionsOnClickRef.current) {
+        return;
+      }
+
       // Temporary loading indicator
-      setSelectedPlaceInfo({
+      setPendingPlace({
         name: 'Locating place...',
         address: 'Fetching address details...',
         lat,
@@ -296,7 +319,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
             }
           }
 
-          setSelectedPlaceInfo({
+          setPendingPlace({
             name: specificName,
             address: data.display_name,
             lat,
@@ -306,7 +329,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
           throw new Error('No address found');
         }
       } catch (err) {
-        setSelectedPlaceInfo({
+        setPendingPlace({
           name: 'Dropped Pin',
           address: `Coordinates: ${lat.toFixed(5)}, ${lng.toFixed(5)}`,
           lat,
@@ -813,6 +836,19 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     }
   };
 
+  // Tourist confirms the "Start Direction?" prompt — closes that prompt and
+  // hands the place off to the existing route-calculation/estimated-time
+  // panel below.
+  const handleStartDirection = () => {
+    if (!pendingPlace) return;
+    setSelectedPlaceInfo(pendingPlace);
+    setPendingPlace(null);
+  };
+
+  const handleDismissPendingPlace = () => {
+    setPendingPlace(null);
+  };
+
   const handleCloseDirections = () => {
     setSelectedPlaceInfo(null);
     setRouteInfo(null);
@@ -838,6 +874,11 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   useEffect(() => {
     drawingModeRef.current = drawingMode;
   }, [drawingMode]);
+
+  const enableDirectionsOnClickRef = useRef(enableDirectionsOnClick);
+  useEffect(() => {
+    enableDirectionsOnClickRef.current = enableDirectionsOnClick;
+  }, [enableDirectionsOnClick]);
 
   const drawPointsRef = useRef(drawPoints);
   useEffect(() => {
@@ -876,8 +917,9 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   };
 
   const handleSaveGeofence = async () => {
-    if (!newGeofenceName.trim()) return;
-    
+    if (!newGeofenceName.trim() || savingGeofence) return;
+    setSavingGeofence(true);
+
     try {
       let payload: any = {
         name: newGeofenceName,
@@ -908,6 +950,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
     } catch (err) {
       console.warn('Failed to save geofence:', err);
     } finally {
+      setSavingGeofence(false);
       handleCancelDrawing();
     }
   };
@@ -954,9 +997,14 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
       {/* Map Anchor container */}
       <div ref={containerRef} className="w-full h-full z-0" />
 
-      {/* Geofence Drawing Overlay */}
+      {/* Geofence Drawing Overlay — anchored top-left (below the authority
+          header) rather than top-right, so it never sits on top of the
+          header's logout button in the opposite corner. */}
       {enableDrawing && (
-        <div className="absolute top-4 right-4 z-[40] pointer-events-auto flex flex-col gap-2">
+        <div
+          className="absolute left-4 z-[40] pointer-events-auto flex flex-col gap-2"
+          style={{ top: 'calc(env(safe-area-inset-top, 0px) + 68px)' }}
+        >
           {drawingMode ? (
             <div className="bg-slate-900/95 backdrop-blur-md p-3 rounded-2xl border border-slate-700 shadow-xl text-white text-xs max-w-[240px] space-y-2">
               <div className="font-bold text-orange-400 uppercase tracking-wider text-[10px]">
@@ -1052,14 +1100,18 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
             <div className="flex gap-2 pt-1">
               <button
                 onClick={handleSaveGeofence}
-                disabled={!newGeofenceName.trim()}
-                className="flex-1 h-9 bg-orange-500 hover:bg-orange-400 disabled:opacity-40 rounded-xl text-[10px] font-bold text-white transition-transform active:scale-95 cursor-pointer"
+                disabled={!newGeofenceName.trim() || savingGeofence}
+                className="flex-1 h-9 bg-orange-500 hover:bg-orange-400 disabled:opacity-40 rounded-xl text-[10px] font-bold text-white transition-transform active:scale-95 cursor-pointer flex items-center justify-center gap-1.5"
               >
-                Save Zone
+                {savingGeofence && (
+                  <span className="w-3 h-3 rounded-full border-2 border-white/40 border-t-white animate-spin" />
+                )}
+                {savingGeofence ? 'Saving Zone…' : 'Save Zone'}
               </button>
               <button
                 onClick={handleCancelDrawing}
-                className="flex-1 h-9 bg-slate-800 hover:bg-slate-700 rounded-xl text-[10px] font-bold text-slate-300 transition-transform active:scale-95 cursor-pointer"
+                disabled={savingGeofence}
+                className="flex-1 h-9 bg-slate-800 hover:bg-slate-700 disabled:opacity-40 rounded-xl text-[10px] font-bold text-slate-300 transition-transform active:scale-95 cursor-pointer"
               >
                 Cancel
               </button>
@@ -1185,6 +1237,68 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
               </button>
             );
           })}
+        </div>
+      )}
+
+      {/* "Start Direction?" confirm prompt — shown right after tapping an
+          empty spot on the map, before any route is calculated. Confirming
+          (Yes / Start Direction) closes this and hands off to the
+          estimated-time + route panel below; the X/Cancel just dismisses it. */}
+      {pendingPlace && (
+        <div
+          className="absolute left-4 right-4 z-30 p-4 rounded-2xl border backdrop-blur-md shadow-2xl flex flex-col gap-3 max-w-sm sm:max-w-md mx-auto transition-all animate-sheet-up"
+          style={{
+            bottom: 84,
+            background: isDarkMode ? '#1e1e1e' : '#ffffff',
+            borderColor: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)',
+            boxShadow: isDarkMode ? '0 10px 30px rgba(0,0,0,0.5)' : '0 10px 30px rgba(0,0,0,0.08)',
+            color: isDarkMode ? '#ffffff' : '#0c2340',
+          }}
+        >
+          <div className="flex items-start justify-between gap-3">
+            <div className="min-w-0 flex-1">
+              <span className="text-[10px] font-black uppercase tracking-wider text-teal-600 dark:text-teal-400">
+                Get Directions?
+              </span>
+              <h4 className="text-sm font-bold truncate mt-0.5">
+                {pendingPlace.name}
+              </h4>
+              <p className="text-xs truncate opacity-60 mt-0.5">
+                {pendingPlace.address}
+              </p>
+            </div>
+            <button
+              onClick={handleDismissPendingPlace}
+              className="w-7 h-7 rounded-full flex items-center justify-center transition-colors cursor-pointer flex-shrink-0"
+              style={{
+                background: isDarkMode ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.05)',
+                color: isDarkMode ? '#ffffff' : '#0c2340',
+              }}
+            >
+              <XIcon size={14} />
+            </button>
+          </div>
+
+          <div className="flex gap-2">
+            <button
+              onClick={handleDismissPendingPlace}
+              className="flex-1 h-10 rounded-xl text-xs font-bold transition-transform active:scale-95 cursor-pointer"
+              style={{
+                background: isDarkMode ? 'rgba(255,255,255,0.06)' : 'rgba(0,0,0,0.05)',
+                color: isDarkMode ? '#ffffff' : '#0c2340',
+              }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={handleStartDirection}
+              disabled={pendingPlace.name === 'Locating place...'}
+              className="flex-1 h-10 rounded-xl text-xs font-bold text-white transition-transform active:scale-95 cursor-pointer disabled:opacity-50"
+              style={{ background: '#FF9933' }}
+            >
+              {pendingPlace.name === 'Locating place...' ? 'Locating…' : 'Start Direction'}
+            </button>
+          </div>
         </div>
       )}
 

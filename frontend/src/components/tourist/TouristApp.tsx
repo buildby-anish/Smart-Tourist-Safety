@@ -7,13 +7,13 @@ import QuickActions from './QuickActions';
 import SOSButton from './SOSButton';
 import PlaceCard from './PlaceCard';
 import BottomNav from './BottomNav';
-import ExplorePanel from './ExplorePanel';
 import AlertsPanel from './AlertsPanel';
 import TripsPanel from './TripsPanel';
 import ProfilePanel from './ProfilePanel';
 import MapLegend from './MapLegend';
 import SafetyBanner from './SafetyBanner';
 import AskAIPanel from './AskAIPanel';
+import WeatherChip from './WeatherChip';
 import BrandMark from '../BrandMark';
 
 import { getSOSLocation } from '../../lib/location';
@@ -25,7 +25,7 @@ import {
 } from '../../lib/api';
 import { TouristUser, Language } from '../../types';
 
-type Tab = 'map' | 'explore' | 'trips' | 'alerts' | 'profile';
+type Tab = 'map' | 'trips' | 'alerts' | 'profile';
 
 interface Props {
   darkMode: boolean;
@@ -299,7 +299,11 @@ export default function TouristApp({
           aria-current={tab === 'alerts' ? 'page' : undefined}
           className="absolute z-30 w-10 h-10 rounded-full flex items-center justify-center transition-all duration-150 hover:scale-105 active:scale-95"
           style={{
-            top: 'calc(env(safe-area-inset-top, 0px) + 12px)',
+            // Matches the search bar's vertical center (search bar starts at
+            // +16px and is 48px tall, so its center sits at +40px; this
+            // button is 40px tall, so top = 40 - 20 = +20px) — previously
+            // +12px, which threw the two out of alignment in phone view.
+            top: 'calc(env(safe-area-inset-top, 0px) + 20px)',
             right: 14,
             background: dm ? 'rgba(10,20,40,0.92)' : 'rgba(255,255,255,0.95)',
             border: `1.5px solid ${tab === 'alerts' ? '#FF9933' : dm ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
@@ -376,9 +380,11 @@ export default function TouristApp({
               </div>
             </div>
 
-            {/* Bottom-right controls: Navigation (Locate Me) + Legend */}
+            {/* Bottom-right controls: live Weather + Navigation (Locate Me) + Legend */}
             <div className="absolute right-4 z-20 flex flex-col gap-2.5 pointer-events-none" style={{ bottom: 84 }}>
               <div className="pointer-events-auto flex flex-col gap-2.5">
+                {/* Live weather chip — sits above the map control buttons */}
+                <WeatherChip darkMode={dm} />
                 {/* Ask AI button on phone view */}
                 <button
                   onClick={() => setShowAskAI(true)}
@@ -413,7 +419,6 @@ export default function TouristApp({
           </>
         )}
 
-        {tab === 'explore' && <ExplorePanel darkMode={dm} onPlaceSelect={(id) => { setSelectedPlace(id); setTab('map'); }} />}
         {tab === 'trips' && <TripsPanel darkMode={dm} isAuthenticated={isAuthenticated} onSignIn={() => setShowLogin(true)} />}
         {tab === 'alerts' && <AlertsPanel darkMode={dm} isAuthenticated={isAuthenticated} onSignIn={() => setShowLogin(true)} />}
         {tab === 'profile' && (
@@ -434,7 +439,13 @@ export default function TouristApp({
       <BottomNav
         active={tab}
         darkMode={dm}
-        onChange={(id) => setTab(id as Tab)}
+        onChange={(id) => {
+          // "Ask AI" replaces the old Explore tab as a nav item, but it
+          // opens the existing AskAIPanel overlay rather than switching
+          // the main content tab.
+          if (id === 'askai') { setShowAskAI(true); return; }
+          setTab(id as Tab);
+        }}
         onProtected={handleProtectedTab}
         isAuthenticated={isAuthenticated}
         sosButton={<SOSButton onTrigger={handleSOS} />}

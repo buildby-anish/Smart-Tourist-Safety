@@ -1,9 +1,9 @@
-import { Map, Compass, Route, User } from 'lucide-react';
+import { Map, Sparkles, Route, User } from 'lucide-react';
 import React from 'react';
 
 const LEFT_TABS = [
   { id: 'map', label: 'Map', Icon: Map, protected: false },
-  { id: 'explore', label: 'Explore', Icon: Compass, protected: false },
+  { id: 'askai', label: 'Ask AI', Icon: Sparkles, protected: false },
 ];
 
 const RIGHT_TABS = [

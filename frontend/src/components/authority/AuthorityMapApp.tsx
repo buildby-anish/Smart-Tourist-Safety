@@ -318,6 +318,7 @@ export default function AuthorityMapApp({
         enableDrawing={true}
         onGeofenceCreated={onGeofenceCreated}
         lockedCity={lockedCity}
+        enableDirectionsOnClick={false}
       />
 
       <AuthorityHeader
