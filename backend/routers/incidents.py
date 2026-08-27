@@ -7,7 +7,13 @@ from db import is_db_active, get_db_cursor, get_authenticated_cursor
 from realtime import broadcast_sync, manager
 from routers.auth import get_current_user, require_authority
 from schemas.auth import SessionResponse
-from schemas.incident import IncidentCreate, IncidentResponse, IncidentUpdate
+from schemas.incident import (
+    IncidentBulkDeleteRequest,
+    IncidentBulkDeleteResponse,
+    IncidentCreate,
+    IncidentResponse,
+    IncidentUpdate,
+)
 from schemas.response import ResponseCreate, ResponseRecord
 
 router = APIRouter(prefix="/incidents", tags=["incidents"])
@@ -326,6 +332,91 @@ def update_incident(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update incident: {str(e)}"
         )
+
+
+# ---------------------------------------------------------------------------
+# Delete (authority only) — powers the "select all SOS + delete" bulk action
+# on the authority dashboard. Deletes dependent rows (public.sos,
+# public.responses, public.alerts all reference incident_id) before the
+# incident row itself, in the same transaction, so this can't be blocked by
+# a foreign-key constraint or leave orphaned child rows behind.
+#
+# Both routes broadcast "incident.deleted" over the authority realtime feed
+# so every connected authority session drops the incident immediately —
+# this is the other half of "dual side sync": a delete triggered on one
+# authority screen now removes the incident everywhere, instead of it only
+# disappearing after that one browser reloads / re-polls.
+# ---------------------------------------------------------------------------
+
+def _delete_incident_and_dependents(cur, incident_id: UUID) -> bool:
+    cur.execute("DELETE FROM public.responses WHERE incident_id = %s;", (incident_id,))
+    cur.execute("DELETE FROM public.alerts WHERE incident_id = %s;", (incident_id,))
+    cur.execute("DELETE FROM public.sos WHERE incident_id = %s;", (incident_id,))
+    cur.execute("DELETE FROM public.incidents WHERE id = %s RETURNING id;", (incident_id,))
+    return cur.fetchone() is not None
+
+
+@router.delete("/{incident_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_incident(
+    incident_id: UUID,
+    current_user: SessionResponse = Depends(require_authority),
+) -> None:
+    if not is_db_active():
+        if incident_id not in _in_memory_incident_store:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+        del _in_memory_incident_store[incident_id]
+        broadcast_sync(manager.broadcast_to_authorities, "incident.deleted", {"id": str(incident_id)})
+        return None
+
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
+            found = _delete_incident_and_dependents(cur, incident_id)
+            if not found:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Incident not found")
+        broadcast_sync(manager.broadcast_to_authorities, "incident.deleted", {"id": str(incident_id)})
+        return None
+    except HTTPException as he:
+        raise he
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to delete incident: {str(e)}")
+
+
+@router.delete("", response_model=IncidentBulkDeleteResponse)
+def bulk_delete_incidents(
+    payload: IncidentBulkDeleteRequest,
+    current_user: SessionResponse = Depends(require_authority),
+) -> IncidentBulkDeleteResponse:
+    """Deletes every incident id in the request (used by the authority
+    dashboard's "select all + delete" action). Ids that don't exist / were
+    already deleted are reported back in not_found_ids rather than failing
+    the whole batch, so one stale id in a large selection doesn't block
+    deleting the rest."""
+    if not payload.incident_ids:
+        return IncidentBulkDeleteResponse(deleted_ids=[], not_found_ids=[])
+
+    if not is_db_active():
+        deleted, not_found = [], []
+        for iid in payload.incident_ids:
+            if iid in _in_memory_incident_store:
+                del _in_memory_incident_store[iid]
+                deleted.append(iid)
+            else:
+                not_found.append(iid)
+        broadcast_sync(manager.broadcast_to_authorities, "incident.deleted", {"ids": [str(i) for i in deleted]})
+        return IncidentBulkDeleteResponse(deleted_ids=deleted, not_found_ids=not_found)
+
+    deleted, not_found = [], []
+    try:
+        with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
+            for iid in payload.incident_ids:
+                if _delete_incident_and_dependents(cur, iid):
+                    deleted.append(iid)
+                else:
+                    not_found.append(iid)
+        broadcast_sync(manager.broadcast_to_authorities, "incident.deleted", {"ids": [str(i) for i in deleted]})
+        return IncidentBulkDeleteResponse(deleted_ids=deleted, not_found_ids=not_found)
+    except Exception as e:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to bulk delete incidents: {str(e)}")
 
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { Radio, Send, CheckCircle2, FileText, Settings } from 'lucide-react';
+import { Circle, Hexagon, Send, CheckCircle2, FileText, Settings } from 'lucide-react';
 import { Language, PatrollingUnit } from '../../types';
 import { i18n } from '../../data/i18n';
 
@@ -6,7 +6,12 @@ interface Props {
   language: Language;
   darkMode: boolean;
   units: PatrollingUnit[];
-  onDispatchClick: () => void;
+  // Dispatch Unit used to live here as a shortcut that just opened the SOS
+  // takeover modal (dispatching itself always happened inside that modal,
+  // not this bar) — removed per request. Dispatching a unit to an incident
+  // is still available from the SOS takeover / incident click flow.
+  onMarkCircleZoneClick: () => void;
+  onMarkPolygonZoneClick: () => void;
   onBroadcastClick: () => void;
   onMarkSafeClick: () => void;
   onAuditLogsClick: () => void;
@@ -21,7 +26,7 @@ const UNIT_STATUS_COLOR: Record<PatrollingUnit['status'], string> = {
 };
 
 export default function AuthorityBottomBar({
-  language, darkMode: dm, units, onDispatchClick, onBroadcastClick, onMarkSafeClick, onAuditLogsClick, onGeofenceManagerClick,
+  language, darkMode: dm, units, onMarkCircleZoneClick, onMarkPolygonZoneClick, onBroadcastClick, onMarkSafeClick, onAuditLogsClick, onGeofenceManagerClick,
 }: Props) {
   const t = i18n[language];
   const surface = dm ? 'rgba(10,20,40,0.94)' : 'rgba(255,255,255,0.96)';
@@ -30,7 +35,8 @@ export default function AuthorityBottomBar({
   const border = dm ? 'rgba(255,255,255,0.08)' : 'rgba(0,0,0,0.08)';
 
   const QUICK_ACTIONS = [
-    { label: t.dispatchUnitBtn, icon: Radio, onClick: onDispatchClick, color: '#0B2447' },
+    { label: 'Mark Circle Zone', icon: Circle, onClick: onMarkCircleZoneClick, color: '#0B2447' },
+    { label: 'Mark Polygon Zone', icon: Hexagon, onClick: onMarkPolygonZoneClick, color: '#0B2447' },
     { label: t.sendBroadcastBtn, icon: Send, onClick: onBroadcastClick, color: '#FF9933' },
     { label: t.markSafeBtn, icon: CheckCircle2, onClick: onMarkSafeClick, color: '#138808' },
     { label: t.viewAuditLogsBtn, icon: FileText, onClick: onAuditLogsClick, color: '#64748b' },

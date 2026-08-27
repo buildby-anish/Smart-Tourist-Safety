@@ -367,6 +367,19 @@ export async function updateIncidentStatus(
   return apiRequest(`/incidents/${incidentId}`, { method: "PATCH", body: payload });
 }
 
+export async function deleteIncident(incidentId: string): Promise<void> {
+  return apiRequest(`/incidents/${incidentId}`, { method: "DELETE" });
+}
+
+export interface IncidentBulkDeleteResult {
+  deleted_ids: string[];
+  not_found_ids: string[];
+}
+
+export async function deleteIncidents(incidentIds: string[]): Promise<IncidentBulkDeleteResult> {
+  return apiRequest(`/incidents`, { method: "DELETE", body: { incident_ids: incidentIds } });
+}
+
 export async function createIncidentResponse(
   incidentId: string,
   payload: { responder_unit?: string; action_taken?: string; resolved_at?: string; authority_id?: string }

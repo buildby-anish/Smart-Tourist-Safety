@@ -24,10 +24,32 @@ DB_ACTIVE = False
 
 if Config.DATABASE_URL:
     try:
-        # Initialize the threaded connection pool
+        # Initialize the threaded connection pool.
+        #
+        # IMPORTANT: maxconn must stay comfortably below the Postgres
+        # session-mode pooler's own client limit (Supabase's pooler logs
+        # "EMAXCONNSESSION ... max clients are limited to pool_size: 15").
+        # This pool previously used maxconn=20, which is *larger* than that
+        # upstream ceiling — so under any real concurrent load (tourist
+        # location pings + SOS submits + authority polling all opening a
+        # connection per request via get_db_cursor/get_authenticated_cursor)
+        # this process alone could ask the pooler for more sessions than it
+        # will ever grant. Every request past the 15th then failed with
+        # psycopg2.OperationalError, which surfaced as "Error in session
+        # verification" on *every* authenticated endpoint — including
+        # geofence listing (silently swallowed by the frontend's try/catch,
+        # so the Manage Geofences panel looked empty) and geofence breach
+        # bookkeeping (the debounce INSERT never committed, so the same
+        # breach re-fired an incident on every subsequent ping instead of
+        # being suppressed for _BREACH_DEBOUNCE).
+        #
+        # 10 leaves headroom under the 15-connection ceiling for other
+        # concurrent clients (migrations, psql, etc.) hitting the same
+        # pooler. Raise this only if the upstream pooler's pool_size is
+        # also raised.
         pool = ThreadedConnectionPool(
             minconn=1,
-            maxconn=20,
+            maxconn=10,
             dsn=Config.DATABASE_URL
         )
         # Test connection

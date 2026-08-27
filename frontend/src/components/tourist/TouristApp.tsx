@@ -17,7 +17,7 @@ import WeatherChip from './WeatherChip';
 import BrandMark from '../BrandMark';
 
 import { getSOSLocation } from '../../lib/location';
-import { queueSOSRecord } from '../../lib/db';
+import { queueSOSRecord, updateSOSRecordStatus } from '../../lib/db';
 import {
   submitSOSOnline, syncQueuedSOS, getTouristProfile, getTouristId,
   getAuthToken, clearSession, logoutUser, ApiError, connectTouristFeed,
@@ -215,6 +215,19 @@ export default function TouristApp({
 
     try {
       const res = await submitSOSOnline(localRecord);
+      // Mark this record SYNCED immediately after a successful direct send.
+      // Without this, the record stays flagged QUEUED_OFFLINE in IndexedDB
+      // forever, and the offline-sync effect (which re-runs on every
+      // 'online' event / app mount — very common with flaky signal) would
+      // find it still "unsynced" and resubmit it as a brand-new SOS/incident,
+      // which is what was causing duplicate SOS alerts to keep arriving on
+      // the authority dashboard for a single real trigger.
+      if (localRecord.local_sos_id) {
+        await updateSOSRecordStatus(localRecord.local_sos_id, "SYNCED", {
+          server_sos_id: res.sos_id,
+          server_incident_id: res.incident_id,
+        }).catch(() => { /* best-effort — don't fail the SOS flow over this */ });
+      }
       onTriggerSos(user.full_name || 'Tourist', locStr, user.id, user.phone_number || undefined);
       return `Authorities have been alerted with your location. Reference: ${res.incident_id || res.sos_id || 'pending'}.`;
     } catch (err: any) {
@@ -343,6 +356,15 @@ export default function TouristApp({
           <div className="max-w-xl md:max-w-2xl pointer-events-auto">
             <SafetyBanner darkMode={dm} onAlertsTap={() => setTab('alerts')} />
           </div>
+
+          {/* Live weather — phone view only. Sits directly below the safe-area
+              notification banner above, instead of floating over the bottom-right
+              map controls (its previous position collided with Locate Me / Legend
+              on small screens). Desktop keeps the weather chip in the bottom-right
+              control stack, unchanged. */}
+          <div className="flex md:hidden pointer-events-auto">
+            <WeatherChip darkMode={dm} />
+          </div>
         </div>
       )}
 
@@ -380,24 +402,19 @@ export default function TouristApp({
               </div>
             </div>
 
-            {/* Bottom-right controls: live Weather + Navigation (Locate Me) + Legend */}
+            {/* Bottom-right controls: live Weather (desktop only — moved to the
+                top banner on phone view, see above) + Navigation (Locate Me) + Legend.
+                The floating "Ask AI" button that used to sit here on phone view has
+                been removed: Ask AI already has its own entry in BottomNav, so the
+                extra button was redundant and threw off alignment of the remaining
+                controls on small screens. */}
             <div className="absolute right-4 z-20 flex flex-col gap-2.5 pointer-events-none" style={{ bottom: 84 }}>
               <div className="pointer-events-auto flex flex-col gap-2.5">
-                {/* Live weather chip — sits above the map control buttons */}
-                <WeatherChip darkMode={dm} />
-                {/* Ask AI button on phone view */}
-                <button
-                  onClick={() => setShowAskAI(true)}
-                  aria-label="Ask AI"
-                  className="w-11 h-11 rounded-xl flex items-center justify-center transition-all duration-150 hover:scale-105 active:scale-95 md:hidden flex"
-                  style={{
-                    background: 'linear-gradient(135deg, #FF9933, #e67a0f)',
-                    boxShadow: '0 4px 16px rgba(255,153,51,0.4)',
-                    color: '#fff',
-                  }}
-                >
-                  <Sparkles size={17} />
-                </button>
+                {/* Live weather chip — desktop only here; phone view shows it
+                    below the safe-area banner instead (see top chrome above). */}
+                <div className="hidden md:flex">
+                  <WeatherChip darkMode={dm} />
+                </div>
                 <MapControlBtn dm={dm} onClick={handleLocateMe} label="Locate me"><Navigation size={15} /></MapControlBtn>
                 <MapLegend darkMode={dm} />
               </div>

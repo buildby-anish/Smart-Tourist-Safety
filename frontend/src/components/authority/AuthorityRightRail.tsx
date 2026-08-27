@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Radio, ChevronLeft, ChevronRight, Clock, AlertTriangle, X, Send } from 'lucide-react';
+import { Radio, ChevronLeft, ChevronRight, Clock, AlertTriangle, X, Send, CheckSquare, Square, Trash2 } from 'lucide-react';
 import { Language, SOSIncident, AlertSeverity, BroadcastAlert } from '../../types';
 import { i18n } from '../../data/i18n';
 
@@ -8,6 +8,7 @@ interface Props {
   darkMode: boolean;
   incidents: SOSIncident[];
   onResolveIncident: (incidentId: string) => void;
+  onDeleteIncidents: (incidentIds: string[]) => void;
   onSendBroadcast: (newAlert: Omit<BroadcastAlert, 'id' | 'timestamp' | 'deliveredCount' | 'status'>) => void;
   onIncidentClick: (incident: SOSIncident) => void;
 }
@@ -19,11 +20,13 @@ const SEVERITY_STYLE: Record<AlertSeverity, string> = {
 };
 
 export default function AuthorityRightRail({
-  language, darkMode: dm, incidents, onResolveIncident, onSendBroadcast, onIncidentClick,
+  language, darkMode: dm, incidents, onResolveIncident, onDeleteIncidents, onSendBroadcast, onIncidentClick,
 }: Props) {
   const t = i18n[language];
   const [collapsed, setCollapsed] = useState(false);
   const [showBroadcast, setShowBroadcast] = useState(false);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
   const surface = dm ? 'rgba(10,20,40,0.94)' : 'rgba(255,255,255,0.96)';
   const text = dm ? '#f1f5f9' : '#0c2340';
@@ -73,57 +76,134 @@ export default function AuthorityRightRail({
           <Radio size={13} className="text-[#FF9933]" />
           {t.activeIncidentsLabel}
         </span>
-        <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded" style={{ background: dm ? 'rgba(255,255,255,0.08)' : 'rgba(11,36,71,0.08)', color: subtle }}>
-          {sorted.length}
-        </span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded" style={{ background: dm ? 'rgba(255,255,255,0.08)' : 'rgba(11,36,71,0.08)', color: subtle }}>
+            {sorted.length}
+          </span>
+          {sorted.length > 0 && (
+            <button
+              onClick={() => {
+                setSelectMode((prev) => !prev);
+                setSelectedIds(new Set());
+              }}
+              className="text-[9px] font-extrabold uppercase tracking-wide px-1.5 py-0.5 rounded transition-colors"
+              style={{
+                background: selectMode ? '#dc2626' : (dm ? 'rgba(255,255,255,0.08)' : 'rgba(11,36,71,0.08)'),
+                color: selectMode ? '#fff' : subtle,
+              }}
+            >
+              {selectMode ? 'Cancel' : 'Select'}
+            </button>
+          )}
+        </div>
       </div>
+
+      {selectMode && sorted.length > 0 && (
+        <div className="px-3 py-2 flex items-center justify-between gap-2" style={{ borderBottom: `1px solid ${border}`, background: dm ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)' }}>
+          <button
+            onClick={() => {
+              const allIds = sorted.map((i) => i.id);
+              const allSelected = allIds.every((id) => selectedIds.has(id));
+              setSelectedIds(allSelected ? new Set() : new Set(allIds));
+            }}
+            className="flex items-center gap-1.5 text-[10px] font-bold"
+            style={{ color: text }}
+          >
+            {sorted.every((i) => selectedIds.has(i.id)) ? (
+              <CheckSquare size={14} style={{ color: '#FF9933' }} />
+            ) : (
+              <Square size={14} style={{ color: subtle }} />
+            )}
+            Select all ({selectedIds.size}/{sorted.length})
+          </button>
+          <button
+            onClick={() => {
+              if (selectedIds.size === 0) return;
+              if (!window.confirm(`Delete ${selectedIds.size} selected SOS incident${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
+              onDeleteIncidents(Array.from(selectedIds));
+              setSelectedIds(new Set());
+              setSelectMode(false);
+            }}
+            disabled={selectedIds.size === 0}
+            className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-[10px] font-bold text-white transition-opacity disabled:opacity-40"
+            style={{ background: '#dc2626' }}
+          >
+            <Trash2 size={12} />
+            Delete{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
+          </button>
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto p-2.5 space-y-2">
         {sorted.length === 0 ? (
           <div className="text-center py-8 text-xs" style={{ color: subtle }}>{t.noActiveIncidents}</div>
         ) : (
-          sorted.map((inc) => (
+          sorted.map((inc) => {
+            const isSelected = selectedIds.has(inc.id);
+            const toggleSelected = () => {
+              setSelectedIds((prev) => {
+                const next = new Set(prev);
+                if (next.has(inc.id)) next.delete(inc.id); else next.add(inc.id);
+                return next;
+              });
+            };
+            return (
             <div
               key={inc.id}
-              className={`rounded-xl ${inc.severity === 'Critical' ? 'animate-pulse-glow' : ''}`}
+              className={`rounded-xl flex items-stretch ${inc.severity === 'Critical' ? 'animate-pulse-glow' : ''}`}
               style={{
                 background: inc.severity === 'Critical' ? 'rgba(220,38,38,0.08)' : dm ? 'rgba(255,255,255,0.03)' : 'rgba(0,0,0,0.02)',
-                border: `1px solid ${inc.severity === 'Critical' ? 'rgba(220,38,38,0.35)' : border}`,
+                border: `1px solid ${isSelected ? '#FF9933' : (inc.severity === 'Critical' ? 'rgba(220,38,38,0.35)' : border)}`,
               }}
             >
-              <button onClick={() => onIncidentClick(inc)} className="w-full text-left p-2.5">
-                <div className="flex items-center justify-between gap-1.5 mb-1">
-                  <span className="text-[10px] font-mono font-bold" style={{ color: subtle }}>{inc.id}</span>
-                  <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-full border ${SEVERITY_STYLE[inc.severity]}`}>
-                    {inc.severity}
-                  </span>
-                </div>
-                <div className="text-xs font-bold truncate" style={{ color: text }}>{inc.touristName}</div>
-                <div className="text-[10px] truncate mt-0.5" style={{ color: subtle }}>{inc.hazardType}</div>
-                <div className="flex items-center gap-1 mt-1 text-[9px]" style={{ color: subtle }}>
-                  <Clock size={9} />
-                  <span>{inc.timestamp.split(' ')[1] || inc.timestamp}</span>
-                  {inc.status === 'Units Dispatched' && (
-                    <span className="ml-auto px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 text-[9px] font-extrabold">DISPATCHED</span>
+              {selectMode && (
+                <button
+                  onClick={toggleSelected}
+                  aria-label={isSelected ? 'Deselect incident' : 'Select incident'}
+                  className="flex items-start justify-center pt-2.5 pl-2.5 pr-1"
+                >
+                  {isSelected ? (
+                    <CheckSquare size={16} style={{ color: '#FF9933' }} />
+                  ) : (
+                    <Square size={16} style={{ color: subtle }} />
                   )}
-                  {inc.status === 'New' && (
-                    <span className="ml-auto px-1.5 py-0.5 rounded bg-red-100 text-red-800 text-[9px] font-extrabold">NEW</span>
-                  )}
-                </div>
-              </button>
-              {inc.status === 'Units Dispatched' && (
-                <div className="px-2.5 pb-2.5">
-                  <button
-                    onClick={() => onResolveIncident(inc.id)}
-                    className="w-full h-7 rounded-lg text-[10px] font-bold text-white transition-opacity hover:opacity-90"
-                    style={{ background: '#138808' }}
-                  >
-                    {t.resolveBtn}
-                  </button>
-                </div>
+                </button>
               )}
+              <div className="flex-1 min-w-0">
+                <button onClick={() => (selectMode ? toggleSelected() : onIncidentClick(inc))} className="w-full text-left p-2.5">
+                  <div className="flex items-center justify-between gap-1.5 mb-1">
+                    <span className="text-[10px] font-mono font-bold" style={{ color: subtle }}>{inc.id}</span>
+                    <span className={`text-[9px] font-extrabold px-1.5 py-0.5 rounded-full border ${SEVERITY_STYLE[inc.severity]}`}>
+                      {inc.severity}
+                    </span>
+                  </div>
+                  <div className="text-xs font-bold truncate" style={{ color: text }}>{inc.touristName}</div>
+                  <div className="text-[10px] truncate mt-0.5" style={{ color: subtle }}>{inc.hazardType}</div>
+                  <div className="flex items-center gap-1 mt-1 text-[9px]" style={{ color: subtle }}>
+                    <Clock size={9} />
+                    <span>{inc.timestamp.split(' ')[1] || inc.timestamp}</span>
+                    {inc.status === 'Units Dispatched' && (
+                      <span className="ml-auto px-1.5 py-0.5 rounded bg-amber-100 text-amber-900 text-[9px] font-extrabold">DISPATCHED</span>
+                    )}
+                    {inc.status === 'New' && (
+                      <span className="ml-auto px-1.5 py-0.5 rounded bg-red-100 text-red-800 text-[9px] font-extrabold">NEW</span>
+                    )}
+                  </div>
+                </button>
+                {inc.status === 'Units Dispatched' && (
+                  <div className="px-2.5 pb-2.5">
+                    <button
+                      onClick={() => onResolveIncident(inc.id)}
+                      className="w-full h-7 rounded-lg text-[10px] font-bold text-white transition-opacity hover:opacity-90"
+                      style={{ background: '#138808' }}
+                    >
+                      {t.resolveBtn}
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
-          ))
+          );})
         )}
       </div>
 

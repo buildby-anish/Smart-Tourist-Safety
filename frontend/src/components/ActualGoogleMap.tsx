@@ -41,6 +41,12 @@ interface ActualGoogleMapProps {
   onClearRoute?: () => void;
   enableDrawing?: boolean;
   onGeofenceCreated?: () => void;
+  /** Lets a parent (e.g. AuthorityBottomBar's "Mark Circle Zone" /
+   * "Mark Polygon Zone" buttons) start drawing mode from outside the map,
+   * instead of only via the in-map drawing-tools overlay. Bump `ts` (e.g.
+   * Date.now()) each time, even for the same shape, so re-clicking the same
+   * button restarts drawing. */
+  startDrawTrigger?: { shape: 'circle' | 'polygon'; ts: number } | null;
   lockedCity?: any;
   /** When false, clicking an empty spot on the map no longer reverse-geocodes
    * and shows the Directions popup — used to keep the authority dashboard's
@@ -78,6 +84,7 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
   onGeofenceCreated,
   lockedCity,
   enableDirectionsOnClick = true,
+  startDrawTrigger,
 }) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<any>(null);
@@ -938,6 +945,15 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
       drawLayerRef.current = null;
     }
   };
+
+  // External trigger (e.g. AuthorityBottomBar's "Mark Circle/Polygon Zone"
+  // buttons) — mirrors the in-map drawing-tools overlay's startDrawing call
+  // so a zone can be started from outside the map component too.
+  useEffect(() => {
+    if (!enableDrawing || !startDrawTrigger) return;
+    startDrawing(startDrawTrigger.shape);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [startDrawTrigger?.ts, enableDrawing]);
 
   const handleFinishPolygon = () => {
     if (drawPoints.length < 3) return;

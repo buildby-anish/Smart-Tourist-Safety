@@ -52,7 +52,8 @@ import {
   getLiveTouristLocations,
   listAuthorityTourists,
   broadcastStateAlert,
-  listGeofences
+  listGeofences,
+  deleteIncidents
 } from './lib/api';
 import LoginModal from './components/tourist/LoginModal';
 
@@ -389,11 +390,20 @@ export default function App() {
   // Realtime authority feed (directive §B.1, §B.3, §B.2): connects once the
   // dashboard is authenticated as an authority, and refreshes incidents the
   // moment the backend pushes an sos.created / incident.updated /
-  // geofence.breach event, instead of relying solely on manual refresh calls.
+  // incident.deleted / geofence.breach event, instead of relying solely on
+  // manual refresh calls. incident.deleted is what makes bulk-delete from
+  // one authority screen disappear on every other connected authority
+  // session immediately, instead of only on their next manual refresh.
   useEffect(() => {
     if (userRole !== 'authority') return;
     const socket = connectAuthorityFeed((event) => {
-      if (event.type === 'sos.created' || event.type === 'incident.updated' || event.type === 'geofence.breach' || event.type === 'tourist.updated') {
+      if (
+        event.type === 'sos.created' ||
+        event.type === 'incident.updated' ||
+        event.type === 'incident.deleted' ||
+        event.type === 'geofence.breach' ||
+        event.type === 'tourist.updated'
+      ) {
         refreshTouristsFromBackend().then((freshTourists) => {
           refreshIncidentsFromBackend(freshTourists);
         });
@@ -402,6 +412,24 @@ export default function App() {
       }
     });
     return () => socket?.close();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [userRole]);
+
+  // Dual-side geofence sync: the tourist map already polls listGeofences
+  // every 15s (see MapCanvas), so a zone drawn by an authority officer
+  // shows up for tourists automatically. The authority dashboard itself,
+  // though, only ever refetched geofences at login and right after its own
+  // create/update/delete actions — so a zone created/removed from a
+  // *different* authority session (or before this dashboard's DB pool
+  // exhaustion issue was fixed — see db.py — silently failed to load) never
+  // showed up here, which is exactly what made it look "undeletable."
+  // Poll on the same cadence as the tourist side so both stay in sync.
+  useEffect(() => {
+    if (userRole !== 'authority') return;
+    const intervalId = window.setInterval(() => {
+      refreshGeofencesFromBackend();
+    }, 15000);
+    return () => window.clearInterval(intervalId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userRole]);
 
@@ -598,6 +626,32 @@ export default function App() {
       'Incident Resolution',
       `Marked SOS Incident ${incidentId} as Resolved. Tourist confirmed safe.`
     );
+  };
+
+  // Bulk-delete incidents — powers the authority dashboard's "select all
+  // SOS + delete" action. Removes them from local state immediately, then
+  // persists the delete for every incident that has a real backend id.
+  // Other connected authority sessions pick up the delete via the
+  // "incident.deleted" realtime event handled in the socket effect below,
+  // rather than only on their next manual refresh — the other half of
+  // keeping tourist/authority state in sync both ways.
+  const handleDeleteIncidents = async (incidentIds: string[]) => {
+    const idSet = new Set(incidentIds);
+    const targets = incidents.filter((i) => idSet.has(i.id));
+    const backendIds = targets.map((i) => i.backendIncidentId).filter(Boolean) as string[];
+
+    setIncidents((prev) => prev.filter((i) => !idSet.has(i.id)));
+
+    if (backendIds.length === 0) return;
+    try {
+      await deleteIncidents(backendIds);
+    } catch (err) {
+      console.warn('Failed to delete incidents on backend:', err);
+      // Re-sync with the backend rather than leaving local/remote state
+      // silently diverged if the bulk delete failed server-side.
+      const fresh = await refreshTouristsFromBackend();
+      await refreshIncidentsFromBackend(fresh);
+    }
   };
 
   // Mark tourist safe from the Tourist Tracking module — resolves that
@@ -802,6 +856,7 @@ export default function App() {
           onGeofenceCreated={refreshGeofencesFromBackend}
           onDispatchUnit={handleDispatchUnit}
           onResolveIncident={handleResolveIncident}
+          onDeleteIncidents={handleDeleteIncidents}
           onMarkTouristSafe={handleMarkTouristSafe}
           onSendBroadcast={handleSendBroadcast}
         />

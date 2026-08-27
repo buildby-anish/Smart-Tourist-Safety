@@ -23,6 +23,15 @@ class IncidentUpdate(BaseModel):
     assigned_officer_id: UUID | None = None
 
 
+class IncidentBulkDeleteRequest(BaseModel):
+    incident_ids: list[UUID]
+
+
+class IncidentBulkDeleteResponse(BaseModel):
+    deleted_ids: list[UUID]
+    not_found_ids: list[UUID]
+
+
 class IncidentResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
