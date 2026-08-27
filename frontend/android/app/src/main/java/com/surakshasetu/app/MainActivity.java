@@ -21,17 +21,21 @@ import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.net.ConnectivityManager;
+import android.net.NetworkCapabilities;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.ParcelUuid;
 import android.util.Log;
 import com.getcapacitor.BridgeActivity;
+import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import org.json.JSONObject;
 
+import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.ByteOrder;
@@ -46,100 +50,260 @@ import java.util.Set;
 import java.util.UUID;
 
 public class MainActivity extends BridgeActivity {
-    private static final String TAG = "BLE_SOS_Relay";
+    private static final String TAG = "SosMesh";
+    
+    // UUIDs for GATT Server / Client Handshake
     private static final UUID SERVICE_UUID = UUID.fromString("505b9110-3fa1-4e6a-913a-c4345b080001");
     private static final UUID SERVICE_UUID_16 = UUID.fromString("00009110-0000-1000-8000-00805f9b34fb");
     private static final UUID CHARACTERISTIC_UUID = UUID.fromString("505b9110-3fa1-4e6a-913a-c4345b080002");
-    private static final int MANUFACTURER_ID = 0xFFFF; // Using reserved for testing
+    
     private static final int REQUEST_PERMISSIONS = 121;
     
     private BluetoothLeAdvertiser advertiser;
     private BluetoothLeScanner scanner;
     private BluetoothGattServer gattServer;
-    private BluetoothGattCharacteristic sosCharacteristic;
-    private android.os.Handler handler = new android.os.Handler();
+    private BluetoothGattCharacteristic meshCharacteristic;
     
+    private boolean isScanning = false;
+    private boolean isAdvertising = false;
+    private byte[] activePacketData = null;
+    
+    private android.os.Handler handler = new android.os.Handler();
     private String serverUrl = "https://smart-tourist-safety-production.up.railway.app/api/v1/sos/relay";
-    private final Set<String> processedSOSPackets = Collections.synchronizedSet(new HashSet<>());
+    
+    private final Set<UUID> processedSosIds = Collections.synchronizedSet(new HashSet<>());
     private final Set<String> pendingConnections = Collections.synchronizedSet(new HashSet<>());
+    private final Set<String> pendingUploads = Collections.synchronizedSet(new HashSet<>());
+    
+    private static SosMeshPlugin pluginInstance = null;
 
-    // Inner Capacitor plugin so JS can call window.Capacitor.Plugins.BleSosRelay.advertiseSOS()
-    @CapacitorPlugin(name = "BleSosRelay")
-    public class BleSosRelayPlugin extends Plugin {
-        @PluginMethod
-        public void checkStatus(PluginCall call) {
-            BluetoothManager manager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
-            BluetoothAdapter adapter = manager != null ? manager.getAdapter() : null;
-            
-            com.getcapacitor.JSObject ret = new com.getcapacitor.JSObject();
-            ret.put("enabled", adapter != null && adapter.isEnabled());
-            ret.put("supported", adapter != null);
-            call.resolve(ret);
-        }
+    // Enums
+    private static final byte EMERGENCY_GENERAL = 0;
+    private static final byte EMERGENCY_MEDICAL = 1;
+    private static final byte EMERGENCY_FIRE = 2;
+    private static final byte EMERGENCY_NATURAL_DISASTER = 3;
+    private static final byte EMERGENCY_ACCIDENT = 4;
+    private static final byte EMERGENCY_THREAT = 5;
 
-        @PluginMethod
-        public void setServerUrl(PluginCall call) {
-            String url = call.getString("url");
-            if (url != null && !url.isEmpty()) {
-                serverUrl = url;
-                Log.i(TAG, "Relay Server URL updated: " + serverUrl);
-            }
-            call.resolve();
-        }
+    private static final byte SEVERITY_LOW = 0;
+    private static final byte SEVERITY_MEDIUM = 1;
+    private static final byte SEVERITY_HIGH = 2;
+    private static final byte SEVERITY_CRITICAL = 3;
 
-        @PluginMethod
-        public void advertiseSOS(PluginCall call) {
-            String packet = call.getString("packet", "");
-            if (packet != null && !packet.isEmpty()) {
-                Log.i(TAG, "JS requested SOS advertisement (Legacy). Packet: " + packet);
-                advertiseSOSPacket(packet);
-            }
-            call.resolve();
-        }
-
-        @PluginMethod
-        public void advertiseSOSBinary(PluginCall call) {
-            String touristId = call.getString("touristId");
-            Double lat = call.getDouble("latitude");
-            Double lng = call.getDouble("longitude");
-            Integer battery = call.getInt("battery");
-            String triggeredAt = call.getString("triggeredAt");
-
-            if (touristId != null && lat != null && lng != null) {
-                try {
-                    UUID uuid = UUID.fromString(touristId);
-                    ByteBuffer buffer = ByteBuffer.allocate(29);
-                    buffer.order(ByteOrder.BIG_ENDIAN);
-                    buffer.putLong(uuid.getMostSignificantBits());
-                    buffer.putLong(uuid.getLeastSignificantBits());
-                    buffer.putFloat(lat.floatValue());
-                    buffer.putFloat(lng.floatValue());
-                    buffer.put((byte) (battery != null ? battery.intValue() : -1));
-                    
-                    long timestamp = System.currentTimeMillis() / 1000;
-                    if (triggeredAt != null) {
-                        try {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                                timestamp = java.time.Instant.parse(triggeredAt).getEpochSecond();
-                            }
-                        } catch (Exception e) { /* fallback to current */ }
-                    }
-                    buffer.putInt((int) timestamp);
-                    
-                    byte[] data = buffer.array();
-                    advertiseBinaryData(data);
-                    Log.i(TAG, "BLE SOS Binary advertising started with timestamp: " + timestamp);
-                    call.resolve();
-                } catch (Exception e) {
-                    call.reject("Invalid data: " + e.getMessage());
-                }
-            } else {
-                call.reject("Missing required fields");
-            }
+    private static byte getEmergencyTypeCode(String type) {
+        if (type == null) return EMERGENCY_GENERAL;
+        switch (type.toUpperCase()) {
+            case "MEDICAL": return EMERGENCY_MEDICAL;
+            case "FIRE": return EMERGENCY_FIRE;
+            case "NATURAL_DISASTER": case "NATURAL": return EMERGENCY_NATURAL_DISASTER;
+            case "ACCIDENT": return EMERGENCY_ACCIDENT;
+            case "THREAT": return EMERGENCY_THREAT;
+            default: return EMERGENCY_GENERAL;
         }
     }
 
+    private static String getEmergencyTypeString(byte code) {
+        switch (code) {
+            case EMERGENCY_MEDICAL: return "MEDICAL";
+            case EMERGENCY_FIRE: return "FIRE";
+            case EMERGENCY_NATURAL_DISASTER: return "NATURAL_DISASTER";
+            case EMERGENCY_ACCIDENT: return "ACCIDENT";
+            case EMERGENCY_THREAT: return "THREAT";
+            default: return "GENERAL";
+        }
+    }
 
+    private static byte getSeverityCode(String severity) {
+        if (severity == null) return SEVERITY_HIGH;
+        switch (severity.toUpperCase()) {
+            case "LOW": return SEVERITY_LOW;
+            case "MEDIUM": return SEVERITY_MEDIUM;
+            case "CRITICAL": return SEVERITY_CRITICAL;
+            default: return SEVERITY_HIGH;
+        }
+    }
+
+    private static String getSeverityString(byte code) {
+        switch (code) {
+            case SEVERITY_LOW: return "LOW";
+            case SEVERITY_MEDIUM: return "MEDIUM";
+            case SEVERITY_CRITICAL: return "CRITICAL";
+            default: return "HIGH";
+        }
+    }
+
+    @CapacitorPlugin(name = "SosMesh")
+    public class SosMeshPlugin extends Plugin {
+        @Override
+        public void load() {
+            pluginInstance = this;
+        }
+
+        public void emitEvent(String eventName, JSObject data) {
+            notifyListeners(eventName, data);
+        }
+
+        @PluginMethod
+        public void startMesh(PluginCall call) {
+            startMeshScanningAndAdvertising();
+            call.resolve();
+        }
+
+        @PluginMethod
+        public void stopMesh(PluginCall call) {
+            stopMeshScanningAndAdvertising();
+            call.resolve();
+        }
+
+        @PluginMethod
+        public void sendSOS(PluginCall call) {
+            String sosIdStr = call.getString("sosId");
+            String touristIdStr = call.getString("touristId");
+            Double lat = call.getDouble("latitude");
+            Double lng = call.getDouble("longitude");
+            Integer battery = call.getInt("battery", 100);
+            String emergencyType = call.getString("emergencyType", "GENERAL");
+            String severity = call.getString("severity", "HIGH");
+
+            if (touristIdStr == null || lat == null || lng == null) {
+                call.reject("Missing required fields: touristId, latitude, longitude");
+                return;
+            }
+
+            try {
+                UUID sosId = (sosIdStr != null && !sosIdStr.isEmpty()) ? UUID.fromString(sosIdStr) : UUID.randomUUID();
+                UUID touristId = UUID.fromString(touristIdStr);
+                
+                long timestamp = System.currentTimeMillis() / 1000L;
+                byte batteryByte = (byte) battery.intValue();
+                byte typeCode = getEmergencyTypeCode(emergencyType);
+                byte severityCode = getSeverityCode(severity);
+                byte hopCount = 0;
+                byte ttl = 3; // Hop limit of 3
+
+                byte[] packedData = packSosMesh(sosId, touristId, lat.floatValue(), lng.floatValue(), timestamp, batteryByte, typeCode, severityCode, hopCount, ttl);
+                processedSosIds.add(sosId);
+                
+                activePacketData = packedData;
+                if (meshCharacteristic != null) {
+                    meshCharacteristic.setValue(packedData);
+                }
+                
+                startAdvertising(packedData);
+                startScanning();
+                
+                call.resolve();
+            } catch (Exception e) {
+                call.reject("Failed to format SOS: " + e.getMessage());
+            }
+        }
+
+        @PluginMethod
+        public void getMeshStatus(PluginCall call) {
+            JSObject ret = new JSObject();
+            ret.put("isScanning", isScanning);
+            ret.put("isAdvertising", isAdvertising);
+            ret.put("bluetoothState", getBluetoothStateString());
+            call.resolve(ret);
+        }
+    }
+
+    private String getBluetoothStateString() {
+        BluetoothManager manager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+        if (manager == null) return "UNAVAILABLE";
+        BluetoothAdapter adapter = manager.getAdapter();
+        if (adapter == null) return "UNAVAILABLE";
+        return adapter.isEnabled() ? "ON" : "OFF";
+    }
+
+    // Packet Packer / Unpacker Helper
+    private static byte[] packSosMesh(
+        UUID sosId, UUID touristId, float latitude, float longitude, 
+        long timestamp, byte battery, byte emergencyType, byte severity, 
+        byte hopCount, byte ttl
+    ) {
+        ByteBuffer buffer = ByteBuffer.allocate(49);
+        buffer.order(ByteOrder.BIG_ENDIAN);
+        
+        buffer.putLong(sosId.getMostSignificantBits());
+        buffer.putLong(sosId.getLeastSignificantBits());
+        
+        buffer.putLong(touristId.getMostSignificantBits());
+        buffer.putLong(touristId.getLeastSignificantBits());
+        
+        buffer.putFloat(latitude);
+        buffer.putFloat(longitude);
+        buffer.putInt((int) timestamp);
+        buffer.put(battery);
+        buffer.put(emergencyType);
+        buffer.put(severity);
+        buffer.put(hopCount);
+        buffer.put(ttl);
+        
+        return buffer.array();
+    }
+
+    public static class SosMeshPacket {
+        public UUID sosId;
+        public UUID touristId;
+        public float latitude;
+        public float longitude;
+        public long timestamp;
+        public int battery;
+        public String emergencyType;
+        public String severity;
+        public int hopCount;
+        public int ttl;
+
+        public static SosMeshPacket unpack(byte[] bytes) {
+            if (bytes == null || bytes.length < 49) return null;
+            try {
+                ByteBuffer buffer = ByteBuffer.wrap(bytes);
+                buffer.order(ByteOrder.BIG_ENDIAN);
+                
+                SosMeshPacket p = new SosMeshPacket();
+                p.sosId = new UUID(buffer.getLong(), buffer.getLong());
+                p.touristId = new UUID(buffer.getLong(), buffer.getLong());
+                p.latitude = buffer.getFloat();
+                p.longitude = buffer.getFloat();
+                p.timestamp = buffer.getInt() & 0xFFFFFFFFL;
+                p.battery = buffer.get() & 0xFF;
+                p.emergencyType = getEmergencyTypeString(buffer.get());
+                p.severity = getSeverityString(buffer.get());
+                p.hopCount = buffer.get() & 0xFF;
+                p.ttl = buffer.get() & 0xFF;
+                return p;
+            } catch (Exception e) {
+                return null;
+            }
+        }
+
+        public String toJSONString() {
+            try {
+                JSONObject obj = new JSONObject();
+                obj.put("tourist_id", touristId.toString());
+                obj.put("latitude", latitude);
+                obj.put("longitude", longitude);
+                obj.put("battery_status", battery);
+                
+                // Convert timestamp to ISO date format
+                java.text.DateFormat df = new java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'");
+                df.setTimeZone(java.util.TimeZone.getTimeZone("UTC"));
+                String triggeredAt = df.format(new java.util.Date(timestamp * 1000L));
+                obj.put("triggered_at", triggeredAt);
+                
+                // Add extended mesh info
+                obj.put("sos_id", sosId.toString());
+                obj.put("emergency_type", emergencyType);
+                obj.put("severity", severity);
+                obj.put("hop_count", hopCount);
+                obj.put("ttl", ttl);
+                return obj.toString();
+            } catch (Exception e) {
+                return "{}";
+            }
+        }
+    }
 
     private void checkAndRequestPermissions() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -180,10 +344,11 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
-        registerPlugin(BleSosRelayPlugin.class);
+        registerPlugin(SosMeshPlugin.class);
         super.onCreate(savedInstanceState);
         checkAndRequestPermissions();
         setupBLERelay();
+        setupNetworkMonitoring();
     }
 
     @Override
@@ -195,7 +360,7 @@ public class MainActivity extends BridgeActivity {
     private void setupBLERelay() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
-                Log.w(TAG, "Location permission missing, BLE relay won't start.");
+                Log.w(TAG, "Location permission missing, BLE mesh won't start.");
                 return;
             }
         }
@@ -220,12 +385,6 @@ public class MainActivity extends BridgeActivity {
             if (gattServer == null) {
                 setupGattServer(manager);
             }
-
-            if (scanner != null) {
-                startScanning();
-            } else {
-                Log.e(TAG, "Bluetooth LE Scanner is null.");
-            }
         } catch (Exception e) {
             Log.e(TAG, "BLE Setup error: " + e.getMessage());
         }
@@ -236,14 +395,14 @@ public class MainActivity extends BridgeActivity {
         if (gattServer == null) return;
 
         BluetoothGattService service = new BluetoothGattService(SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY);
-        sosCharacteristic = new BluetoothGattCharacteristic(
+        meshCharacteristic = new BluetoothGattCharacteristic(
             CHARACTERISTIC_UUID,
             BluetoothGattCharacteristic.PROPERTY_READ | BluetoothGattCharacteristic.PROPERTY_NOTIFY,
             BluetoothGattCharacteristic.PERMISSION_READ
         );
-        service.addCharacteristic(sosCharacteristic);
+        service.addCharacteristic(meshCharacteristic);
         gattServer.addService(service);
-        Log.i(TAG, "GATT Server started with SOS Service");
+        Log.i(TAG, "GATT Server started with SosMesh Service");
     }
 
     private final BluetoothGattServerCallback gattServerCallback = new BluetoothGattServerCallback() {
@@ -254,13 +413,44 @@ public class MainActivity extends BridgeActivity {
                 Log.i(TAG, "Device connected to GATT server: " + device.getAddress());
             }
         }
+
+        @Override
+        public void onCharacteristicReadRequest(BluetoothDevice device, int requestId, int offset, BluetoothGattCharacteristic characteristic) {
+            super.onCharacteristicReadRequest(device, requestId, offset, characteristic);
+            if (characteristic.getUuid().equals(CHARACTERISTIC_UUID)) {
+                byte[] val = activePacketData;
+                if (val != null) {
+                    if (offset > val.length) {
+                        gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_INVALID_OFFSET, offset, null);
+                        return;
+                    }
+                    byte[] responseBytes = new byte[val.length - offset];
+                    System.arraycopy(val, offset, responseBytes, 0, responseBytes.length);
+                    gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_SUCCESS, offset, responseBytes);
+                } else {
+                    gattServer.sendResponse(device, requestId, BluetoothGatt.GATT_FAILURE, offset, null);
+                }
+            }
+        }
     };
 
+    private void startMeshScanningAndAdvertising() {
+        setupBLERelay();
+        startScanning();
+        if (activePacketData != null) {
+            startAdvertising(activePacketData);
+        }
+    }
+
+    private void stopMeshScanningAndAdvertising() {
+        stopScanning();
+        stopAdvertising();
+    }
+
     private void startScanning() {
-        if (scanner == null) return;
+        if (scanner == null || isScanning) return;
         
         List<ScanFilter> filters = new ArrayList<>();
-        filters.add(new ScanFilter.Builder().setServiceUuid(new ParcelUuid(SERVICE_UUID)).build());
         filters.add(new ScanFilter.Builder().setServiceData(new ParcelUuid(SERVICE_UUID_16), null).build());
 
         ScanSettings settings = new ScanSettings.Builder()
@@ -270,20 +460,34 @@ public class MainActivity extends BridgeActivity {
             .build();
 
         try {
-            scanner.stopScan(scanCallback);
             scanner.startScan(filters, settings, scanCallback);
-            Log.i(TAG, "BLE Scanning started (or restarted)");
+            isScanning = true;
+            Log.i(TAG, "BLE Mesh Scanning started");
             
-            // Watchdog: Restart scan every 2 minutes to prevent OS throttling
+            // Watchdog scan restart
             handler.removeCallbacksAndMessages(null);
             handler.postDelayed(new Runnable() {
                 @Override
                 public void run() {
-                    startScanning();
+                    if (isScanning) {
+                        stopScanning();
+                        startScanning();
+                    }
                 }
             }, 120000);
         } catch (Exception e) {
-            Log.e(TAG, "Failed to start scan: " + e.getMessage());
+            Log.e(TAG, "Failed to start scanning: " + e.getMessage());
+        }
+    }
+
+    private void stopScanning() {
+        if (scanner == null || !isScanning) return;
+        try {
+            scanner.stopScan(scanCallback);
+            isScanning = false;
+            Log.i(TAG, "BLE Mesh Scanning stopped");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to stop scanning: " + e.getMessage());
         }
     }
 
@@ -293,47 +497,30 @@ public class MainActivity extends BridgeActivity {
             super.onScanResult(callbackType, result);
             if (result.getScanRecord() == null) return;
             
-            // 1. Try 16-bit Service Data (New Compact Binary format)
-            byte[] serviceData16 = result.getScanRecord().getServiceData(new ParcelUuid(SERVICE_UUID_16));
-            if (serviceData16 != null && serviceData16.length == 29) {
-                parseBinaryPayload(serviceData16);
-                return;
-            }
+            byte[] serviceData = result.getScanRecord().getServiceData(new ParcelUuid(SERVICE_UUID_16));
+            if (serviceData != null && serviceData.length == 25) {
+                // Parse SOS ID to check duplication connectionlessly
+                ByteBuffer buffer = ByteBuffer.wrap(serviceData);
+                buffer.order(ByteOrder.BIG_ENDIAN);
+                UUID sosId = new UUID(buffer.getLong(), buffer.getLong());
 
-            // 1b. Try Legacy Service Data (128-bit UUID)
-            byte[] serviceData = result.getScanRecord().getServiceData(new ParcelUuid(SERVICE_UUID));
-            if (serviceData != null) {
-                if (serviceData.length == 29) {
-                    parseBinaryPayload(serviceData);
-                    return;
-                } else {
-                    String packet = new String(serviceData, StandardCharsets.UTF_8);
-                    if (packet.contains("tourist_id")) {
-                        handleSOSPacket(packet);
-                        return;
-                    }
+                if (processedSosIds.contains(sosId)) {
+                    return; // Skip duplicate immediately
                 }
-            }
 
-            // 2. Try Binary Format (Manufacturer Data)
-            byte[] manufacturerData = result.getScanRecord().getManufacturerSpecificData(MANUFACTURER_ID);
-            if (manufacturerData != null && manufacturerData.length == 29) {
-                parseBinaryPayload(manufacturerData);
-                return;
-            }
-
-            // 4. Try Connecting (iOS/GATT style)
-            String address = result.getDevice().getAddress();
-            if (!pendingConnections.contains(address)) {
-                pendingConnections.add(address);
-                result.getDevice().connectGatt(MainActivity.this, false, gattClientCallback);
+                // New SOS detected! Connect via GATT to read full 49-byte metadata packet
+                String address = result.getDevice().getAddress();
+                if (!pendingConnections.contains(address)) {
+                    pendingConnections.add(address);
+                    result.getDevice().connectGatt(MainActivity.this, false, gattClientCallback);
+                }
             }
         }
     };
 
-    private final android.bluetooth.BluetoothGattCallback gattClientCallback = new android.bluetooth.BluetoothGattCallback() {
+    private final BluetoothGattCallback gattClientCallback = new BluetoothGattCallback() {
         @Override
-        public void onConnectionStateChange(android.bluetooth.BluetoothGatt gatt, int status, int newState) {
+        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 gatt.discoverServices();
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
@@ -343,8 +530,8 @@ public class MainActivity extends BridgeActivity {
         }
 
         @Override
-        public void onServicesDiscovered(android.bluetooth.BluetoothGatt gatt, int status) {
-            if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
+        public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
                 BluetoothGattService service = gatt.getService(SERVICE_UUID);
                 if (service != null) {
                     BluetoothGattCharacteristic characteristic = service.getCharacteristic(CHARACTERISTIC_UUID);
@@ -356,68 +543,20 @@ public class MainActivity extends BridgeActivity {
         }
 
         @Override
-        public void onCharacteristicRead(android.bluetooth.BluetoothGatt gatt, android.bluetooth.BluetoothGattCharacteristic characteristic, int status) {
-            if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS && characteristic.getUuid().equals(CHARACTERISTIC_UUID)) {
+        public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+            if (status == BluetoothGatt.GATT_SUCCESS && characteristic.getUuid().equals(CHARACTERISTIC_UUID)) {
                 byte[] data = characteristic.getValue();
-                if (data != null) {
-                    if (data.length == 29) {
-                        parseBinaryPayload(data);
-                    } else {
-                        String packet = new String(data, StandardCharsets.UTF_8);
-                        if (packet.contains("tourist_id")) {
-                            handleSOSPacket(packet);
-                        }
-                    }
+                if (data != null && data.length == 49) {
+                    handleIncomingMeshPacket(data);
                 }
             }
             gatt.disconnect();
         }
     };
 
-    private void parseBinaryPayload(byte[] data) {
-        try {
-            ByteBuffer buffer = ByteBuffer.wrap(data);
-            buffer.order(ByteOrder.BIG_ENDIAN);
-            long mostSigBits = buffer.getLong();
-            long leastSigBits = buffer.getLong();
-            float lat = buffer.getFloat();
-            float lng = buffer.getFloat();
-            int battery = (data.length > 24) ? buffer.get() : -1;
-            
-            String triggeredAt = null;
-            if (data.length >= 29) {
-                long seconds = buffer.getInt() & 0xFFFFFFFFL;
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    triggeredAt = java.time.Instant.ofEpochSecond(seconds).toString();
-                }
-            }
-            
-            UUID touristId = new UUID(mostSigBits, leastSigBits);
-            String jsonPacket;
-            if (triggeredAt != null) {
-                jsonPacket = String.format(Locale.US,
-                    "{\"tourist_id\":\"%s\",\"latitude\":%f,\"longitude\":%f,\"battery_status\":%d,\"triggered_at\":\"%s\"}",
-                    touristId, lat, lng, battery, triggeredAt
-                );
-            } else {
-                jsonPacket = String.format(Locale.US,
-                    "{\"tourist_id\":\"%s\",\"latitude\":%f,\"longitude\":%f,\"battery_status\":%d}",
-                    touristId, lat, lng, battery
-                );
-            }
-            handleSOSPacket(jsonPacket);
-        } catch (Exception e) {
-            Log.e(TAG, "Failed to parse binary SOS: " + e.getMessage());
-        }
-    }
-
-    private void advertiseBinaryData(byte[] data) {
-        if (advertiser == null) return;
-        advertiser.stopAdvertising(advertiseCallback);
-
-        if (sosCharacteristic != null) {
-            sosCharacteristic.setValue(data);
-        }
+    private void startAdvertising(byte[] fullData) {
+        if (advertiser == null || fullData == null || fullData.length < 49) return;
+        stopAdvertising();
 
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
@@ -425,75 +564,185 @@ public class MainActivity extends BridgeActivity {
             .setConnectable(true)
             .build();
 
-        // 1. Primary Advertising Packet: Contains 16-bit Service Data (fits under 31-byte limit)
+        // Shrink the 49-byte packet to 25 bytes to fit legacy BLE 31-byte limit:
+        // 16 bytes SOS ID + 4 bytes Lat + 4 bytes Lng + 1 byte (lower 4 bits Hop Count, upper 4 bits TTL)
+        byte[] adPayload = new byte[25];
+        System.arraycopy(fullData, 0, adPayload, 0, 16); // copy SOS ID
+        System.arraycopy(fullData, 32, adPayload, 16, 8); // copy Lat & Lng (bytes 32-39 in fullData)
+        
+        byte hopCount = fullData[47];
+        byte ttl = fullData[48];
+        adPayload[24] = (byte) ((hopCount & 0x0F) | ((ttl & 0x0F) << 4));
+
         AdvertiseData advertiseData = new AdvertiseData.Builder()
             .setIncludeDeviceName(false)
-            .addServiceData(new ParcelUuid(SERVICE_UUID_16), data)
+            .addServiceData(new ParcelUuid(SERVICE_UUID_16), adPayload)
             .build();
 
-        // 2. Scan Response Packet: Contains the 128-bit Service UUID so iOS/Android scanners can discover GATT services
         AdvertiseData scanResponse = new AdvertiseData.Builder()
             .addServiceUuid(new ParcelUuid(SERVICE_UUID))
             .build();
 
         advertiser.startAdvertising(settings, advertiseData, scanResponse, advertiseCallback);
-        Log.i(TAG, "BLE SOS Binary advertising started (connectionless 16-bit + 128-bit Scan Response) with " + data.length + " bytes");
+        isAdvertising = true;
+        Log.i(TAG, "BLE Mesh Advertising started");
+    }
+
+    private void stopAdvertising() {
+        if (advertiser == null || !isAdvertising) return;
+        try {
+            advertiser.stopAdvertising(advertiseCallback);
+            isAdvertising = false;
+            Log.i(TAG, "BLE Mesh Advertising stopped");
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to stop advertising: " + e.getMessage());
+        }
     }
 
     private final AdvertiseCallback advertiseCallback = new AdvertiseCallback() {
         @Override
         public void onStartSuccess(AdvertiseSettings settingsInEffect) {
             super.onStartSuccess(settingsInEffect);
-            Log.i(TAG, "BLE SOS advertising started successfully.");
+            Log.i(TAG, "BLE Mesh advertising started successfully");
         }
 
         @Override
         public void onStartFailure(int errorCode) {
             super.onStartFailure(errorCode);
-            Log.e(TAG, "BLE SOS advertising failed: " + errorCode);
+            Log.e(TAG, "BLE Mesh advertising failed: " + errorCode);
         }
     };
 
-    private void handleSOSPacket(final String packet) {
-        if (processedSOSPackets.contains(packet)) return;
-        processedSOSPackets.add(packet);
-        Log.i(TAG, "New SOS Packet received via BLE: " + packet);
+    private void handleIncomingMeshPacket(byte[] data) {
+        SosMeshPacket packet = SosMeshPacket.unpack(data);
+        if (packet == null) return;
 
-        new Thread(new Runnable() {
-            @Override
-            public void run() {
-                if (relayToServer(packet)) {
+        if (processedSosIds.contains(packet.sosId)) return;
+        processedSosIds.add(packet.sosId);
+        
+        Log.i(TAG, "Received SOS Mesh Packet! SOS ID: " + packet.sosId + ", Hops: " + packet.hopCount);
+
+        // Notify UI layer
+        if (pluginInstance != null) {
+            JSObject jsObj = new JSObject();
+            jsObj.put("sosId", packet.sosId.toString());
+            jsObj.put("touristId", packet.touristId.toString());
+            jsObj.put("latitude", packet.latitude);
+            jsObj.put("longitude", packet.longitude);
+            jsObj.put("battery", packet.battery);
+            jsObj.put("emergencyType", packet.emergencyType);
+            jsObj.put("severity", packet.severity);
+            jsObj.put("hopCount", packet.hopCount);
+            jsObj.put("ttl", packet.ttl);
+            pluginInstance.emitEvent("onSOSReceived", jsObj);
+        }
+
+        String jsonString = packet.toJSONString();
+
+        if (isOnline()) {
+            // Relaying directly since we are online!
+            new Thread(() -> {
+                if (uploadRelayPacket(jsonString)) {
                     Log.i(TAG, "SOS packet relayed to backend successfully.");
+                    if (pluginInstance != null) {
+                        JSObject jsObj = new JSObject();
+                        jsObj.put("sosId", packet.sosId.toString());
+                        pluginInstance.emitEvent("onSOSDelivered", jsObj);
+                    }
                 } else {
-                    Log.w(TAG, "Failed to relay to backend, starting BLE re-advertisement...");
-                    advertiseSOSPacket(packet);
+                    Log.w(TAG, "Upload failed. Queueing packet for retry.");
+                    pendingUploads.add(jsonString);
+                    startRelayingOfflinePacket(packet);
                 }
+            }).start();
+        } else {
+            // Offline: Re-advertise (relay)
+            Log.i(TAG, "Offline. Forwarding packet via BLE...");
+            pendingUploads.add(jsonString);
+            startRelayingOfflinePacket(packet);
+        }
+    }
+
+    private void startRelayingOfflinePacket(SosMeshPacket packet) {
+        if (packet.ttl <= 1) {
+            Log.w(TAG, "TTL expired. Dropping packet.");
+            return;
+        }
+
+        byte newHopCount = (byte) (packet.hopCount + 1);
+        byte newTtl = (byte) (packet.ttl - 1);
+        
+        byte typeCode = getEmergencyTypeCode(packet.emergencyType);
+        byte severityCode = getSeverityCode(packet.severity);
+
+        byte[] relayedData = packSosMesh(
+            packet.sosId, packet.touristId, packet.latitude, packet.longitude, 
+            packet.timestamp, (byte) packet.battery, typeCode, severityCode, 
+            newHopCount, newTtl
+        );
+
+        activePacketData = relayedData;
+        if (meshCharacteristic != null) {
+            meshCharacteristic.setValue(relayedData);
+        }
+        
+        startAdvertising(relayedData);
+
+        if (pluginInstance != null) {
+            JSObject jsObj = new JSObject();
+            jsObj.put("sosId", packet.sosId.toString());
+            jsObj.put("hopCount", (int) newHopCount);
+            pluginInstance.emitEvent("onSOSRelayed", jsObj);
+        }
+    }
+
+    private boolean isOnline() {
+        ConnectivityManager manager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (manager == null) return false;
+        android.net.Network activeNetwork = manager.getActiveNetwork();
+        if (activeNetwork == null) return false;
+        NetworkCapabilities caps = manager.getNetworkCapabilities(activeNetwork);
+        return caps != null && caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET);
+    }
+
+    private void setupNetworkMonitoring() {
+        ConnectivityManager manager = (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+        if (manager == null) return;
+        manager.registerDefaultNetworkCallback(new ConnectivityManager.NetworkCallback() {
+            @Override
+            public void onAvailable(android.net.Network network) {
+                super.onAvailable(network);
+                Log.i(TAG, "Network connection restored. Syncing pending upload queue...");
+                syncPendingUploads();
+            }
+        });
+    }
+
+    private void syncPendingUploads() {
+        if (pendingUploads.isEmpty()) return;
+        new Thread(() -> {
+            synchronized (pendingUploads) {
+                List<String> toRemove = new ArrayList<>();
+                for (String packetJson : pendingUploads) {
+                    if (uploadRelayPacket(packetJson)) {
+                        toRemove.add(packetJson);
+                        try {
+                            JSONObject obj = new JSONObject(packetJson);
+                            String sosId = obj.getString("sos_id");
+                            if (pluginInstance != null) {
+                                JSObject jsObj = new JSObject();
+                                jsObj.put("sosId", sosId);
+                                pluginInstance.emitEvent("onSOSDelivered", jsObj);
+                            }
+                        } catch (Exception e) { /* ignore */ }
+                    }
+                }
+                pendingUploads.removeAll(toRemove);
             }
         }).start();
     }
 
-    private void advertiseSOSPacket(String packet) {
-        if (advertiser == null) return;
-        byte[] payload = packet.getBytes(StandardCharsets.UTF_8);
-        
-        if (sosCharacteristic != null) {
-            sosCharacteristic.setValue(payload);
-        }
-
-        AdvertiseSettings settings = new AdvertiseSettings.Builder()
-            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
-            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
-            .setConnectable(true)
-            .build();
-
-        AdvertiseData data = new AdvertiseData.Builder()
-            .addServiceUuid(new ParcelUuid(SERVICE_UUID))
-            .build();
-
-        advertiser.startAdvertising(settings, data, advertiseCallback);
-    }
-
-    private boolean relayToServer(String packet) {
+    private boolean uploadRelayPacket(String jsonPayload) {
         try {
             URL url = new URL(serverUrl);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
@@ -503,16 +752,18 @@ public class MainActivity extends BridgeActivity {
             conn.setConnectTimeout(5000);
             
             JSONObject json = new JSONObject();
-            json.put("payload", packet);
+            json.put("payload", jsonPayload);
             String jsonInputString = json.toString();
             
             byte[] input = jsonInputString.getBytes(StandardCharsets.UTF_8);
-            conn.getOutputStream().write(input, 0, input.length);
+            try (OutputStream os = conn.getOutputStream()) {
+                os.write(input, 0, input.length);
+            }
 
             int code = conn.getResponseCode();
             return (code == 200 || code == 201);
         } catch (Exception e) {
-            Log.w(TAG, "Internet upload failed: " + e.getMessage());
+            Log.w(TAG, "Network sync upload failed: " + e.getMessage());
             return false;
         }
     }

@@ -280,16 +280,36 @@ def relay_sos(body: BLERelayPayload):
         except Exception:
             logger.warning(f"Failed to parse triggered_at '{triggered_at_val}' in BLE payload")
 
+    sos_id_val = data.get("sos_id")
+    try:
+        sos_id = UUID(str(sos_id_val)) if sos_id_val else uuid4()
+    except Exception:
+        sos_id = uuid4()
+
+    emergency_type = data.get("emergency_type", "GENERAL")
+    severity = data.get("severity", "HIGH")
+    hop_count = data.get("hop_count", 0)
+    
+    # Map severity to priority
+    priority = "CRITICAL"
+    if severity == "LOW":
+        priority = "LOW"
+    elif severity == "MEDIUM":
+        priority = "MEDIUM"
+    elif severity == "HIGH":
+        priority = "HIGH"
+        
+    description = f"SOS Alarm Triggered (BLE Mesh Relay - Hop Count: {hop_count}, Type: {emergency_type}, Severity: {severity})"
+
     # Fallback mode — no DB
     if not is_db_active():
         from routers.incidents import _in_memory_incident_store
         incident_id = uuid4()
-        sos_id = uuid4()
         incident = IncidentResponse(
             id=incident_id, incident_type="SOS", tourist_id=tourist_id,
             latitude=float(latitude), longitude=float(longitude),
-            ai_risk_score=70, priority="CRITICAL", status="OPEN",
-            description="SOS Alarm Triggered (BLE Mesh Relay)", created_at=triggered_at,
+            ai_risk_score=70, priority=priority, status="OPEN",
+            description=description, created_at=triggered_at,
         )
         _in_memory_incident_store[incident_id] = incident
         sos = SOSResponse(
@@ -327,7 +347,6 @@ def relay_sos(body: BLERelayPayload):
                 return {"status": "duplicate_skipped"}
 
             incident_id = uuid4()
-            sos_id = uuid4()
 
             cur.execute("""
                 INSERT INTO public.incidents (
@@ -336,7 +355,7 @@ def relay_sos(body: BLERelayPayload):
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id;
             """, (incident_id, "SOS", tourist_id, float(latitude), float(longitude),
-                  70, "CRITICAL", "OPEN", "SOS Alarm Triggered (BLE Mesh Relay)", triggered_at))
+                  70, priority, "OPEN", description, triggered_at))
 
             cur.execute("""
                 INSERT INTO public.sos_requests (

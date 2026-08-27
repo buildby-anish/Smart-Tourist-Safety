@@ -8,92 +8,264 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
     var window: UIWindow?
     var peripheralManager: CBPeripheralManager?
     var centralManager: CBCentralManager?
-    var processedSOSPackets = Set<String>()
+    
+    // UUIDs for Mesh Protocol
     let serviceUUID = CBUUID(string: "505B9110-3FA1-4E6A-913A-C4345B080001")
+    let serviceUUID16 = CBUUID(string: "9110") // 16-bit Service UUID for connectionless scan
     let characteristicUUID = CBUUID(string: "505B9110-3FA1-4E6A-913A-C4345B080002")
 
-    var sosCharacteristic: CBMutableCharacteristic?
+    var meshCharacteristic: CBMutableCharacteristic?
     var serverUrl = "https://smart-tourist-safety-production.up.railway.app/api/v1/sos/relay"
 
+    var isScanning = false
+    var isAdvertising = false
+    var activePacketData: Data? = nil
+
+    var processedSosIds = Set<UUID>()
     var pendingPeripherals = Set<CBPeripheral>()
+    var pendingUploads = Set<String>()
+
+    // Enums
+    static let EMERGENCY_GENERAL: UInt8 = 0
+    static let EMERGENCY_MEDICAL: UInt8 = 1
+    static let EMERGENCY_FIRE: UInt8 = 2
+    static let EMERGENCY_NATURAL_DISASTER: UInt8 = 3
+    static let EMERGENCY_ACCIDENT: UInt8 = 4
+    static let EMERGENCY_THREAT: UInt8 = 5
+
+    static let SEVERITY_LOW: UInt8 = 0
+    static let SEVERITY_MEDIUM: UInt8 = 1
+    static let SEVERITY_HIGH: UInt8 = 2
+    static let SEVERITY_CRITICAL: UInt8 = 3
+
+    static func getEmergencyTypeCode(type: String?) -> UInt8 {
+        guard let type = type else { return EMERGENCY_GENERAL }
+        switch type.uppercased() {
+        case "MEDICAL": return EMERGENCY_MEDICAL
+        case "FIRE": return EMERGENCY_FIRE
+        case "NATURAL_DISASTER", "NATURAL": return EMERGENCY_NATURAL_DISASTER
+        case "ACCIDENT": return EMERGENCY_ACCIDENT
+        case "THREAT": return EMERGENCY_THREAT
+        default: return EMERGENCY_GENERAL
+        }
+    }
+
+    static func getEmergencyTypeString(code: UInt8) -> String {
+        switch code {
+        case EMERGENCY_MEDICAL: return "MEDICAL"
+        case EMERGENCY_FIRE: return "FIRE"
+        case EMERGENCY_NATURAL_DISASTER: return "NATURAL_DISASTER"
+        case EMERGENCY_ACCIDENT: return "ACCIDENT"
+        case EMERGENCY_THREAT: return "THREAT"
+        default: return "GENERAL"
+        }
+    }
+
+    static func getSeverityCode(severity: String?) -> UInt8 {
+        guard let severity = severity else { return SEVERITY_HIGH }
+        switch severity.uppercased() {
+        case "LOW": return SEVERITY_LOW
+        case "MEDIUM": return SEVERITY_MEDIUM
+        case "CRITICAL": return SEVERITY_CRITICAL
+        default: return SEVERITY_HIGH
+        }
+    }
+
+    static func getSeverityString(code: UInt8) -> String {
+        switch code {
+        case SEVERITY_LOW: return "LOW"
+        case SEVERITY_MEDIUM: return "MEDIUM"
+        case SEVERITY_CRITICAL: return "CRITICAL"
+        default: return "HIGH"
+        }
+    }
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
-        // Setup BLE Mesh Relaying
+        // Setup CoreBluetooth
         peripheralManager = CBPeripheralManager(delegate: self, queue: nil)
         centralManager = CBCentralManager(delegate: self, queue: nil)
 
-        // Listen for JS → native BLE bridge calls
+        // Setup notification observers for JS bridge calls
         let nc = NotificationCenter.default
-        nc.addObserver(self, selector: #selector(handleCheckStatus(_:)), name: NSNotification.Name("BleSosRelay_checkStatus"), object: nil)
-        nc.addObserver(self, selector: #selector(handleSetServerUrl(_:)), name: NSNotification.Name("BleSosRelay_setServerUrl"), object: nil)
-        nc.addObserver(self, selector: #selector(handleAdvertiseBLE(_:)), name: NSNotification.Name("BleSosRelay_advertiseSOS"), object: nil)
-        nc.addObserver(self, selector: #selector(handleAdvertiseBinaryBLE(_:)), name: NSNotification.Name("BleSosRelay_advertiseSOSBinary"), object: nil)
+        nc.addObserver(self, selector: #selector(handleStartMesh(_:)), name: NSNotification.Name("SosMesh_startMesh"), object: nil)
+        nc.addObserver(self, selector: #selector(handleStopMesh(_:)), name: NSNotification.Name("SosMesh_stopMesh"), object: nil)
+        nc.addObserver(self, selector: #selector(handleSendSOS(_:)), name: NSNotification.Name("SosMesh_sendSOS"), object: nil)
+        nc.addObserver(self, selector: #selector(handleGetStatus(_:)), name: NSNotification.Name("SosMesh_getStatus"), object: nil)
 
         return true
     }
 
-    @objc func handleCheckStatus(_ notification: Notification) {
-        guard let call = notification.userInfo?["call"] as? CAPPluginCall else { return }
-        let enabled = peripheralManager?.state == .poweredOn
-        let supported = peripheralManager != nil
-        call.resolve([
-            "enabled": enabled,
-            "supported": supported
-        ])
-    }
-
-    @objc func handleSetServerUrl(_ notification: Notification) {
-        if let url = notification.userInfo?["url"] as? String {
-            self.serverUrl = url
-            print("iOS BLE Relay Server URL updated: \(url)")
+    @objc func handleStartMesh(_ notification: Notification) {
+        startScanning()
+        if let data = activePacketData {
+            startAdvertising(data: data)
         }
     }
 
-    @objc func handleAdvertiseBLE(_ notification: Notification) {
-        if let packet = notification.userInfo?["packet"] as? String {
-            advertiseSOS(packet: packet)
-        }
+    @objc func handleStopMesh(_ notification: Notification) {
+        stopScanning()
+        stopAdvertising()
     }
 
-    @objc func handleAdvertiseBinaryBLE(_ notification: Notification) {
+    @objc func handleSendSOS(_ notification: Notification) {
         guard let touristIdStr = notification.userInfo?["touristId"] as? String,
               let lat = notification.userInfo?["latitude"] as? Double,
               let lng = notification.userInfo?["longitude"] as? Double,
               let battery = notification.userInfo?["battery"] as? Int,
               let touristId = UUID(uuidString: touristIdStr) else { return }
 
+        let sosIdStr = notification.userInfo?["sosId"] as? String
+        let sosId = (sosIdStr != nil && !sosIdStr!.isEmpty) ? UUID(uuidString: sosIdStr!)! : UUID()
+        let emergencyType = notification.userInfo?["emergencyType"] as? String ?? "GENERAL"
+        let severity = notification.userInfo?["severity"] as? String ?? "HIGH"
+
+        let timestamp = UInt32(Date().timeIntervalSince1970)
+        let batteryByte = UInt8(clamping: battery)
+        let typeCode = AppDelegate.getEmergencyTypeCode(type: emergencyType)
+        let severityCode = AppDelegate.getSeverityCode(severity: severity)
+        let hopCount: UInt8 = 0
+        let ttl: UInt8 = 3
+
+        let packedData = packSosMesh(
+            sosId: sosId, touristId: touristId, latitude: Float(lat), longitude: Float(lng),
+            timestamp: timestamp, battery: batteryByte, emergencyType: typeCode, severity: severityCode,
+            hopCount: hopCount, ttl: ttl
+        )
+
+        processedSosIds.insert(sosId)
+        activePacketData = packedData
+        meshCharacteristic?.value = packedData
+
+        startAdvertising(data: packedData)
+        startScanning()
+    }
+
+    @objc func handleGetStatus(_ notification: Notification) {
+        guard let call = notification.userInfo?["call"] as? CAPPluginCall else { return }
+        let enabled = peripheralManager?.state == .poweredOn
+        let status: [String: Any] = [
+            "isScanning": isScanning,
+            "isAdvertising": isAdvertising,
+            "bluetoothState": enabled ? "ON" : "OFF"
+        ]
+        call.resolve(status)
+    }
+
+    // Binary packer for iOS (49 bytes)
+    func packSosMesh(
+        sosId: UUID, touristId: UUID, latitude: Float, longitude: Float,
+        timestamp: UInt32, battery: UInt8, emergencyType: UInt8, severity: UInt8,
+        hopCount: UInt8, ttl: UInt8
+    ) -> Data {
         var data = Data()
-
-        // 16 bytes UUID
-        let uuid = touristId.uuid
+        
+        let sosUuid = sosId.uuid
         data.append(contentsOf: [
-            uuid.0, uuid.1, uuid.2, uuid.3, uuid.4, uuid.5, uuid.6, uuid.7,
-            uuid.8, uuid.9, uuid.10, uuid.11, uuid.12, uuid.13, uuid.14, uuid.15
+            sosUuid.0, sosUuid.1, sosUuid.2, sosUuid.3, sosUuid.4, sosUuid.5, sosUuid.6, sosUuid.7,
+            sosUuid.8, sosUuid.9, sosUuid.10, sosUuid.11, sosUuid.12, sosUuid.13, sosUuid.14, sosUuid.15
         ])
-
-        // 4 bytes Lat (Float32, Big-Endian)
-        var latFloat = Float32(lat).bitPattern.bigEndian
+        
+        let touristUuid = touristId.uuid
+        data.append(contentsOf: [
+            touristUuid.0, touristUuid.1, touristUuid.2, touristUuid.3, touristUuid.4, touristUuid.5, touristUuid.6, touristUuid.7,
+            touristUuid.8, touristUuid.9, touristUuid.10, touristUuid.11, touristUuid.12, touristUuid.13, touristUuid.14, touristUuid.15
+        ])
+        
+        var latFloat = latitude.bitPattern.bigEndian
         withUnsafeBytes(of: &latFloat) { data.append(contentsOf: $0) }
-
-        // 4 bytes Lng (Float32, Big-Endian)
-        var lngFloat = Float32(lng).bitPattern.bigEndian
+        
+        var lngFloat = longitude.bitPattern.bigEndian
         withUnsafeBytes(of: &lngFloat) { data.append(contentsOf: $0) }
+        
+        var ts = timestamp.bigEndian
+        withUnsafeBytes(of: &ts) { data.append(contentsOf: $0) }
+        
+        data.append(battery)
+        data.append(emergencyType)
+        data.append(severity)
+        data.append(hopCount)
+        data.append(ttl)
+        
+        return data
+    }
 
-        // 1 byte Battery
-        let batteryByte = Int8(battery)
-        data.append(UInt8(bitPattern: batteryByte))
-
-        // 4 bytes Timestamp (UInt32 seconds, Big-Endian)
-        var timestamp = UInt32(Date().timeIntervalSince1970).bigEndian
-        if let triggeredAtStr = notification.userInfo?["triggeredAt"] as? String {
-            let formatter = ISO8601DateFormatter()
-            if let date = formatter.date(from: triggeredAtStr) {
-                timestamp = UInt32(date.timeIntervalSince1970).bigEndian
-            }
+    struct SosMeshPacket {
+        var sosId: UUID
+        var touristId: UUID
+        var latitude: Float
+        var longitude: Float
+        var timestamp: UInt32
+        var battery: UInt8
+        var emergencyType: String
+        var severity: String
+        var hopCount: UInt8
+        var ttl: UInt8
+        
+        static func unpack(data: Data) -> SosMeshPacket? {
+            guard data.count >= 49 else { return nil }
+            
+            let sosUuidBytes = data.subdata(in: 0..<16)
+            let sosId = UUID(uuid: (
+                sosUuidBytes[0], sosUuidBytes[1], sosUuidBytes[2], sosUuidBytes[3],
+                sosUuidBytes[4], sosUuidBytes[5], sosUuidBytes[6], sosUuidBytes[7],
+                sosUuidBytes[8], sosUuidBytes[9], sosUuidBytes[10], sosUuidBytes[11],
+                sosUuidBytes[12], sosUuidBytes[13], sosUuidBytes[14], sosUuidBytes[15]
+            ))
+            
+            let touristUuidBytes = data.subdata(in: 16..<32)
+            let touristId = UUID(uuid: (
+                touristUuidBytes[0], touristUuidBytes[1], touristUuidBytes[2], touristUuidBytes[3],
+                touristUuidBytes[4], touristUuidBytes[5], touristUuidBytes[6], touristUuidBytes[7],
+                touristUuidBytes[8], touristUuidBytes[9], touristUuidBytes[10], touristUuidBytes[11],
+                touristUuidBytes[12], touristUuidBytes[13], touristUuidBytes[14], touristUuidBytes[15]
+            ))
+            
+            let latPattern = data.subdata(in: 32..<36).withUnsafeBytes { $0.load(as: UInt32.self) }.bigEndian
+            let latitude = Float(bitPattern: latPattern)
+            
+            let lngPattern = data.subdata(in: 36..<40).withUnsafeBytes { $0.load(as: UInt32.self) }.bigEndian
+            let longitude = Float(bitPattern: lngPattern)
+            
+            let tsPattern = data.subdata(in: 40..<44).withUnsafeBytes { $0.load(as: UInt32.self) }.bigEndian
+            let timestamp = tsPattern
+            
+            let battery = data[44]
+            let emergencyType = AppDelegate.getEmergencyTypeString(code: data[45])
+            let severity = AppDelegate.getSeverityString(code: data[46])
+            let hopCount = data[47]
+            let ttl = data[48]
+            
+            return SosMeshPacket(
+                sosId: sosId, touristId: touristId, latitude: latitude, longitude: longitude,
+                timestamp: timestamp, battery: battery, emergencyType: emergencyType, severity: severity,
+                hopCount: hopCount, ttl: ttl
+            )
         }
-        withUnsafeBytes(of: &timestamp) { data.append(contentsOf: $0) }
-
-        advertiseSOSBinary(data: data)
+        
+        func toJSONString() -> String {
+            let formatter = ISO8601DateFormatter()
+            let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
+            let triggeredAt = formatter.string(from: date)
+            
+            let dict: [String: Any] = [
+                "tourist_id": touristId.uuidString.lowercased(),
+                "latitude": latitude,
+                "longitude": longitude,
+                "battery_status": battery,
+                "triggered_at": triggeredAt,
+                "sos_id": sosId.uuidString.lowercased(),
+                "emergency_type": emergencyType,
+                "severity": severity,
+                "hop_count": hopCount,
+                "ttl": ttl
+            ]
+            
+            if let jsonData = try? JSONSerialization.data(withJSONObject: dict, options: []),
+               let jsonString = String(data: jsonData, encoding: .utf8) {
+                return jsonString
+            }
+            return "{}"
+        }
     }
 
     // MARK: - CBPeripheralManagerDelegate
@@ -106,7 +278,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
 
     func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
         if request.characteristic.uuid == characteristicUUID {
-            if let charValue = sosCharacteristic?.value {
+            if let charValue = meshCharacteristic?.value {
                 if request.offset > charValue.count {
                     peripheral.respond(to: request, withResult: .invalidOffset)
                     return
@@ -128,24 +300,17 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
         )
         let service = CBMutableService(type: serviceUUID, primary: true)
         service.characteristics = [char]
-        self.sosCharacteristic = char
+        self.meshCharacteristic = char
         peripheralManager?.add(service)
     }
 
-    func advertiseSOS(packet: String) {
-        guard let data = packet.data(using: .utf8) else { return }
-        advertiseSOSBinary(data: data)
-    }
-
-    func advertiseSOSBinary(data: Data) {
+    func startAdvertising(data: Data) {
         guard let pm = peripheralManager, pm.state == .poweredOn else { return }
         pm.stopAdvertising()
 
-        if let char = sosCharacteristic {
-            // Update the dynamic value so readers get the latest SOS
-            pm.updateValue(data, for: char, onSubscribedCentrals: nil)
-            // Also update the static value property for direct reads if possible
+        if let char = meshCharacteristic {
             char.value = data
+            pm.updateValue(data, for: char, onSubscribedCentrals: nil)
         }
 
         let advertisementData: [String: Any] = [
@@ -153,20 +318,39 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
         ]
         
         pm.startAdvertising(advertisementData)
-        print("iOS BLE SOS advertising started with \(data.count) bytes")
+        isAdvertising = true
+        print("iOS BLE SOS Mesh advertising started")
+    }
+
+    func stopAdvertising() {
+        peripheralManager?.stopAdvertising()
+        isAdvertising = false
+        print("iOS BLE SOS Mesh advertising stopped")
     }
 
     // MARK: - CBCentralManagerDelegate
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
-        if central.state == .poweredOn {
+        if central.state == .poweredOn && isScanning {
             central.scanForPeripherals(withServices: [serviceUUID], options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
-            print("iOS BLE SOS Scanning started")
+            print("iOS BLE SOS Mesh Scanning started")
         }
     }
 
+    func startScanning() {
+        isScanning = true
+        if centralManager?.state == .poweredOn {
+            centralManager?.scanForPeripherals(withServices: [serviceUUID], options: [CBCentralManagerScanOptionAllowDuplicatesKey: true])
+            print("iOS BLE SOS Mesh Scanning started")
+        }
+    }
+
+    func stopScanning() {
+        centralManager?.stopScan()
+        isScanning = false
+        print("iOS BLE SOS Mesh Scanning stopped")
+    }
+
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
-        // iOS doesn't always show Service Data in discovery for background peripherals.
-        // We connect to the peripheral to read the SOS characteristic.
         if !pendingPeripherals.contains(peripheral) {
             pendingPeripherals.insert(peripheral)
             centralManager?.connect(peripheral, options: nil)
@@ -200,70 +384,95 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard let data = characteristic.value else { return }
 
-        if data.count == 29 {
-            parseBinarySOS(data: data)
-        } else if let packet = String(data: data, encoding: .utf8), packet.contains("tourist_id") {
-            handleSOSPacket(packet)
+        if data.count == 49 {
+            handleIncomingMeshPacket(data: data)
         }
 
         centralManager?.cancelPeripheralConnection(peripheral)
     }
 
-    func parseBinarySOS(data: Data) {
-        if data.count < 24 { return }
+    func handleIncomingMeshPacket(data: Data) {
+        guard let packet = SosMeshPacket.unpack(data: data) else { return }
 
-        let uuidData = data.subdata(in: 0..<16)
-        let latData = data.subdata(in: 16..<20)
-        let lngData = data.subdata(in: 20..<24)
-        let battery = data.count > 24 ? Int(data[24]) : -1
+        if processedSosIds.contains(packet.sosId) { return }
+        processedSosIds.insert(packet.sosId)
 
-        var triggeredAt: String? = nil
-        if data.count >= 29 {
-            let tsData = data.subdata(in: 25..<29)
-            let timestamp = tsData.withUnsafeBytes { $0.load(as: UInt32.self) }.bigEndian
-            let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
-            let formatter = ISO8601DateFormatter()
-            triggeredAt = formatter.string(from: date)
-        }
+        print("Received SOS Mesh Packet! SOS ID: \(packet.sosId), Hops: \(packet.hopCount)")
 
-        let touristId = UUID(uuid: (
-            uuidData[0], uuidData[1], uuidData[2], uuidData[3],
-            uuidData[4], uuidData[5], uuidData[6], uuidData[7],
-            uuidData[8], uuidData[9], uuidData[10], uuidData[11],
-            uuidData[12], uuidData[13], uuidData[14], uuidData[15]
-        ))
+        // Notify JS layer via notification bridge
+        let notificationData: [String: Any] = [
+            "sosId": packet.sosId.uuidString,
+            "touristId": packet.touristId.uuidString,
+            "latitude": Double(packet.latitude),
+            "longitude": Double(packet.longitude),
+            "battery": Int(packet.battery),
+            "emergencyType": packet.emergencyType,
+            "severity": packet.severity,
+            "hopCount": Int(packet.hopCount),
+            "ttl": Int(packet.ttl)
+        ]
+        
+        NotificationCenter.default.post(
+            name: NSNotification.Name("SosMesh_onSOSReceived"),
+            object: nil,
+            userInfo: notificationData
+        )
 
-        let latPattern = latData.withUnsafeBytes { $0.load(as: UInt32.self) }.bigEndian
-        let lat = Float32(bitPattern: latPattern)
+        let jsonString = packet.toJSONString()
 
-        let lngPattern = lngData.withUnsafeBytes { $0.load(as: UInt32.self) }.bigEndian
-        let lng = Float32(bitPattern: lngPattern)
-
-        var jsonPacket = "{\"tourist_id\":\"\(touristId.uuidString.lowercased())\",\"latitude\":\(lat),\"longitude\":\(lng),\"battery_status\":\(battery)"
-        if let ts = triggeredAt {
-            jsonPacket += ",\"triggered_at\":\"\(ts)\"}"
-        } else {
-            jsonPacket += "}"
-        }
-        handleSOSPacket(jsonPacket)
-    }
-
-    func handleSOSPacket(_ packet: String) {
-        if processedSOSPackets.contains(packet) { return }
-        processedSOSPackets.insert(packet)
-        print("New SOS Packet received via iOS BLE: \(packet)")
-
-        relayToServer(packet: packet) { success in
-            if success {
-                print("SOS packet relayed to backend successfully.")
-            } else {
-                print("Relay failed. Re-advertising packet...")
-                self.advertiseSOS(packet: packet)
+        // Check internet and upload or relay
+        if NetworkReachability.isOnline() {
+            uploadRelayPacket(jsonString: jsonString) { success in
+                if success {
+                    print("Relayed SOS packet to backend successfully.")
+                    NotificationCenter.default.post(
+                        name: NSNotification.Name("SosMesh_onSOSDelivered"),
+                        object: nil,
+                        userInfo: ["sosId": packet.sosId.uuidString]
+                    )
+                } else {
+                    print("Relay failed. Queueing and starting BLE forwarding...")
+                    self.pendingUploads.insert(jsonString)
+                    self.forwardOfflinePacket(packet: packet)
+                }
             }
+        } else {
+            print("Offline. Forwarding SOS packet via BLE...")
+            self.pendingUploads.insert(jsonString)
+            self.forwardOfflinePacket(packet: packet)
         }
     }
 
-    func relayToServer(packet: String, completion: @escaping (Bool) -> Void) {
+    func forwardOfflinePacket(packet: SosMeshPacket) {
+        guard packet.ttl > 1 else {
+            print("TTL expired. Dropping packet.")
+            return
+        }
+
+        let newHopCount = packet.hopCount + 1
+        let newTtl = packet.ttl - 1
+        let typeCode = AppDelegate.getEmergencyTypeCode(type: packet.emergencyType)
+        let severityCode = AppDelegate.getSeverityCode(severity: packet.severity)
+
+        let relayedData = packSosMesh(
+            sosId: packet.sosId, touristId: packet.touristId, latitude: packet.latitude, longitude: packet.longitude,
+            timestamp: packet.timestamp, battery: packet.battery, emergencyType: typeCode, severity: severityCode,
+            hopCount: newHopCount, ttl: newTtl
+        )
+
+        activePacketData = relayedData
+        meshCharacteristic?.value = relayedData
+
+        startAdvertising(data: relayedData)
+
+        NotificationCenter.default.post(
+            name: NSNotification.Name("SosMesh_onSOSRelayed"),
+            object: nil,
+            userInfo: ["sosId": packet.sosId.uuidString, "hopCount": Int(newHopCount)]
+        )
+    }
+
+    func uploadRelayPacket(jsonString: String, completion: @escaping (Bool) -> Void) {
         guard let url = URL(string: serverUrl) else {
             completion(false)
             return
@@ -271,7 +480,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        let json: [String: Any] = ["payload": packet]
+        let json: [String: Any] = ["payload": jsonString]
         request.httpBody = try? JSONSerialization.data(withJSONObject: json)
 
         let task = URLSession.shared.dataTask(with: request) { _, response, _ in
@@ -284,26 +493,6 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
         task.resume()
     }
 
-    func applicationWillResignActive(_ application: UIApplication) {
-        // Sent when the application is about to move from active to inactive state.
-    }
-
-    func applicationDidEnterBackground(_ application: UIApplication) {
-        // Use this method to release shared resources, save user data, invalidate timers.
-    }
-
-    func applicationWillEnterForeground(_ application: UIApplication) {
-        // Called as part of the transition from the background to the active state.
-    }
-
-    func applicationDidBecomeActive(_ application: UIApplication) {
-        // Restart any tasks that were paused while the application was inactive.
-    }
-
-    func applicationWillTerminate(_ application: UIApplication) {
-        // Called when the application is about to terminate.
-    }
-
     func application(_ app: UIApplication, open url: URL, options: [UIApplication.OpenURLOptionsKey: Any] = [:]) -> Bool {
         return ApplicationDelegateProxy.shared.application(app, open: url, options: options)
     }
@@ -311,5 +500,13 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
     func application(_ application: UIApplication, continue userActivity: NSUserActivity, restorationHandler: @escaping ([UIUserActivityRestoring]?) -> Void) -> Bool {
         return ApplicationDelegateProxy.shared.application(application, continue: userActivity, restorationHandler: restorationHandler)
     }
+}
 
+// Simple Network reachability check helper for iOS
+struct NetworkReachability {
+    static func isOnline() -> Bool {
+        // Basic online check; actual Capacitor client does online listener check
+        // Return true as a fallback so URLSession tries to execute
+        return true
+    }
 }

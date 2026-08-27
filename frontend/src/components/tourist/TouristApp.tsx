@@ -102,21 +102,10 @@ export default function TouristApp({
     return () => socket?.close();
   }, [isAuthenticated, user?.id]);
 
-  // ── Offline SOS queue auto-sync ─────────────────────────────────────────
+  // ── Offline SOS queue auto-sync & BLE SosMesh Setup ────────────────────
   useEffect(() => {
     const trySync = () => { syncQueuedSOS().catch(() => {}); };
     
-    // Set the relay server URL for the native BLE layer
-    try {
-      const apiUrl = `${getApiBaseUrl()}/sos/relay`;
-      const blePlugin = (window as any).Capacitor?.Plugins?.BleSosRelay;
-      if (blePlugin) {
-        blePlugin.setServerUrl?.({ url: apiUrl });
-      }
-    } catch (e) {
-      console.warn("Could not set BLE relay server URL:", e);
-    }
-
     // Fallback standard online check
     if (navigator.onLine) trySync();
 
@@ -139,20 +128,65 @@ export default function TouristApp({
 
     initNetworkSync();
 
-    // Check Bluetooth Status periodically
+    // Check Bluetooth Status periodically via the new SosMesh plugin
     const checkBT = async () => {
       try {
-        const status = await (window as any).Capacitor?.Plugins?.BleSosRelay?.checkStatus();
-        if (status) setBtStatus(status);
+        const meshPlugin = (window as any).Capacitor?.Plugins?.SosMesh;
+        if (meshPlugin) {
+          const status = await meshPlugin.getMeshStatus();
+          setBtStatus({
+            enabled: status.bluetoothState === "ON",
+            supported: status.bluetoothState !== "UNAVAILABLE"
+          });
+        }
       } catch { /* ignore */ }
     };
     checkBT();
     const btInterval = setInterval(checkBT, 5000);
 
+    // Initialize SosMesh listeners
+    let receivedListener: any = null;
+    let relayedListener: any = null;
+    let deliveredListener: any = null;
+
+    const setupSosMesh = async () => {
+      try {
+        const meshPlugin = (window as any).Capacitor?.Plugins?.SosMesh;
+        if (meshPlugin) {
+          await meshPlugin.startMesh().catch(() => {});
+          
+          receivedListener = await meshPlugin.addListener('onSOSReceived', (info: any) => {
+            console.log("SOS Mesh Packet Received in JS:", info);
+          });
+
+          relayedListener = await meshPlugin.addListener('onSOSRelayed', (info: any) => {
+            console.log("SOS Mesh Packet Relayed in JS:", info);
+          });
+
+          deliveredListener = await meshPlugin.addListener('onSOSDelivered', async (info: any) => {
+            console.log("SOS Mesh Packet Delivered in JS:", info);
+            if (info.sosId) {
+              await updateSOSRecordStatus(info.sosId, "SYNCED").catch(() => {});
+            }
+          });
+        }
+      } catch (e) {
+        console.warn("Could not setup SosMesh plugin listeners:", e);
+      }
+    };
+
+    setupSosMesh();
+
     return () => {
       if (nativeListener) nativeListener.remove();
       window.removeEventListener('online', trySync);
       clearInterval(btInterval);
+      if (receivedListener) receivedListener.remove();
+      if (relayedListener) relayedListener.remove();
+      if (deliveredListener) deliveredListener.remove();
+      
+      // Stop mesh on app unmount to save battery
+      (window as any).Capacitor?.Plugins?.SosMesh?.stopMesh().catch(() => {});
     };
   }, []);
 
@@ -239,73 +273,49 @@ export default function TouristApp({
 
     // Broadcast SOS over BLE mesh so nearby devices can relay it to the
     // server even if this device has no internet. The native Android/iOS
-    // layer (MainActivity.java / AppDelegate.swift) exposes advertiseSOS
-    // via the Capacitor bridge. We call it fire-and-forget — failure here
-    // must never block the main SOS submission flow.
+    // layer exposes sendSOS via the new SosMesh Capacitor plugin.
     try {
-      const blePlugin = (window as any).Capacitor?.Plugins?.BleSosRelay;
-      if (blePlugin) {
-        // Try the new binary format first (fits in legacy BLE 31-byte limit)
-        if (blePlugin.advertiseSOSBinary) {
-          blePlugin.advertiseSOSBinary({
-            touristId: user.id,
-            latitude: loc.latitude,
-            longitude: loc.longitude,
-            battery: batteryLevel,
-            triggeredAt: localRecord.triggered_at
-          }).catch(() => {});
-        } else {
-          // Fallback to legacy JSON format
-          const blePacket = JSON.stringify({
-            tourist_id: user.id,
-            latitude: loc.latitude,
-            longitude: loc.longitude,
-            battery_status: batteryLevel,
-            triggered_at: new Date().toISOString(),
-          });
-          blePlugin.advertiseSOS?.({ packet: blePacket }).catch(() => {});
-        }
+      const meshPlugin = (window as any).Capacitor?.Plugins?.SosMesh;
+      if (meshPlugin) {
+        await meshPlugin.sendSOS({
+          sosId: localRecord.local_sos_id,
+          touristId: user.id,
+          latitude: loc.latitude,
+          longitude: loc.longitude,
+          battery: batteryLevel ?? 100,
+          emergencyType: 'GENERAL',
+          severity: 'HIGH'
+        });
       }
-    } catch { /* Ignore any BLE advertising failure */ }
+    } catch (e) {
+      console.warn("Could not initiate BLE mesh SOS relay:", e);
+    }
 
     const locStr = `${loc.latitude?.toFixed(4) ?? '—'}, ${loc.longitude?.toFixed(4) ?? '—'}`;
 
     if (!navigator.onLine) {
-      onTriggerSos(user.full_name || 'Tourist', `${locStr} (Queued Offline)`, user.id, user.phone_number || undefined);
-      return "No connection — your SOS is saved and will send automatically the moment you're back online.";
+      onTriggerSos(user.full_name || 'Tourist', `${locStr} (Relaying BLE...)`, user.id, user.phone_number || undefined);
+      return "No internet connection — your SOS is being relayed through nearby devices via Bluetooth Mesh.";
     }
 
     try {
       const res = await submitSOSOnline(localRecord);
       // Mark this record SYNCED immediately after a successful direct send.
-      // Without this, the record stays flagged QUEUED_OFFLINE in IndexedDB
-      // forever, and the offline-sync effect (which re-runs on every
-      // 'online' event / app mount — very common with flaky signal) would
-      // find it still "unsynced" and resubmit it as a brand-new SOS/incident,
-      // which is what was causing duplicate SOS alerts to keep arriving on
-      // the authority dashboard for a single real trigger.
       if (localRecord.local_sos_id) {
         await updateSOSRecordStatus(localRecord.local_sos_id, "SYNCED", {
           server_sos_id: res.sos_id,
           server_incident_id: res.incident_id,
-        }).catch(() => { /* best-effort — don't fail the SOS flow over this */ });
+        }).catch(() => { /* best-effort */ });
       }
       if (res.is_duplicate) {
-        // Backend rate-limits SOS to one per tourist per 10 minutes (see
-        // routers/sos.py) and returned the existing recent SOS instead of
-        // creating a new one — don't add another local incident marker on
-        // top of it, or this client-side list would still show duplicates
-        // even though nothing new was actually raised on the backend.
         return `You already sent an SOS a few minutes ago — authorities have already been alerted and are on it. Reference: ${res.incident_id || res.sos_id || 'pending'}.`;
       }
       onTriggerSos(user.full_name || 'Tourist', locStr, user.id, user.phone_number || undefined);
-      return `Authorities have been alerted with your location. Reference: ${res.incident_id || res.sos_id || 'pending'}.`;
+      return `Emergency SOS Alert Sent! Incident ID: ${res.incident_id}`;
     } catch (err: any) {
-      if (err instanceof ApiError && [400, 401, 404].includes(err.status)) {
-        throw new Error(err.message || 'Your session was rejected by the server. Please sign in again.');
-      }
-      onTriggerSos(user.full_name || 'Tourist', `${locStr} (Queued Offline)`, user.id, user.phone_number || undefined);
-      return "Couldn't reach the server — your SOS is queued and will send automatically once you're back online.";
+      // Backend online submission failed, but BLE advertising was already initiated above.
+      onTriggerSos(user.full_name || 'Tourist', `${locStr} (Relaying BLE...)`, user.id, user.phone_number || undefined);
+      return "Server unreachable — your SOS is being relayed through nearby devices via Bluetooth Mesh.";
     }
   }, [isAuthenticated, user, onTriggerSos]);
 
