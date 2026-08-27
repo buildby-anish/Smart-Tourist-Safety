@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Radio, ChevronLeft, ChevronRight, Clock, AlertTriangle, X, Send, CheckSquare, Square, Trash2 } from 'lucide-react';
+import { Radio, ChevronLeft, ChevronRight, Clock, AlertTriangle, X, Send, CheckSquare, Square, CheckCircle2 } from 'lucide-react';
 import { Language, SOSIncident, AlertSeverity, BroadcastAlert } from '../../types';
 import { i18n } from '../../data/i18n';
 
@@ -8,7 +8,7 @@ interface Props {
   darkMode: boolean;
   incidents: SOSIncident[];
   onResolveIncident: (incidentId: string) => void;
-  onDeleteIncidents: (incidentIds: string[]) => void;
+  onBulkResolveIncidents: (incidentIds: string[]) => void;
   onSendBroadcast: (newAlert: Omit<BroadcastAlert, 'id' | 'timestamp' | 'deliveredCount' | 'status'>) => void;
   onIncidentClick: (incident: SOSIncident) => void;
 }
@@ -20,7 +20,7 @@ const SEVERITY_STYLE: Record<AlertSeverity, string> = {
 };
 
 export default function AuthorityRightRail({
-  language, darkMode: dm, incidents, onResolveIncident, onDeleteIncidents, onSendBroadcast, onIncidentClick,
+  language, darkMode: dm, incidents, onResolveIncident, onBulkResolveIncidents, onSendBroadcast, onIncidentClick,
 }: Props) {
   const t = i18n[language];
   const [collapsed, setCollapsed] = useState(false);
@@ -119,17 +119,17 @@ export default function AuthorityRightRail({
           <button
             onClick={() => {
               if (selectedIds.size === 0) return;
-              if (!window.confirm(`Delete ${selectedIds.size} selected SOS incident${selectedIds.size > 1 ? 's' : ''}? This cannot be undone.`)) return;
-              onDeleteIncidents(Array.from(selectedIds));
+              if (!window.confirm(`Mark ${selectedIds.size} selected SOS incident${selectedIds.size > 1 ? 's' : ''} as resolved?`)) return;
+              onBulkResolveIncidents(Array.from(selectedIds));
               setSelectedIds(new Set());
               setSelectMode(false);
             }}
             disabled={selectedIds.size === 0}
             className="flex items-center gap-1 h-7 px-2.5 rounded-lg text-[10px] font-bold text-white transition-opacity disabled:opacity-40"
-            style={{ background: '#dc2626' }}
+            style={{ background: '#138808' }}
           >
-            <Trash2 size={12} />
-            Delete{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
+            <CheckCircle2 size={12} />
+            Resolve{selectedIds.size > 0 ? ` (${selectedIds.size})` : ''}
           </button>
         </div>
       )}

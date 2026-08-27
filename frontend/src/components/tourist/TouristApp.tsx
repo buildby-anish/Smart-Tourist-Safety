@@ -228,6 +228,14 @@ export default function TouristApp({
           server_incident_id: res.incident_id,
         }).catch(() => { /* best-effort — don't fail the SOS flow over this */ });
       }
+      if (res.is_duplicate) {
+        // Backend rate-limits SOS to one per tourist per 10 minutes (see
+        // routers/sos.py) and returned the existing recent SOS instead of
+        // creating a new one — don't add another local incident marker on
+        // top of it, or this client-side list would still show duplicates
+        // even though nothing new was actually raised on the backend.
+        return `You already sent an SOS a few minutes ago — authorities have already been alerted and are on it. Reference: ${res.incident_id || res.sos_id || 'pending'}.`;
+      }
       onTriggerSos(user.full_name || 'Tourist', locStr, user.id, user.phone_number || undefined);
       return `Authorities have been alerted with your location. Reference: ${res.incident_id || res.sos_id || 'pending'}.`;
     } catch (err: any) {

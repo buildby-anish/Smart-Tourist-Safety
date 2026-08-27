@@ -34,7 +34,7 @@ interface Props {
 
   onDispatchUnit: (incidentId: string, unitId: string) => void;
   onResolveIncident: (incidentId: string) => void;
-  onDeleteIncidents: (incidentIds: string[]) => void;
+  onBulkResolveIncidents: (incidentIds: string[]) => void;
   onMarkTouristSafe: (touristId: string) => void;
   onSendBroadcast: (newAlert: Omit<BroadcastAlert, 'id' | 'timestamp' | 'deliveredCount' | 'status'>) => void;
 }
@@ -58,7 +58,7 @@ function clustersToZones(clusters: AnomalyCluster[]): GeoFenceZone[] {
 export default function AuthorityMapApp({
   language, onLanguageChange, darkMode: dm, onToggleDarkMode, onLogout, officerName,
   tourists, incidents, units, stations, hospitals, clusters, auditLogs, liveLocations, geofences, onGeofenceCreated,
-  onDispatchUnit, onResolveIncident, onDeleteIncidents, onMarkTouristSafe, onSendBroadcast,
+  onDispatchUnit, onResolveIncident, onBulkResolveIncidents, onMarkTouristSafe, onSendBroadcast,
 }: Props) {
   const convertedGeofenceZones = useMemo<GeoFenceZone[]>(() => {
     return geofences.map((z) => {
@@ -360,7 +360,7 @@ export default function AuthorityMapApp({
       <AuthorityRightRail
         language={language} darkMode={dm} incidents={incidents}
         onResolveIncident={onResolveIncident}
-        onDeleteIncidents={onDeleteIncidents}
+        onBulkResolveIncidents={onBulkResolveIncidents}
         onSendBroadcast={onSendBroadcast}
         onIncidentClick={(inc) => { flyTo(inc.location.lat, inc.location.lng); setManualTakeoverIncident(inc); }}
       />

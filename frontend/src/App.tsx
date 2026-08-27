@@ -52,8 +52,7 @@ import {
   getLiveTouristLocations,
   listAuthorityTourists,
   broadcastStateAlert,
-  listGeofences,
-  deleteIncidents
+  listGeofences
 } from './lib/api';
 import LoginModal from './components/tourist/LoginModal';
 
@@ -638,30 +637,46 @@ export default function App() {
     );
   };
 
-  // Bulk-delete incidents — powers the authority dashboard's "select all
-  // SOS + delete" action. Removes them from local state immediately, then
-  // persists the delete for every incident that has a real backend id.
-  // Other connected authority sessions pick up the delete via the
-  // "incident.deleted" realtime event handled in the socket effect below,
-  // rather than only on their next manual refresh — the other half of
-  // keeping tourist/authority state in sync both ways.
-  const handleDeleteIncidents = async (incidentIds: string[]) => {
+  // Bulk-resolve incidents — powers the authority dashboard's "select all
+  // SOS + resolve" action (previously bulk-delete; switched to resolve per
+  // request, since deleting was also erasing the record of what happened —
+  // resolving keeps the incident but clears it off the active queue, same
+  // as the single-incident Resolve button). Updates local state immediately
+  // for every selected incident, then persists each via the same
+  // updateIncidentStatus call the single Resolve button already uses —
+  // that endpoint already broadcasts "incident.updated" per incident, so
+  // other connected authority sessions pick up every resolution too.
+  const handleBulkResolveIncidents = async (incidentIds: string[]) => {
     const idSet = new Set(incidentIds);
     const targets = incidents.filter((i) => idSet.has(i.id));
+
+    setIncidents((prev) =>
+      prev.map((i) => (idSet.has(i.id) ? { ...i, status: 'Resolved' } : i))
+    );
+    setTourists((prev) =>
+      prev.map((t) =>
+        targets.some((i) => i.touristId === t.id) ? { ...t, safetyStatus: 'Safe' } : t
+      )
+    );
+
     const backendIds = targets.map((i) => i.backendIncidentId).filter(Boolean) as string[];
-
-    setIncidents((prev) => prev.filter((i) => !idSet.has(i.id)));
-
-    if (backendIds.length === 0) return;
-    try {
-      await deleteIncidents(backendIds);
-    } catch (err) {
-      console.warn('Failed to delete incidents on backend:', err);
-      // Re-sync with the backend rather than leaving local/remote state
-      // silently diverged if the bulk delete failed server-side.
-      const fresh = await refreshTouristsFromBackend();
-      await refreshIncidentsFromBackend(fresh);
+    if (backendIds.length > 0) {
+      const results = await Promise.allSettled(
+        backendIds.map((id) => updateIncidentStatus(id, { status: 'RESOLVED' }))
+      );
+      if (results.some((r) => r.status === 'rejected')) {
+        console.warn('Some incidents failed to resolve on the backend — re-syncing.');
+        const fresh = await refreshTouristsFromBackend();
+        await refreshIncidentsFromBackend(fresh);
+      }
     }
+
+    handleLogAudit(
+      'TICKET_STATUS_CHANGE',
+      incidentIds.join(', '),
+      'Bulk Incident Resolution',
+      `Marked ${incidentIds.length} SOS incident(s) as Resolved.`
+    );
   };
 
   // Mark tourist safe from the Tourist Tracking module — resolves that
@@ -866,7 +881,7 @@ export default function App() {
           onGeofenceCreated={refreshGeofencesFromBackend}
           onDispatchUnit={handleDispatchUnit}
           onResolveIncident={handleResolveIncident}
-          onDeleteIncidents={handleDeleteIncidents}
+          onBulkResolveIncidents={handleBulkResolveIncidents}
           onMarkTouristSafe={handleMarkTouristSafe}
           onSendBroadcast={handleSendBroadcast}
         />

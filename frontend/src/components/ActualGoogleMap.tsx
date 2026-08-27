@@ -1056,55 +1056,42 @@ export const ActualGoogleMap: React.FC<ActualGoogleMapProps> = ({
 
       {/* Geofence Drawing Overlay — anchored top-left (below the authority
           header) rather than top-right, so it never sits on top of the
-          header's logout button in the opposite corner. */}
-      {enableDrawing && (
+          header's logout button in the opposite corner. Only rendered while
+          actively drawing now — the "Draw Circle Zone" / "Draw Polygon
+          Zone" start buttons that used to sit here permanently were removed
+          since they're redundant with the same actions in the bottom-left
+          quick-action bar (AuthorityBottomBar). */}
+      {enableDrawing && drawingMode && (
         <div
           className="absolute left-4 z-[40] pointer-events-auto flex flex-col gap-2"
           style={{ top: 'calc(env(safe-area-inset-top, 0px) + 68px)' }}
         >
-          {drawingMode ? (
-            <div className="bg-slate-900/95 backdrop-blur-md p-3 rounded-2xl border border-slate-700 shadow-xl text-white text-xs max-w-[240px] space-y-2">
-              <div className="font-bold text-orange-400 uppercase tracking-wider text-[10px]">
-                Drawing Geofence ({drawingMode})
-              </div>
-              <p className="opacity-80 text-[10px]">
-                {drawingMode === 'circle'
-                  ? 'Click anywhere on the map to set the center of the danger circle.'
-                  : 'Click on the map to place vertices.'}
-              </p>
-              <div className="flex gap-2">
-                {drawingMode === 'polygon' && drawPoints.length >= 3 && (
-                  <button
-                    onClick={handleFinishPolygon}
-                    className="flex-1 bg-emerald-600 hover:bg-emerald-500 py-1 rounded-lg font-bold text-white transition-transform active:scale-95 text-[10px]"
-                  >
-                    Finish
-                  </button>
-                )}
+          <div className="bg-slate-900/95 backdrop-blur-md p-3 rounded-2xl border border-slate-700 shadow-xl text-white text-xs max-w-[240px] space-y-2">
+            <div className="font-bold text-orange-400 uppercase tracking-wider text-[10px]">
+              Drawing Geofence ({drawingMode})
+            </div>
+            <p className="opacity-80 text-[10px]">
+              {drawingMode === 'circle'
+                ? 'Click anywhere on the map to set the center of the danger circle.'
+                : 'Click on the map to place vertices.'}
+            </p>
+            <div className="flex gap-2">
+              {drawingMode === 'polygon' && drawPoints.length >= 3 && (
                 <button
-                  onClick={handleCancelDrawing}
-                  className="flex-1 bg-red-600 hover:bg-red-500 py-1 rounded-lg font-bold text-white transition-transform active:scale-95 text-[10px]"
+                  onClick={handleFinishPolygon}
+                  className="flex-1 bg-emerald-600 hover:bg-emerald-500 py-1 rounded-lg font-bold text-white transition-transform active:scale-95 text-[10px]"
                 >
-                  Cancel
+                  Finish
                 </button>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-slate-900/95 backdrop-blur-md p-1.5 rounded-2xl border border-slate-700 shadow-xl flex gap-1.5">
+              )}
               <button
-                onClick={() => startDrawing('circle')}
-                className="bg-orange-500 hover:bg-orange-400 text-white font-bold text-[9px] px-2.5 py-1.5 rounded-xl transition-transform active:scale-95 flex items-center gap-1 cursor-pointer"
+                onClick={handleCancelDrawing}
+                className="flex-1 bg-red-600 hover:bg-red-500 py-1 rounded-lg font-bold text-white transition-transform active:scale-95 text-[10px]"
               >
-                🔴 Draw Circle Zone
-              </button>
-              <button
-                onClick={() => startDrawing('polygon')}
-                className="bg-orange-500 hover:bg-orange-400 text-white font-bold text-[9px] px-2.5 py-1.5 rounded-xl transition-transform active:scale-95 flex items-center gap-1 cursor-pointer"
-              >
-                ⬡ Draw Polygon Zone
+                Cancel
               </button>
             </div>
-          )}
+          </div>
         </div>
       )}
 
