@@ -3,6 +3,7 @@ import logging
 import secrets
 import random
 import re
+import time
 from datetime import datetime, timedelta, timezone
 import json
 import requests
@@ -38,6 +39,13 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 _in_memory_auth_store: dict[UUID, dict] = {}
 _in_memory_session_store: dict[str, dict] = {}
 _in_memory_refresh_store: dict[str, str] = {}  # refresh_token -> access_token, offline mode only
+
+# In-memory caches to prevent connection pool exhaustion and Supabase network blocks under heavy load.
+_session_cache = {}  # token -> (expiry_time, SessionResponse)
+_SESSION_CACHE_TTL = 10  # Cache session verification for 10 seconds (adequate for telemetry/pings)
+_jwks_cache = None   # Cached JWKS response dictionary
+_jwks_cache_expiry = 0  # Timestamp when JWKS cache expires
+_JWKS_CACHE_TTL = 3600  # Cache JWKS keys for 1 hour since they change very infrequently
 
 # --- OTP store/helpers ---
 # In-memory only: DATABASE.md does not define an OTP table, and OTPs are
@@ -167,6 +175,15 @@ def resolve_session(token: str | None) -> SessionResponse:
             headers={"WWW-Authenticate": "Bearer"},
         )
 
+    # Check session cache to throttle database queries/JWKS network requests
+    now_ts = time.time()
+    if token in _session_cache:
+        cache_exp, cached_res = _session_cache[token]
+        if now_ts < cache_exp:
+            return cached_res
+        else:
+            del _session_cache[token]
+
     # 1. Fallback / Mock Mode
     if not is_db_active():
         session_data = _in_memory_session_store.get(token)
@@ -176,7 +193,9 @@ def resolve_session(token: str | None) -> SessionResponse:
                 detail="Invalid or expired session token",
                 headers={"WWW-Authenticate": "Bearer"},
             )
-        return SessionResponse(**session_data)
+        session_resp = SessionResponse(**session_data)
+        _session_cache[token] = (time.time() + _SESSION_CACHE_TTL, session_resp)
+        return session_resp
 
     # 2. Database Mode: JWT Session Decoding
     try:
@@ -191,21 +210,26 @@ def resolve_session(token: str | None) -> SessionResponse:
         # MalformedFraming" when an EC-signed (ES256) token fell through to
         # the HS256/shared-secret branch below.
         if alg in ("RS256", "ES256", "PS256"):
-            if not Config.SUPABASE_URL:
-                logger.error(f"SUPABASE_URL is not configured; cannot fetch JWKS keys for {alg}.")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Authentication is not correctly configured on the server.",
-                )
-            jwks_url = f"{Config.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
-            resp = requests.get(jwks_url, timeout=10)
-            if resp.status_code != 200:
-                logger.error(f"Failed to fetch JWKS from {jwks_url}: status={resp.status_code}")
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Authentication server could not be reached.",
-                )
-            jwks = resp.json()
+            global _jwks_cache, _jwks_cache_expiry
+            now_ts = time.time()
+            if _jwks_cache is None or now_ts >= _jwks_cache_expiry:
+                if not Config.SUPABASE_URL:
+                    logger.error(f"SUPABASE_URL is not configured; cannot fetch JWKS keys for {alg}.")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Authentication is not correctly configured on the server.",
+                    )
+                jwks_url = f"{Config.SUPABASE_URL.rstrip('/')}/auth/v1/.well-known/jwks.json"
+                resp = requests.get(jwks_url, timeout=10)
+                if resp.status_code != 200:
+                    logger.error(f"Failed to fetch JWKS from {jwks_url}: status={resp.status_code}")
+                    raise HTTPException(
+                        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                        detail="Authentication server could not be reached.",
+                    )
+                _jwks_cache = resp.json()
+                _jwks_cache_expiry = now_ts + _JWKS_CACHE_TTL
+            jwks = _jwks_cache
 
             # Find the key matching the token's kid
             kid = header.get("kid")
@@ -342,7 +366,7 @@ def resolve_session(token: str | None) -> SessionResponse:
                 )
             
             user_type = "tourist" if row[2] is not None else "authority"
-            return SessionResponse(
+            session_resp = SessionResponse(
                 auth_id=row[0],
                 auth_user_id=row[1],
                 username=row[4],
@@ -352,6 +376,8 @@ def resolve_session(token: str | None) -> SessionResponse:
                 mfa_enabled=row[5],
                 last_login_at=row[6],
             )
+            _session_cache[token] = (time.time() + _SESSION_CACHE_TTL, session_resp)
+            return session_resp
             
     except jwt.PyJWTError as jwt_err:
         logger.warning(f"JWT decode error: {jwt_err}")
