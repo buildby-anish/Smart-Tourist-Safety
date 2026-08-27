@@ -200,12 +200,10 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
         guard let data = characteristic.value else { return }
 
-        // Try to parse as JSON first
-        if let packet = String(data: data, encoding: .utf8), packet.contains("tourist_id") {
-            handleSOSPacket(packet)
-        } else if data.count >= 24 {
-            // Try to parse as Binary
+        if data.count == 29 {
             parseBinarySOS(data: data)
+        } else if let packet = String(data: data, encoding: .utf8), packet.contains("tourist_id") {
+            handleSOSPacket(packet)
         }
 
         centralManager?.cancelPeripheralConnection(peripheral)

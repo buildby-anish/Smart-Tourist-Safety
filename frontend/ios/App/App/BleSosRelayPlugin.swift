@@ -41,20 +41,20 @@ public class BleSosRelayPlugin: CAPPlugin {
         let touristId = call.getString("touristId") ?? ""
         let lat = call.getDouble("latitude") ?? 0.0
         let lng = call.getDouble("longitude") ?? 0.0
-        let battery = call.getInt("battery") ?? -1
-
-        if !touristId.isEmpty {
-            NotificationCenter.default.post(
-                name: NSNotification.Name("BleSosRelay_advertiseSOSBinary"),
-                object: nil,
-                userInfo: [
-                    "touristId": touristId,
-                    "latitude": lat,
-                    "longitude": lng,
-                    "battery": battery
-                ]
-            )
-        }
+        let battery = call.getInt("battery") ?? 100
+        let triggeredAt = call.getString("triggeredAt") ?? ""
+        
+        NotificationCenter.default.post(
+            name: NSNotification.Name("BleSosRelay_advertiseSOSBinary"),
+            object: nil,
+            userInfo: [
+                "touristId": touristId,
+                "latitude": lat,
+                "longitude": lng,
+                "battery": battery,
+                "triggeredAt": triggeredAt
+            ]
+        )
         call.resolve()
     }
 }

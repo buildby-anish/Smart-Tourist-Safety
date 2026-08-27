@@ -295,31 +295,30 @@ public class MainActivity extends BridgeActivity {
             
             // 1. Try 16-bit Service Data (New Compact Binary format)
             byte[] serviceData16 = result.getScanRecord().getServiceData(new ParcelUuid(SERVICE_UUID_16));
-            if (serviceData16 != null && serviceData16.length >= 24) {
+            if (serviceData16 != null && serviceData16.length == 29) {
                 parseBinaryPayload(serviceData16);
                 return;
             }
 
             // 1b. Try Legacy Service Data (128-bit UUID)
             byte[] serviceData = result.getScanRecord().getServiceData(new ParcelUuid(SERVICE_UUID));
-            if (serviceData != null && serviceData.length >= 24) {
-                parseBinaryPayload(serviceData);
-                return;
+            if (serviceData != null) {
+                if (serviceData.length == 29) {
+                    parseBinaryPayload(serviceData);
+                    return;
+                } else {
+                    String packet = new String(serviceData, StandardCharsets.UTF_8);
+                    if (packet.contains("tourist_id")) {
+                        handleSOSPacket(packet);
+                        return;
+                    }
+                }
             }
 
             // 2. Try Binary Format (Manufacturer Data)
             byte[] manufacturerData = result.getScanRecord().getManufacturerSpecificData(MANUFACTURER_ID);
-            if (manufacturerData != null && manufacturerData.length >= 24) {
+            if (manufacturerData != null && manufacturerData.length == 29) {
                 parseBinaryPayload(manufacturerData);
-                return;
-            }
-
-            // 3. Fallback: Legacy JSON (Service Data)
-            if (serviceData != null) {
-                String packet = new String(serviceData, StandardCharsets.UTF_8);
-                if (packet.contains("tourist_id")) {
-                    handleSOSPacket(packet);
-                }
                 return;
             }
 
@@ -361,11 +360,13 @@ public class MainActivity extends BridgeActivity {
             if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS && characteristic.getUuid().equals(CHARACTERISTIC_UUID)) {
                 byte[] data = characteristic.getValue();
                 if (data != null) {
-                    if (data.length >= 24) {
+                    if (data.length == 29) {
                         parseBinaryPayload(data);
                     } else {
                         String packet = new String(data, StandardCharsets.UTF_8);
-                        handleSOSPacket(packet);
+                        if (packet.contains("tourist_id")) {
+                            handleSOSPacket(packet);
+                        }
                     }
                 }
             }
