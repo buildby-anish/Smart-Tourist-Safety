@@ -3,51 +3,111 @@ import Capacitor
 import CoreBluetooth
 
 @UIApplicationMain
-class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelegate, CBCentralManagerDelegate {
+class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelegate, CBCentralManagerDelegate, CBPeripheralDelegate {
 
     var window: UIWindow?
     var peripheralManager: CBPeripheralManager?
     var centralManager: CBCentralManager?
     var processedSOSPackets = Set<String>()
     let serviceUUID = CBUUID(string: "505B9110-3FA1-4E6A-913A-C4345B080001")
+    let characteristicUUID = CBUUID(string: "505B9110-3FA1-4E6A-913A-C4345B080002")
+
+    var sosCharacteristic: CBMutableCharacteristic?
+    var serverUrl = "https://smart-tourist-safety-production.up.railway.app/api/v1/sos/relay"
+
+    var pendingPeripherals = Set<CBPeripheral>()
 
     func application(_ application: UIApplication, didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]?) -> Bool {
         // Setup BLE Mesh Relaying
         peripheralManager = CBPeripheralManager(delegate: self, queue: nil)
         centralManager = CBCentralManager(delegate: self, queue: nil)
-        // Listen for JS → native BLE advertise bridge calls
-        NotificationCenter.default.addObserver(
-            self,
-            selector: #selector(handleAdvertiseBLE(_:)),
-            name: NSNotification.Name("BleSosRelay_advertiseSOS"),
-            object: nil
-        )
+
+        // Listen for JS → native BLE bridge calls
+        let nc = NotificationCenter.default
+        nc.addObserver(self, selector: #selector(handleSetServerUrl(_:)), name: NSNotification.Name("BleSosRelay_setServerUrl"), object: nil)
+        nc.addObserver(self, selector: #selector(handleAdvertiseBLE(_:)), name: NSNotification.Name("BleSosRelay_advertiseSOS"), object: nil)
+        nc.addObserver(self, selector: #selector(handleAdvertiseBinaryBLE(_:)), name: NSNotification.Name("BleSosRelay_advertiseSOSBinary"), object: nil)
+
         return true
     }
 
-    // Called when the JS layer posts BleSosRelay_advertiseSOS via Capacitor bridge plugin file
+    @objc func handleSetServerUrl(_ notification: Notification) {
+        if let url = notification.userInfo?["url"] as? String {
+            self.serverUrl = url
+            print("iOS BLE Relay Server URL updated: \(url)")
+        }
+    }
+
     @objc func handleAdvertiseBLE(_ notification: Notification) {
         if let packet = notification.userInfo?["packet"] as? String {
             advertiseSOS(packet: packet)
         }
     }
 
+    @objc func handleAdvertiseBinaryBLE(_ notification: Notification) {
+        guard let touristIdStr = notification.userInfo?["touristId"] as? String,
+              let lat = notification.userInfo?["latitude"] as? Double,
+              let lng = notification.userInfo?["longitude"] as? Double,
+              let battery = notification.userInfo?["battery"] as? Int,
+              let touristId = UUID(uuidString: touristIdStr) else { return }
+
+        var data = Data()
+        var uuidBytes = touristId.uuid
+        withUnsafeBytes(of: &uuidBytes) { data.append(contentsOf: $0) }
+
+        var latFloat = Float32(lat).bitPattern.bigEndian
+        withUnsafeBytes(of: &latFloat) { data.append(contentsOf: $0) }
+
+        var lngFloat = Float32(lng).bitPattern.bigEndian
+        withUnsafeBytes(of: &lngFloat) { data.append(contentsOf: $0) }
+
+        var batteryByte = Int8(battery)
+        data.append(contentsOf: [UInt8(bitPattern: batteryByte)])
+
+        advertiseSOSBinary(data: data)
+    }
+
     // MARK: - CBPeripheralManagerDelegate
     func peripheralManagerDidUpdateState(_ peripheral: CBPeripheralManager) {
         if peripheral.state == .poweredOn {
-            print("iOS BLE Advertiser ready")
+            print("iOS BLE Peripheral Manager ready")
+            setupSOSService()
         }
     }
 
+    func setupSOSService() {
+        let char = CBMutableCharacteristic(
+            type: characteristicUUID,
+            properties: [.read, .notify],
+            value: nil,
+            permissions: [.readable]
+        )
+        let service = CBMutableService(type: serviceUUID, primary: true)
+        service.characteristics = [char]
+        self.sosCharacteristic = char
+        peripheralManager?.add(service)
+    }
+
     func advertiseSOS(packet: String) {
+        guard let data = packet.data(using: .utf8) else { return }
+        advertiseSOSBinary(data: data)
+    }
+
+    func advertiseSOSBinary(data: Data) {
         guard let pm = peripheralManager, pm.state == .poweredOn else { return }
+        pm.stopAdvertising()
+
+        if let char = sosCharacteristic {
+            pm.updateValue(data, for: char, onSubscribedCentrals: nil)
+        }
+
         let advertisementData: [String: Any] = [
             CBAdvertisementDataServiceUUIDsKey: [serviceUUID],
             CBAdvertisementDataLocalNameKey: "SurakshaSOS"
         ]
         
         pm.startAdvertising(advertisementData)
-        print("iOS BLE SOS advertising packet: \(packet)")
+        print("iOS BLE SOS advertising started with \(data.count) bytes")
     }
 
     // MARK: - CBCentralManagerDelegate
@@ -59,11 +119,75 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
     }
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
-        if let serviceData = advertisementData[CBAdvertisementDataServiceDataKey] as? [CBUUID: Data],
-           let payload = serviceData[serviceUUID],
-           let packet = String(data: payload, encoding: .utf8) {
-            handleSOSPacket(packet)
+        // iOS doesn't always show Service Data in discovery for background peripherals.
+        // We connect to the peripheral to read the SOS characteristic.
+        if !pendingPeripherals.contains(peripheral) {
+            pendingPeripherals.insert(peripheral)
+            centralManager?.connect(peripheral, options: nil)
         }
+    }
+
+    func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
+        peripheral.delegate = self
+        peripheral.discoverServices([serviceUUID])
+    }
+
+    func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        pendingPeripherals.remove(peripheral)
+    }
+
+    // MARK: - CBPeripheralDelegate
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard let services = peripheral.services else { return }
+        for service in services where service.uuid == serviceUUID {
+            peripheral.discoverCharacteristics([characteristicUUID], for: service)
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
+        guard let characteristics = service.characteristics else { return }
+        for char in characteristics where char.uuid == characteristicUUID {
+            peripheral.readValue(for: char)
+        }
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
+        guard let data = characteristic.value else { return }
+
+        // Try to parse as JSON first
+        if let packet = String(data: data, encoding: .utf8), packet.contains("tourist_id") {
+            handleSOSPacket(packet)
+        } else if data.count >= 24 {
+            // Try to parse as Binary
+            parseBinarySOS(data: data)
+        }
+
+        centralManager?.cancelPeripheralConnection(peripheral)
+    }
+
+    func parseBinarySOS(data: Data) {
+        if data.count < 24 { return }
+
+        let uuidData = data.subdata(in: 0..<16)
+        let latData = data.subdata(in: 16..<20)
+        let lngData = data.subdata(in: 20..<24)
+        let battery = data.count > 24 ? Int(data[24]) : -1
+
+        let touristId = UUID(uuid: (
+            uuidData[0], uuidData[1], uuidData[2], uuidData[3],
+            uuidData[4], uuidData[5], uuidData[6], uuidData[7],
+            uuidData[8], uuidData[9], uuidData[10], uuidData[11],
+            uuidData[12], uuidData[13], uuidData[14], uuidData[15]
+        ))
+
+        let latPattern = latData.withUnsafeBytes { $0.load(as: UInt32.self) }.bigEndian
+        let lat = Float32(bitPattern: latPattern)
+
+        let lngPattern = lngData.withUnsafeBytes { $0.load(as: UInt32.self) }.bigEndian
+        let lng = Float32(bitPattern: lngPattern)
+
+        let jsonPacket = "{\"tourist_id\":\"\(touristId.uuidString.lowercased())\",\"latitude\":\(lat),\"longitude\":\(lng),\"battery_status\":\(battery)}"
+        handleSOSPacket(jsonPacket)
     }
 
     func handleSOSPacket(_ packet: String) {
@@ -82,7 +206,7 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
     }
 
     func relayToServer(packet: String, completion: @escaping (Bool) -> Void) {
-        guard let url = URL(string: "https://smart-tourist-safety-production.up.railway.app/api/v1/sos/relay") else {
+        guard let url = URL(string: serverUrl) else {
             completion(false)
             return
         }

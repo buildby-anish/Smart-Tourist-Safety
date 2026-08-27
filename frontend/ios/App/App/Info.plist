@@ -58,5 +58,11 @@
 	<string>We need Bluetooth access to propagate offline SOS beacon hops when cellular service is unavailable.</string>
 	<key>NSBluetoothPeripheralUsageDescription</key>
 	<string>We need Bluetooth access to advertise offline SOS beacon hops to nearby devices.</string>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>bluetooth-central</string>
+		<string>bluetooth-peripheral</string>
+		<string>location</string>
+	</array>
 </dict>
 </plist>

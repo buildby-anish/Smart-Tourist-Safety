@@ -2,6 +2,11 @@ package com.surakshasetu.app;
 
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothManager;
+import android.bluetooth.BluetoothGatt;
+import android.bluetooth.BluetoothGattCallback;
+import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattService;
+import android.bluetooth.BluetoothProfile;
 import android.bluetooth.le.AdvertiseCallback;
 import android.bluetooth.le.AdvertiseData;
 import android.bluetooth.le.AdvertiseSettings;
@@ -24,10 +29,13 @@ import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.nio.ByteBuffer;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
@@ -35,6 +43,7 @@ import java.util.UUID;
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "BLE_SOS_Relay";
     private static final UUID SERVICE_UUID = UUID.fromString("505b9110-3fa1-4e6a-913a-c4345b080001");
+    private static final UUID CHARACTERISTIC_UUID = UUID.fromString("505b9110-3fa1-4e6a-913a-c4345b080002");
     private static final int MANUFACTURER_ID = 0xFFFF; // Using reserved for testing
     private static final int REQUEST_PERMISSIONS = 121;
     
@@ -42,6 +51,7 @@ public class MainActivity extends BridgeActivity {
     private BluetoothLeScanner scanner;
     private String serverUrl = "https://smart-tourist-safety-production.up.railway.app/api/v1/sos/relay";
     private final Set<String> processedSOSPackets = Collections.synchronizedSet(new HashSet<>());
+    private final Set<String> pendingConnections = Collections.synchronizedSet(new HashSet<>());
 
     // Inner Capacitor plugin so JS can call window.Capacitor.Plugins.BleSosRelay.advertiseSOS()
     @CapacitorPlugin(name = "BleSosRelay")
@@ -74,20 +84,21 @@ public class MainActivity extends BridgeActivity {
             Integer battery = call.getInt("battery");
 
             if (touristId != null && lat != null && lng != null) {
-                try {
-                    UUID uuid = UUID.fromString(touristId);
-                    ByteBuffer buffer = ByteBuffer.allocate(25);
-                    buffer.putLong(uuid.getMostSignificantBits());
-                    buffer.putLong(uuid.getLeastSignificantBits());
-                    buffer.putFloat(lat.floatValue());
-                    buffer.putFloat(lng.floatValue());
-                    buffer.put((byte) (battery != null ? battery.intValue() : -1));
-                    
-                    byte[] data = buffer.array();
-                    advertiseBinaryData(data);
-                    Log.i(TAG, "BLE SOS Binary advertising started for " + touristId);
-                    call.resolve();
-                } catch (Exception e) {
+            try {
+                UUID uuid = UUID.fromString(touristId);
+                ByteBuffer buffer = ByteBuffer.allocate(25);
+                buffer.order(ByteOrder.BIG_ENDIAN);
+                buffer.putLong(uuid.getMostSignificantBits());
+                buffer.putLong(uuid.getLeastSignificantBits());
+                buffer.putFloat(lat.floatValue());
+                buffer.putFloat(lng.floatValue());
+                buffer.put((byte) (battery != null ? battery.intValue() : -1));
+                
+                byte[] data = buffer.array();
+                advertiseBinaryData(data);
+                Log.i(TAG, "BLE SOS Binary advertising started for " + touristId);
+                call.resolve();
+            } catch (Exception e) {
                     call.reject("Invalid data: " + e.getMessage());
                 }
             } else {
@@ -179,16 +190,20 @@ public class MainActivity extends BridgeActivity {
     }
 
     private void startScanning() {
-        ScanFilter filter = new ScanFilter.Builder()
-            .setManufacturerData(MANUFACTURER_ID, new byte[]{})
-            .build();
+        List<ScanFilter> filters = new ArrayList<>();
+        
+        // Filter 1: Android Manufacturer Data (Binary Format)
+        filters.add(new ScanFilter.Builder().setManufacturerData(MANUFACTURER_ID, new byte[]{}).build());
+        
+        // Filter 2: iOS Service UUID (Characteristic-based Format)
+        filters.add(new ScanFilter.Builder().setServiceUuid(new ParcelUuid(SERVICE_UUID)).build());
 
         ScanSettings settings = new ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
             .build();
 
-        scanner.startScan(Collections.singletonList(filter), settings, scanCallback);
-        Log.i(TAG, "BLE Scanning started for Manufacturer ID: " + String.format("0x%04X", MANUFACTURER_ID));
+        scanner.startScan(filters, settings, scanCallback);
+        Log.i(TAG, "BLE Scanning started for Manufacturer ID and Service UUID");
     }
 
     private final ScanCallback scanCallback = new ScanCallback() {
@@ -197,27 +212,25 @@ public class MainActivity extends BridgeActivity {
             super.onScanResult(callbackType, result);
             if (result.getScanRecord() == null) return;
             
-            // Try Binary Format (Manufacturer Data)
+            // 1. Try Binary Format (Manufacturer Data - Android)
             byte[] manufacturerData = result.getScanRecord().getManufacturerSpecificData(MANUFACTURER_ID);
             if (manufacturerData != null && manufacturerData.length >= 24) {
-                try {
-                    ByteBuffer buffer = ByteBuffer.wrap(manufacturerData);
-                    long mostSigBits = buffer.getLong();
-                    long leastSigBits = buffer.getLong();
-                    float lat = buffer.getFloat();
-                    float lng = buffer.getFloat();
-                    int battery = (manufacturerData.length > 24) ? buffer.get() : -1;
-                    
-                    UUID touristId = new UUID(mostSigBits, leastSigBits);
-                    String jsonPacket = String.format(Locale.US,
-                        "{\"tourist_id\":\"%s\",\"latitude\":%f,\"longitude\":%f,\"battery_status\":%d}",
-                        touristId, lat, lng, battery
-                    );
-                    handleSOSPacket(jsonPacket);
-                } catch (Exception e) {
-                    Log.e(TAG, "Failed to parse binary SOS: " + e.getMessage());
-                }
+                parseBinaryPayload(manufacturerData);
                 return;
+            }
+
+            // 2. Try iOS Service UUID (Connection-based)
+            List<ParcelUuid> services = result.getScanRecord().getServiceUuids();
+            if (services != null) {
+                for (ParcelUuid uuid : services) {
+                    if (uuid.getUuid().equals(SERVICE_UUID)) {
+                        String address = result.getDevice().getAddress();
+                        if (!pendingConnections.contains(address)) {
+                            pendingConnections.add(address);
+                            result.getDevice().connectGatt(MainActivity.this, false, gattCallback);
+                        }
+                    }
+                }
             }
 
             // Fallback: Legacy JSON (Service Data)
@@ -228,6 +241,68 @@ public class MainActivity extends BridgeActivity {
             }
         }
     };
+
+    private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
+        @Override
+        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                gatt.discoverServices();
+            } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                pendingConnections.remove(gatt.getDevice().getAddress());
+                gatt.close();
+            }
+        }
+
+        @Override
+        public void onServicesDiscovered(BluetoothGatt gatt, int status) {
+            if (status == BluetoothGatt.GATT_SUCCESS) {
+                BluetoothGattService service = gatt.getService(SERVICE_UUID);
+                if (service != null) {
+                    BluetoothGattCharacteristic characteristic = service.getCharacteristic(CHARACTERISTIC_UUID);
+                    if (characteristic != null) {
+                        gatt.readCharacteristic(characteristic);
+                    }
+                }
+            }
+        }
+
+        @Override
+        public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
+            if (status == BluetoothGatt.GATT_SUCCESS && characteristic.getUuid().equals(CHARACTERISTIC_UUID)) {
+                byte[] data = characteristic.getValue();
+                if (data != null) {
+                    if (data.length >= 24) {
+                        parseBinaryPayload(data);
+                    } else {
+                        String packet = new String(data, StandardCharsets.UTF_8);
+                        handleSOSPacket(packet);
+                    }
+                }
+            }
+            gatt.disconnect();
+        }
+    };
+
+    private void parseBinaryPayload(byte[] data) {
+        try {
+            ByteBuffer buffer = ByteBuffer.wrap(data);
+            buffer.order(ByteOrder.BIG_ENDIAN);
+            long mostSigBits = buffer.getLong();
+            long leastSigBits = buffer.getLong();
+            float lat = buffer.getFloat();
+            float lng = buffer.getFloat();
+            int battery = (data.length > 24) ? buffer.get() : -1;
+            
+            UUID touristId = new UUID(mostSigBits, leastSigBits);
+            String jsonPacket = String.format(Locale.US,
+                "{\"tourist_id\":\"%s\",\"latitude\":%f,\"longitude\":%f,\"battery_status\":%d}",
+                touristId, lat, lng, battery
+            );
+            handleSOSPacket(jsonPacket);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to parse binary SOS: " + e.getMessage());
+        }
+    }
 
     private void advertiseBinaryData(byte[] data) {
         if (advertiser == null) return;
