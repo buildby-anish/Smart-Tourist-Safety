@@ -77,6 +77,11 @@ public class MainActivity extends BridgeActivity {
     
     private static SosMeshPlugin pluginInstance = null;
 
+    // Static self-reference so the (now static) SosMeshPlugin nested class
+    // can reach this Activity's instance state — see the comment on
+    // SosMeshPlugin below for why this is required.
+    private static MainActivity activityInstance = null;
+
     // Enums
     private static final byte EMERGENCY_GENERAL = 0;
     private static final byte EMERGENCY_MEDICAL = 1;
@@ -132,8 +137,21 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    // IMPORTANT: this must be a STATIC nested class, not a plain (non-static)
+    // inner class. Capacitor's registerPlugin(SosMeshPlugin.class) creates
+    // the plugin via reflection using a no-arg constructor — but a
+    // non-static inner class has no no-arg constructor (the compiler
+    // silently gives it a hidden constructor parameter for the enclosing
+    // MainActivity instance instead), so that reflective instantiation
+    // throws NoSuchMethodException and the plugin never actually registers
+    // on the JS bridge. window.Capacitor.Plugins.SosMesh then stays
+    // undefined, and the frontend's "if (meshPlugin)" guard just silently
+    // no-ops every call — no crash, no visible error, SOS mesh simply never
+    // fires. Being static means it now needs the outer instance state
+    // (advertiser/scanner/processedSosIds/etc.) via the explicit
+    // `activityInstance` reference below instead of implicit outer access.
     @CapacitorPlugin(name = "SosMesh")
-    public class SosMeshPlugin extends Plugin {
+    public static class SosMeshPlugin extends Plugin {
         @Override
         public void load() {
             pluginInstance = this;
@@ -145,13 +163,13 @@ public class MainActivity extends BridgeActivity {
 
         @PluginMethod
         public void startMesh(PluginCall call) {
-            startMeshScanningAndAdvertising();
+            activityInstance.startMeshScanningAndAdvertising();
             call.resolve();
         }
 
         @PluginMethod
         public void stopMesh(PluginCall call) {
-            stopMeshScanningAndAdvertising();
+            activityInstance.stopMeshScanningAndAdvertising();
             call.resolve();
         }
 
@@ -182,15 +200,15 @@ public class MainActivity extends BridgeActivity {
                 byte ttl = 3; // Hop limit of 3
 
                 byte[] packedData = packSosMesh(sosId, touristId, lat.floatValue(), lng.floatValue(), timestamp, batteryByte, typeCode, severityCode, hopCount, ttl);
-                processedSosIds.add(sosId);
-                
-                activePacketData = packedData;
-                if (meshCharacteristic != null) {
-                    meshCharacteristic.setValue(packedData);
+                activityInstance.processedSosIds.add(sosId);
+
+                activityInstance.activePacketData = packedData;
+                if (activityInstance.meshCharacteristic != null) {
+                    activityInstance.meshCharacteristic.setValue(packedData);
                 }
-                
-                startAdvertising(packedData);
-                startScanning();
+
+                activityInstance.startAdvertising(packedData);
+                activityInstance.startScanning();
                 
                 call.resolve();
             } catch (Exception e) {
@@ -201,9 +219,9 @@ public class MainActivity extends BridgeActivity {
         @PluginMethod
         public void getMeshStatus(PluginCall call) {
             JSObject ret = new JSObject();
-            ret.put("isScanning", isScanning);
-            ret.put("isAdvertising", isAdvertising);
-            ret.put("bluetoothState", getBluetoothStateString());
+            ret.put("isScanning", activityInstance.isScanning);
+            ret.put("isAdvertising", activityInstance.isAdvertising);
+            ret.put("bluetoothState", activityInstance.getBluetoothStateString());
             call.resolve(ret);
         }
     }
@@ -344,6 +362,7 @@ public class MainActivity extends BridgeActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        activityInstance = this;
         registerPlugin(SosMeshPlugin.class);
         super.onCreate(savedInstanceState);
         checkAndRequestPermissions();
