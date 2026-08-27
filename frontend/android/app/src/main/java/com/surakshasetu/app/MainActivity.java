@@ -30,6 +30,8 @@ import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
+import org.json.JSONObject;
+
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.ByteOrder;
@@ -416,7 +418,10 @@ public class MainActivity extends BridgeActivity {
             conn.setDoOutput(true);
             conn.setConnectTimeout(5000);
             
-            String jsonInputString = "{\"payload\":\"" + packet + "\"}";
+            JSONObject json = new JSONObject();
+            json.put("payload", packet);
+            String jsonInputString = json.toString();
+            
             byte[] input = jsonInputString.getBytes(StandardCharsets.UTF_8);
             conn.getOutputStream().write(input, 0, input.length);
 
