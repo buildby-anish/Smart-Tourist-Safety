@@ -1,6 +1,6 @@
 import json
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -32,14 +32,19 @@ class BLERelayPayload(BaseModel):
 # Temporary in-memory storage for local API development only (fallback).
 _in_memory_sos_store: dict[UUID, SOSResponse] = {}
 
-# One genuine SOS per tourist per this window — a tourist mashing the SOS
-# button, a flaky-network retry, or (previously) the offline-sync bug that
-# resubmitted an already-sent SOS all used to create a brand-new incident
-# every time, flooding the authority dashboard with dozens of rows for a
-# single real emergency. Within the window, create_sos now returns the
-# tourist's existing recent SOS (is_duplicate=True) instead of inserting a
-# new incident/sos_requests row.
-_SOS_RATE_LIMIT = timedelta(minutes=10)
+# A tourist mashing the SOS button, a flaky-network retry, or the offline-
+# sync bug that resubmitted an already-sent SOS all used to create a
+# brand-new incident every time, flooding the authority dashboard with
+# dozens of rows for a single real emergency. create_sos now checks whether
+# this tourist already has an SOS whose linked incident is still unresolved
+# (status OPEN or INVESTIGATING) and, if so, returns that existing SOS
+# (is_duplicate=True) instead of inserting a new incident/sos_requests row —
+# tied to resolution state rather than a rolling time window, so: (a) it
+# can never be duplicated while still open, however many times the button
+# is pressed or retried, and (b) the moment an authority resolves it, the
+# next genuine SOS from that tourist creates a fresh incident right away
+# instead of waiting out a fixed window.
+_UNRESOLVED_INCIDENT_STATUSES = ("OPEN", "INVESTIGATING")
 
 
 @router.post("", response_model=SOSResponse, status_code=status.HTTP_201_CREATED)
@@ -73,13 +78,14 @@ def create_sos(
 
         now = datetime.now(timezone.utc)
 
-        recent = sorted(
+        existing = sorted(
             (s for s in _in_memory_sos_store.values() if s.tourist_id == payload.tourist_id),
             key=lambda s: s.triggered_at, reverse=True,
         )
-        if recent and (now - recent[0].triggered_at) < _SOS_RATE_LIMIT:
-            duplicate = recent[0].model_copy(update={"is_duplicate": True})
-            return duplicate
+        for s in existing:
+            linked_incident = _in_memory_incident_store.get(s.incident_id)
+            if linked_incident is not None and linked_incident.status in _UNRESOLVED_INCIDENT_STATUSES:
+                return s.model_copy(update={"is_duplicate": True})
 
         incident_id = uuid4()
         incident = IncidentResponse(
@@ -129,19 +135,23 @@ def create_sos(
                     detail="Tourist profile not found",
                 )
 
-            # Rate limit: one genuine SOS per tourist per _SOS_RATE_LIMIT
-            # window. If this tourist already has an SOS inside the window,
-            # hand back that existing record instead of creating another
-            # incident — this is what stops a single account from filling
-            # the authority dashboard with dozens of rows.
+            # Duplicate guard: if this tourist already has an SOS whose
+            # linked incident is still unresolved (OPEN/INVESTIGATING), hand
+            # back that existing record instead of creating another incident
+            # — this is what stops a single account from filling the
+            # authority dashboard with dozens of rows, and it stays blocked
+            # for as long as the incident stays open, however many times the
+            # button is pressed. The moment an authority resolves it, this
+            # query no longer matches and the next SOS creates a fresh one.
             cur.execute("""
-                SELECT sos_id, tourist_id, incident_id, latitude, longitude,
-                       battery_status, authority_id, trigger_source, sos_status, triggered_at
-                FROM public.sos_requests
-                WHERE tourist_id = %s AND triggered_at > %s
-                ORDER BY triggered_at DESC
+                SELECT sr.sos_id, sr.tourist_id, sr.incident_id, sr.latitude, sr.longitude,
+                       sr.battery_status, sr.authority_id, sr.trigger_source, sr.sos_status, sr.triggered_at
+                FROM public.sos_requests sr
+                JOIN public.incidents i ON i.id = sr.incident_id
+                WHERE sr.tourist_id = %s AND i.status = ANY(%s)
+                ORDER BY sr.triggered_at DESC
                 LIMIT 1;
-            """, (payload.tourist_id, now - _SOS_RATE_LIMIT))
+            """, (payload.tourist_id, list(_UNRESOLVED_INCIDENT_STATUSES)))
             recent_row = cur.fetchone()
             if recent_row:
                 return SOSResponse(
@@ -229,8 +239,8 @@ def relay_sos(body: BLERelayPayload):
     The relaying device sends the original tourist's SOS packet (JSON string)
     as 'payload'. We parse it and create the incident + sos_request rows using
     a service-level DB cursor so no JWT from the (offline) tourist is needed.
-    Duplicate packets (same tourist_id within _SOS_RATE_LIMIT) are silently
-    deduplicated.
+    Duplicate packets (same tourist_id with an already-unresolved SOS
+    incident) are silently deduplicated.
     """
     try:
         data = json.loads(body.payload)
@@ -289,16 +299,18 @@ def relay_sos(body: BLERelayPayload):
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND,
                                     detail="Tourist profile not found")
 
-            # Deduplicate: skip if another SOS from the same tourist within
-            # the shared _SOS_RATE_LIMIT window (was 60s BLE-hop dedup only;
-            # widened to match the direct-submit rate limit above so a
-            # tourist can't flood the dashboard via BLE relay either).
+            # Deduplicate: skip if this tourist already has an SOS whose
+            # linked incident is still unresolved — tied to resolution
+            # state (see _UNRESOLVED_INCIDENT_STATUSES above) rather than a
+            # fixed window, matching the direct-submit path above, so a
+            # tourist can't flood the dashboard via BLE relay either.
             cur.execute("""
-                SELECT sos_id FROM public.sos_requests
-                WHERE tourist_id = %s
-                  AND triggered_at > %s
+                SELECT sr.sos_id
+                FROM public.sos_requests sr
+                JOIN public.incidents i ON i.id = sr.incident_id
+                WHERE sr.tourist_id = %s AND i.status = ANY(%s)
                 LIMIT 1;
-            """, (tourist_id, now - _SOS_RATE_LIMIT))
+            """, (tourist_id, list(_UNRESOLVED_INCIDENT_STATUSES)))
             if cur.fetchone():
                 logger.info(f"[BLE Relay] Duplicate SOS from {tourist_id} — skipping")
                 return {"status": "duplicate_skipped"}

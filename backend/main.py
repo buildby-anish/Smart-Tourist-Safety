@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import Config
 from database.schema_manager import run_database_schema_check
-from database.seed_test_data import ensure_demo_authority_account, ensure_default_geofences
+from database.seed_test_data import ensure_demo_authority_account
 from routers import alerts, audit_logs, auth, authority, geofences, incidents, itinerary, locations, points_of_interest, sos, tourists, ws
 from routers import ai_assistant
 from document_verification import router as document_verification_router
@@ -14,8 +14,16 @@ run_database_schema_check()
 
 # Idempotent: creates one demo authority account for testing the Official
 # Sign In page if it doesn't already exist. See database/seed_test_data.py.
+# NOTE: the demo Himachal Pradesh / Maharashtra danger-zone geofences that
+# used to be auto-seeded here (ensure_default_geofences) have been removed —
+# their large radii were triggering constant geofence-breach "incidents"
+# for real tourists passing anywhere nearby. If they were already created
+# in your database before this change, delete them once with:
+#   DELETE FROM public.geofences WHERE name IN (
+#     'Himachal Pradesh High Risk Avalanche Zone',
+#     'Maharashtra Western Ghats Landslide Corridor'
+#   );
 ensure_demo_authority_account()
-ensure_default_geofences()
 
 app = FastAPI(title="Smart Tourist Safety API")
 

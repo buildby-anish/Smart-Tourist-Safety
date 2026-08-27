@@ -25,8 +25,8 @@ class SOSResponse(BaseModel):
     triggered_at: datetime
     trigger_source: str | None = "APP"
     sos_status: str = "PENDING"  # PENDING | ACKNOWLEDGED | DISPATCHED | RESOLVED
-    # True when this response is an existing SOS returned because of the
-    # 10-minute per-tourist rate limit, rather than a newly created one —
-    # lets the frontend tell the tourist "already sent" instead of implying
-    # a fresh alert went out. See routers/sos.py's _SOS_RATE_LIMIT.
+    # True when this response is an existing SOS returned because the
+    # tourist already has an unresolved SOS incident, rather than a newly
+    # created one — lets the frontend tell the tourist "already sent"
+    # instead of implying a fresh alert went out. See routers/sos.py.
     is_duplicate: bool = False

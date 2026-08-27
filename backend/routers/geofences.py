@@ -277,9 +277,21 @@ def evaluate_geofence_breaches(cur, tourist_id: UUID, latitude: float, longitude
     """
     Checks a single GPS ping against all active hazard geofences (RESTRICTED
     / UNSAFE / WARNING, CIRCLE or POLYGON) using geofence_engine's matcher,
-    and records a breach (+ a linked incident) for any match, debounced per
-    tourist+geofence so a tourist standing still doesn't spam new incidents
-    every ping.
+    and records a breach for any match, debounced per tourist+geofence so a
+    tourist standing still doesn't spam repeat alerts every ping.
+
+    This intentionally does NOT create an incident/SOS anymore. It used to
+    insert a GEOFENCE_BREACH incident here on every un-debounced match, which
+    meant a tourist merely standing inside a (sometimes very large, e.g. the
+    old 8-10km-radius demo) zone kept generating a brand-new "SOS-looking"
+    incident every _BREACH_DEBOUNCE window forever — including right after
+    an authority resolved the previous one, since debounce was time-based,
+    not tied to whether anything was still open. A geofence breach is a
+    location-based warning (tourist gets a popup, authority dashboard gets a
+    live marker/notification via the geofence.breach broadcast below); it is
+    not an emergency the tourist raised, so it should never fabricate one.
+    A real SOS is still only ever created by the tourist themselves (or a
+    BLE relay of their device) via routers/sos.py.
 
     NOTE (documented scope limit, unchanged from the original): this only
     detects ENTERING a hazard zone. Detecting "exited a SAFE zone" needs
@@ -313,22 +325,9 @@ def evaluate_geofence_breaches(cur, tourist_id: UUID, latitude: float, longitude
         """, (breach_id, tourist_id, match.zone_id, latitude, longitude, now, sms_sent,
               match.severity, match.warning_message))
 
-        incident_priority = "CRITICAL" if match.severity == "CRITICAL" else ("HIGH" if match.severity in ("HIGH", "MEDIUM") else "MEDIUM")
-        incident_id = uuid4()
-        cur.execute("""
-            INSERT INTO public.incidents (
-                id, incident_type, tourist_id, latitude, longitude,
-                ai_risk_score, priority, status, description, created_at
-            )
-            VALUES (%s, 'GEOFENCE_BREACH', %s, %s, %s, %s, %s, 'OPEN', %s, %s);
-        """, (
-            incident_id, tourist_id, latitude, longitude, 55, incident_priority,
-            f"Entered {match.zone_type.lower()} zone '{match.zone_name}'", now
-        ))
         created.append({
             "geofence_id": match.zone_id, "geofence_name": match.zone_name,
-            "incident_id": incident_id, "severity": match.severity,
-            "warning_message": match.warning_message,
+            "severity": match.severity, "warning_message": match.warning_message,
         })
 
     return created
