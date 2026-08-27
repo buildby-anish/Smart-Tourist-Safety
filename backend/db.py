@@ -1,9 +1,10 @@
 import json
 import logging
+import time
 from contextlib import contextmanager
 import psycopg2
 import psycopg2.extras
-from psycopg2.pool import ThreadedConnectionPool
+from psycopg2.pool import ThreadedConnectionPool, PoolError
 from config import Config
 
 logging.basicConfig(level=logging.INFO)
@@ -71,11 +72,35 @@ def is_db_active() -> bool:
     return DB_ACTIVE
 
 
+# psycopg2's ThreadedConnectionPool does NOT block when every connection is
+# checked out — pool.getconn() raises PoolError("connection pool exhausted")
+# immediately. Real traffic here is bursty (a tourist location ping, an SOS
+# submit, and an authority PATCH can all land in the same instant), and each
+# checkout is normally held for milliseconds, so the fix isn't a bigger pool
+# (that just moves the ceiling and still fails on the next burst, plus risks
+# exceeding the upstream pooler's own 15-connection limit — see the maxconn
+# comment above) — it's waiting a moment for one of those in-flight
+# connections to free up instead of failing the request on the first try.
+_POOL_CHECKOUT_TIMEOUT = 3.0   # total seconds to wait for a free connection
+_POOL_RETRY_INTERVAL = 0.05    # seconds between checkout attempts
+
+
+def _checkout_connection():
+    deadline = time.monotonic() + _POOL_CHECKOUT_TIMEOUT
+    while True:
+        try:
+            return pool.getconn()
+        except PoolError:
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(_POOL_RETRY_INTERVAL)
+
+
 @contextmanager
 def get_db_cursor(commit: bool = False):
     if not DB_ACTIVE or pool is None:
         raise RuntimeError("Database connection is not active.")
-    conn = pool.getconn()
+    conn = _checkout_connection()
     cur = conn.cursor()
     try:
         yield cur
@@ -93,7 +118,7 @@ def get_db_cursor(commit: bool = False):
 def get_authenticated_cursor(auth_user_id, commit: bool = False):
     if not DB_ACTIVE or pool is None:
         raise RuntimeError("Database connection is not active.")
-    conn = pool.getconn()
+    conn = _checkout_connection()
     cur = conn.cursor()
     try:
         # Set JWT claims in the transaction
