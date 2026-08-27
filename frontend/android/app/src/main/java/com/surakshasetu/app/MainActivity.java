@@ -451,7 +451,7 @@ public class MainActivity extends BridgeActivity {
         if (scanner == null || isScanning) return;
         
         List<ScanFilter> filters = new ArrayList<>();
-        filters.add(new ScanFilter.Builder().setServiceData(new ParcelUuid(SERVICE_UUID_16), null).build());
+        filters.add(new ScanFilter.Builder().setServiceUuid(new ParcelUuid(SERVICE_UUID)).build());
 
         ScanSettings settings = new ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
@@ -497,22 +497,37 @@ public class MainActivity extends BridgeActivity {
             super.onScanResult(callbackType, result);
             if (result.getScanRecord() == null) return;
             
+            // 1. Try 16-bit Service Data (connectionless mesh match)
             byte[] serviceData = result.getScanRecord().getServiceData(new ParcelUuid(SERVICE_UUID_16));
             if (serviceData != null && serviceData.length == 25) {
-                // Parse SOS ID to check duplication connectionlessly
                 ByteBuffer buffer = ByteBuffer.wrap(serviceData);
                 buffer.order(ByteOrder.BIG_ENDIAN);
                 UUID sosId = new UUID(buffer.getLong(), buffer.getLong());
 
                 if (processedSosIds.contains(sosId)) {
-                    return; // Skip duplicate immediately
+                    return; // Skip duplicate
                 }
 
-                // New SOS detected! Connect via GATT to read full 49-byte metadata packet
                 String address = result.getDevice().getAddress();
                 if (!pendingConnections.contains(address)) {
                     pendingConnections.add(address);
                     result.getDevice().connectGatt(MainActivity.this, false, gattClientCallback);
+                }
+                return;
+            }
+
+            // 2. Try 128-bit Service UUID fallback (matches iOS / background beacons)
+            List<ParcelUuid> serviceUuids = result.getScanRecord().getServiceUuids();
+            if (serviceUuids != null) {
+                for (ParcelUuid parcelUuid : serviceUuids) {
+                    if (parcelUuid.getUuid().equals(SERVICE_UUID)) {
+                        String address = result.getDevice().getAddress();
+                        if (!pendingConnections.contains(address)) {
+                            pendingConnections.add(address);
+                            result.getDevice().connectGatt(MainActivity.this, false, gattClientCallback);
+                        }
+                        break;
+                    }
                 }
             }
         }
@@ -576,16 +591,16 @@ public class MainActivity extends BridgeActivity {
 
         AdvertiseData advertiseData = new AdvertiseData.Builder()
             .setIncludeDeviceName(false)
-            .addServiceData(new ParcelUuid(SERVICE_UUID_16), adPayload)
+            .addServiceUuid(new ParcelUuid(SERVICE_UUID))
             .build();
 
         AdvertiseData scanResponse = new AdvertiseData.Builder()
-            .addServiceUuid(new ParcelUuid(SERVICE_UUID))
+            .addServiceData(new ParcelUuid(SERVICE_UUID_16), adPayload)
             .build();
 
         advertiser.startAdvertising(settings, advertiseData, scanResponse, advertiseCallback);
         isAdvertising = true;
-        Log.i(TAG, "BLE Mesh Advertising started");
+        Log.i(TAG, "BLE Mesh Advertising started (128-bit Primary + 16-bit Service Data Scan Response)");
     }
 
     private void stopAdvertising() {
