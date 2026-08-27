@@ -351,7 +351,7 @@ def update_incident(
 def _delete_incident_and_dependents(cur, incident_id: UUID) -> bool:
     cur.execute("DELETE FROM public.responses WHERE incident_id = %s;", (incident_id,))
     cur.execute("DELETE FROM public.alerts WHERE incident_id = %s;", (incident_id,))
-    cur.execute("DELETE FROM public.sos WHERE incident_id = %s;", (incident_id,))
+    cur.execute("DELETE FROM public.sos_requests WHERE incident_id = %s;", (incident_id,))
     cur.execute("DELETE FROM public.incidents WHERE id = %s RETURNING id;", (incident_id,))
     return cur.fetchone() is not None
 

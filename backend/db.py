@@ -101,17 +101,28 @@ def get_db_cursor(commit: bool = False):
     if not DB_ACTIVE or pool is None:
         raise RuntimeError("Database connection is not active.")
     conn = _checkout_connection()
-    cur = conn.cursor()
+    cur = None
     try:
+        cur = conn.cursor()
         yield cur
         if commit:
             conn.commit()
     except Exception as e:
-        conn.rollback()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise e
     finally:
-        cur.close()
-        pool.putconn(conn)
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        try:
+            pool.putconn(conn)
+        except Exception:
+            pass
 
 
 @contextmanager
@@ -119,8 +130,9 @@ def get_authenticated_cursor(auth_user_id, commit: bool = False):
     if not DB_ACTIVE or pool is None:
         raise RuntimeError("Database connection is not active.")
     conn = _checkout_connection()
-    cur = conn.cursor()
+    cur = None
     try:
+        cur = conn.cursor()
         # Set JWT claims in the transaction
         claims_str = json.dumps({"sub": str(auth_user_id), "role": "authenticated"})
         cur.execute("SELECT set_config('request.jwt.claims', %s, true);", (claims_str,))
@@ -131,8 +143,18 @@ def get_authenticated_cursor(auth_user_id, commit: bool = False):
         if commit:
             conn.commit()
     except Exception as e:
-        conn.rollback()
+        try:
+            conn.rollback()
+        except Exception:
+            pass
         raise e
     finally:
-        cur.close()
-        pool.putconn(conn)
+        if cur is not None:
+            try:
+                cur.close()
+            except Exception:
+                pass
+        try:
+            pool.putconn(conn)
+        except Exception:
+            pass

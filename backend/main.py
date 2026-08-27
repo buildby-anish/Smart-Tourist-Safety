@@ -24,6 +24,7 @@ run_database_schema_check()
 #     'Maharashtra Western Ghats Landslide Corridor'
 #   );
 ensure_demo_authority_account()
+sos.start_sos_cleanup_task()
 
 app = FastAPI(title="Smart Tourist Safety API")
 

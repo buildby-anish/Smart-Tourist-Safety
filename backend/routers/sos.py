@@ -1,6 +1,8 @@
 import json
 import logging
-from datetime import datetime, timezone
+import threading
+import time
+from datetime import datetime, timezone, timedelta
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -357,3 +359,85 @@ def relay_sos(body: BLERelayPayload):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to record relayed SOS: {str(e)}",
         )
+
+
+def delete_old_sos_one_by_one():
+    """
+    Deletes any SOS (incident and request) older than 1 hour, one by one.
+    """
+    cutoff_time = datetime.now(timezone.utc) - timedelta(hours=1)
+    
+    # 1. Fallback / Mock Mode (In-memory)
+    if not is_db_active():
+        from routers.incidents import _in_memory_incident_store
+        # Find in-memory SOS requests older than 1 hour
+        old_sos_ids = []
+        for sos_id, sos in list(_in_memory_sos_store.items()):
+            triggered_at = sos.triggered_at
+            if isinstance(triggered_at, str):
+                try:
+                    triggered_at = datetime.fromisoformat(triggered_at.replace("Z", "+00:00"))
+                except Exception:
+                    continue
+            if triggered_at < cutoff_time:
+                old_sos_ids.append(sos_id)
+        
+        for sos_id in old_sos_ids:
+            sos = _in_memory_sos_store.pop(sos_id, None)
+            if sos and sos.incident_id:
+                _in_memory_incident_store.pop(sos.incident_id, None)
+                broadcast_sync(manager.broadcast_to_authorities, "incident.deleted", {"id": str(sos.incident_id)})
+            logger.info(f"[Cleanup] Deleted old in-memory SOS request {sos_id}")
+        return
+
+    # 2. Database Mode
+    try:
+        with get_db_cursor(commit=True) as cur:
+            # Query SOS requests older than 1 hour
+            cur.execute("""
+                SELECT sos_id, incident_id 
+                FROM public.sos_requests 
+                WHERE triggered_at < %s;
+            """, (cutoff_time,))
+            rows = cur.fetchall()
+            
+            for sos_id, incident_id in rows:
+                logger.info(f"[Cleanup] Automatically deleting old SOS: sos_id={sos_id}, incident_id={incident_id}")
+                if incident_id:
+                    # Deleting dependents one by one first to avoid FK violations, matching _delete_incident_and_dependents
+                    cur.execute("DELETE FROM public.responses WHERE incident_id = %s;", (incident_id,))
+                    cur.execute("DELETE FROM public.alerts WHERE incident_id = %s;", (incident_id,))
+                    cur.execute("DELETE FROM public.sos_requests WHERE incident_id = %s;", (incident_id,))
+                    cur.execute("DELETE FROM public.incidents WHERE id = %s;", (incident_id,))
+                else:
+                    cur.execute("DELETE FROM public.sos_requests WHERE sos_id = %s;", (sos_id,))
+                
+                # Broadcast the deletion to authorities in real time so the dashboard updates
+                if incident_id:
+                    broadcast_sync(manager.broadcast_to_authorities, "incident.deleted", {"id": str(incident_id)})
+                    
+    except Exception as e:
+        logger.error(f"Error in automatic SOS cleanup: {e}", exc_info=True)
+
+
+def sos_cleanup_worker():
+    """
+    Background worker loop that runs the cleanup check every 60 seconds.
+    """
+    # Wait 10 seconds before starting to let the app fully initialize
+    time.sleep(10)
+    while True:
+        try:
+            delete_old_sos_one_by_one()
+        except Exception as e:
+            logger.error(f"Error in SOS cleanup thread: {e}")
+        time.sleep(60)
+
+
+def start_sos_cleanup_task():
+    """
+    Starts the automatic SOS cleanup task in a background daemon thread.
+    """
+    thread = threading.Thread(target=sos_cleanup_worker, daemon=True, name="SOSCleanupWorker")
+    thread.start()
+    logger.info("Automatic SOS cleanup background task started.")
