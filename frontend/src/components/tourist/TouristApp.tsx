@@ -15,6 +15,7 @@ import SafetyBanner from './SafetyBanner';
 import AskAIPanel from './AskAIPanel';
 import WeatherChip from './WeatherChip';
 import BrandMark from '../BrandMark';
+import { Network } from '@capacitor/network';
 
 import { getSOSLocation } from '../../lib/location';
 import { queueSOSRecord, updateSOSRecordStatus } from '../../lib/db';
@@ -103,9 +104,33 @@ export default function TouristApp({
   // ── Offline SOS queue auto-sync ─────────────────────────────────────────
   useEffect(() => {
     const trySync = () => { syncQueuedSOS().catch(() => {}); };
+    
+    // Fallback standard online check
     if (navigator.onLine) trySync();
-    window.addEventListener('online', trySync);
-    return () => window.removeEventListener('online', trySync);
+
+    let nativeListener: any = null;
+
+    // Use Capacitor Network listener when available on native platforms
+    const initNetworkSync = async () => {
+      try {
+        const status = await Network.getStatus();
+        if (status.connected) trySync();
+
+        nativeListener = await Network.addListener('networkStatusChange', (status) => {
+          if (status.connected) trySync();
+        });
+      } catch {
+        // Fallback to web listener if running in standard web browser
+        window.addEventListener('online', trySync);
+      }
+    };
+
+    initNetworkSync();
+
+    return () => {
+      if (nativeListener) nativeListener.remove();
+      window.removeEventListener('online', trySync);
+    };
   }, []);
 
   // ── Periodic location ping to backend (Live Tourist Tracking) ──

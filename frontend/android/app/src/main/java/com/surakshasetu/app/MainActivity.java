@@ -12,6 +12,8 @@ import android.bluetooth.le.ScanFilter;
 import android.bluetooth.le.ScanResult;
 import android.bluetooth.le.ScanSettings;
 import android.content.Context;
+import android.content.pm.PackageManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.ParcelUuid;
 import android.util.Log;
@@ -31,6 +33,7 @@ import java.util.UUID;
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "BLE_SOS_Relay";
     private static final UUID SERVICE_UUID = UUID.fromString("505b9110-3fa1-4e6a-913a-c4345b080001");
+    private static final int REQUEST_PERMISSIONS = 121;
     
     private BluetoothLeAdvertiser advertiser;
     private BluetoothLeScanner scanner;
@@ -51,14 +54,63 @@ public class MainActivity extends BridgeActivity {
 
 
 
+    private void checkAndRequestPermissions() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            java.util.List<String> permissions = new java.util.ArrayList<>();
+            
+            if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(android.Manifest.permission.ACCESS_FINE_LOCATION);
+            }
+            if (checkSelfPermission(android.Manifest.permission.ACCESS_COARSE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                permissions.add(android.Manifest.permission.ACCESS_COARSE_LOCATION);
+            }
+            
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED) {
+                    permissions.add(android.Manifest.permission.BLUETOOTH_SCAN);
+                }
+                if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) != PackageManager.PERMISSION_GRANTED) {
+                    permissions.add(android.Manifest.permission.BLUETOOTH_ADVERTISE);
+                }
+                if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED) {
+                    permissions.add(android.Manifest.permission.BLUETOOTH_CONNECT);
+                }
+            }
+            
+            if (!permissions.isEmpty()) {
+                requestPermissions(permissions.toArray(new String[0]), REQUEST_PERMISSIONS);
+            }
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == REQUEST_PERMISSIONS) {
+            setupBLERelay();
+        }
+    }
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         registerPlugin(BleSosRelayPlugin.class);
         super.onCreate(savedInstanceState);
+        checkAndRequestPermissions();
         setupBLERelay();
     }
 
     private void setupBLERelay() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                return;
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
+                    checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) != PackageManager.PERMISSION_GRANTED) {
+                    return;
+                }
+            }
+        }
         try {
             BluetoothManager manager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
             if (manager == null) return;

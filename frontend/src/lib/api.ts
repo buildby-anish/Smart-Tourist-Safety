@@ -1,6 +1,20 @@
 import { SOSRecord, getQueuedSOSRecords, updateSOSRecordStatus } from "./db";
+import { Capacitor } from "@capacitor/core";
+import { Network } from "@capacitor/network";
 
 let isSyncing = false;
+
+async function checkIsOnline(): Promise<boolean> {
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const status = await Network.getStatus();
+      return status.connected;
+    } catch {
+      return navigator.onLine;
+    }
+  }
+  return navigator.onLine;
+}
 
 // ---------------------------------------------------------------------------
 // Base URL & session storage
@@ -831,7 +845,8 @@ export async function syncQueuedSOS(
     return { count: 0, synced: 0 };
   }
 
-  if (!navigator.onLine) {
+  const online = await checkIsOnline();
+  if (!online) {
     console.log("Device is offline. Cannot perform synchronization.");
     return { count: 0, synced: 0, error: "Offline" };
   }
