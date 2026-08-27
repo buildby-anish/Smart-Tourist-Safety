@@ -78,7 +78,7 @@ def create_sos(
 
         _get_tourist_or_404(payload.tourist_id)
 
-        now = datetime.now(timezone.utc)
+        now = payload.triggered_at or datetime.now(timezone.utc)
 
         existing = sorted(
             (s for s in _in_memory_sos_store.values() if s.tourist_id == payload.tourist_id),
@@ -122,7 +122,7 @@ def create_sos(
         return sos
 
     # 2. Database Mode
-    now = datetime.now(timezone.utc)
+    now = payload.triggered_at or datetime.now(timezone.utc)
     incident_id = uuid4()
     sos_id = uuid4()
 
@@ -176,9 +176,6 @@ def create_sos(
             if kyc_status != "VERIFIED":
                 sos_description += " (UNVERIFIED IDENTITY — tourist has not completed KYC)"
 
-            # Create an incident record — SOS coordinates are stored
-            # directly on the incident (directive §4: incidents.latitude /
-            # incidents.longitude), no separate location row needed.
             cur.execute("""
                 INSERT INTO public.incidents (
                     id, incident_type, tourist_id, latitude, longitude,
@@ -270,6 +267,18 @@ def relay_sos(body: BLERelayPayload):
 
     battery_status = data.get("battery_status") or data.get("battery")
     now = datetime.now(timezone.utc)
+    
+    # Parse triggered_at if present in the payload (useful for offline delay reconstruction)
+    triggered_at_val = data.get("triggered_at") or data.get("time")
+    triggered_at = now
+    if triggered_at_val:
+        try:
+            if isinstance(triggered_at_val, (int, float)):
+                triggered_at = datetime.fromtimestamp(triggered_at_val, tz=timezone.utc)
+            else:
+                triggered_at = datetime.fromisoformat(str(triggered_at_val).replace("Z", "+00:00"))
+        except Exception:
+            logger.warning(f"Failed to parse triggered_at '{triggered_at_val}' in BLE payload")
 
     # Fallback mode — no DB
     if not is_db_active():
@@ -280,13 +289,13 @@ def relay_sos(body: BLERelayPayload):
             id=incident_id, incident_type="SOS", tourist_id=tourist_id,
             latitude=float(latitude), longitude=float(longitude),
             ai_risk_score=70, priority="CRITICAL", status="OPEN",
-            description="SOS Alarm Triggered (BLE Mesh Relay)", created_at=now,
+            description="SOS Alarm Triggered (BLE Mesh Relay)", created_at=triggered_at,
         )
         _in_memory_incident_store[incident_id] = incident
         sos = SOSResponse(
             sos_id=sos_id, tourist_id=tourist_id, incident_id=incident_id,
             latitude=float(latitude), longitude=float(longitude),
-            battery_status=battery_status, triggered_at=now,
+            battery_status=battery_status, triggered_at=triggered_at,
             trigger_source="BLE_RELAY", sos_status="PENDING",
         )
         broadcast_sync(manager.broadcast_to_authorities, "sos.created", sos.model_dump(mode="json"))
@@ -327,7 +336,7 @@ def relay_sos(body: BLERelayPayload):
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                 RETURNING id;
             """, (incident_id, "SOS", tourist_id, float(latitude), float(longitude),
-                  70, "CRITICAL", "OPEN", "SOS Alarm Triggered (BLE Mesh Relay)", now))
+                  70, "CRITICAL", "OPEN", "SOS Alarm Triggered (BLE Mesh Relay)", triggered_at))
 
             cur.execute("""
                 INSERT INTO public.sos_requests (
@@ -337,7 +346,7 @@ def relay_sos(body: BLERelayPayload):
                 RETURNING sos_id, tourist_id, incident_id, latitude, longitude,
                           battery_status, authority_id, trigger_source, sos_status, triggered_at;
             """, (sos_id, tourist_id, incident_id, float(latitude), float(longitude),
-                  battery_status, "BLE_RELAY", "PENDING", now))
+                  battery_status, "BLE_RELAY", "PENDING", triggered_at))
 
             row = cur.fetchone()
             sos_response = SOSResponse(

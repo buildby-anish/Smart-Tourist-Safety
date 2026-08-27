@@ -804,6 +804,7 @@ export async function submitSOSOnline(sosRecord: SOSRecord): Promise<any> {
     longitude: sosRecord.longitude,
     battery_status: sosRecord.battery_status ?? undefined,
     trigger_source: "APP",
+    triggered_at: sosRecord.triggered_at,
   };
 
   const controller = new AbortController();

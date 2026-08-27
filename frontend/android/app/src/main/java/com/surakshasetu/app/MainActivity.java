@@ -56,6 +56,7 @@ public class MainActivity extends BridgeActivity {
     private BluetoothLeScanner scanner;
     private BluetoothGattServer gattServer;
     private BluetoothGattCharacteristic sosCharacteristic;
+    private android.os.Handler handler = new android.os.Handler();
     
     private String serverUrl = "https://smart-tourist-safety-production.up.railway.app/api/v1/sos/relay";
     private final Set<String> processedSOSPackets = Collections.synchronizedSet(new HashSet<>());
@@ -64,6 +65,17 @@ public class MainActivity extends BridgeActivity {
     // Inner Capacitor plugin so JS can call window.Capacitor.Plugins.BleSosRelay.advertiseSOS()
     @CapacitorPlugin(name = "BleSosRelay")
     public class BleSosRelayPlugin extends Plugin {
+        @PluginMethod
+        public void checkStatus(PluginCall call) {
+            BluetoothManager manager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+            BluetoothAdapter adapter = manager != null ? manager.getAdapter() : null;
+            
+            com.getcapacitor.JSObject ret = new com.getcapacitor.JSObject();
+            ret.put("enabled", adapter != null && adapter.isEnabled());
+            ret.put("supported", adapter != null);
+            call.resolve(ret);
+        }
+
         @PluginMethod
         public void setServerUrl(PluginCall call) {
             String url = call.getString("url");
@@ -90,11 +102,12 @@ public class MainActivity extends BridgeActivity {
             Double lat = call.getDouble("latitude");
             Double lng = call.getDouble("longitude");
             Integer battery = call.getInt("battery");
+            String triggeredAt = call.getString("triggeredAt");
 
             if (touristId != null && lat != null && lng != null) {
                 try {
                     UUID uuid = UUID.fromString(touristId);
-                    ByteBuffer buffer = ByteBuffer.allocate(25);
+                    ByteBuffer buffer = ByteBuffer.allocate(29);
                     buffer.order(ByteOrder.BIG_ENDIAN);
                     buffer.putLong(uuid.getMostSignificantBits());
                     buffer.putLong(uuid.getLeastSignificantBits());
@@ -102,9 +115,19 @@ public class MainActivity extends BridgeActivity {
                     buffer.putFloat(lng.floatValue());
                     buffer.put((byte) (battery != null ? battery.intValue() : -1));
                     
+                    long timestamp = System.currentTimeMillis() / 1000;
+                    if (triggeredAt != null) {
+                        try {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                                timestamp = java.time.Instant.parse(triggeredAt).getEpochSecond();
+                            }
+                        } catch (Exception e) { /* fallback to current */ }
+                    }
+                    buffer.putInt((int) timestamp);
+                    
                     byte[] data = buffer.array();
                     advertiseBinaryData(data);
-                    Log.i(TAG, "BLE SOS Binary advertising started for " + touristId);
+                    Log.i(TAG, "BLE SOS Binary advertising started with timestamp: " + timestamp);
                     call.resolve();
                 } catch (Exception e) {
                     call.reject("Invalid data: " + e.getMessage());
@@ -171,20 +194,24 @@ public class MainActivity extends BridgeActivity {
     private void setupBLERelay() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                Log.w(TAG, "Location permission missing, BLE relay won't start.");
                 return;
-            }
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-                if (checkSelfPermission(android.Manifest.permission.BLUETOOTH_SCAN) != PackageManager.PERMISSION_GRANTED ||
-                    checkSelfPermission(android.Manifest.permission.BLUETOOTH_ADVERTISE) != PackageManager.PERMISSION_GRANTED) {
-                    return;
-                }
             }
         }
         try {
             BluetoothManager manager = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
             if (manager == null) return;
             BluetoothAdapter adapter = manager.getAdapter();
-            if (adapter == null || !adapter.isEnabled()) return;
+            
+            if (adapter == null) {
+                Log.e(TAG, "Bluetooth Adapter not found on this device.");
+                return;
+            }
+            
+            if (!adapter.isEnabled()) {
+                Log.w(TAG, "Bluetooth is DISABLED. Waiting for user to enable...");
+                return;
+            }
 
             advertiser = adapter.getBluetoothLeAdvertiser();
             scanner = adapter.getBluetoothLeScanner();
@@ -195,6 +222,8 @@ public class MainActivity extends BridgeActivity {
 
             if (scanner != null) {
                 startScanning();
+            } else {
+                Log.e(TAG, "Bluetooth LE Scanner is null.");
             }
         } catch (Exception e) {
             Log.e(TAG, "BLE Setup error: " + e.getMessage());
@@ -227,15 +256,33 @@ public class MainActivity extends BridgeActivity {
     };
 
     private void startScanning() {
+        if (scanner == null) return;
+        
         List<ScanFilter> filters = new ArrayList<>();
         filters.add(new ScanFilter.Builder().setServiceUuid(new ParcelUuid(SERVICE_UUID)).build());
 
         ScanSettings settings = new ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
+            .setCallbackType(ScanSettings.CALLBACK_TYPE_ALL_MATCHES)
+            .setMatchMode(ScanSettings.MATCH_MODE_AGGRESSIVE)
             .build();
 
-        scanner.startScan(filters, settings, scanCallback);
-        Log.i(TAG, "BLE Scanning started for Service UUID");
+        try {
+            scanner.stopScan(scanCallback);
+            scanner.startScan(filters, settings, scanCallback);
+            Log.i(TAG, "BLE Scanning started (or restarted)");
+            
+            // Watchdog: Restart scan every 2 minutes to prevent OS throttling
+            handler.removeCallbacksAndMessages(null);
+            handler.postDelayed(new Runnable() {
+                @Override
+                public void run() {
+                    startScanning();
+                }
+            }, 120000);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to start scan: " + e.getMessage());
+        }
     }
 
     private final ScanCallback scanCallback = new ScanCallback() {
@@ -244,26 +291,30 @@ public class MainActivity extends BridgeActivity {
             super.onScanResult(callbackType, result);
             if (result.getScanRecord() == null) return;
             
-            // 1. Try Binary Format (Manufacturer Data)
+            // 1. Try Service Data (New Binary Format)
+            byte[] serviceData = result.getScanRecord().getServiceData(new ParcelUuid(SERVICE_UUID));
+            if (serviceData != null && serviceData.length >= 24) {
+                parseBinaryPayload(serviceData);
+                return;
+            }
+
+            // 2. Try Binary Format (Manufacturer Data)
             byte[] manufacturerData = result.getScanRecord().getManufacturerSpecificData(MANUFACTURER_ID);
             if (manufacturerData != null && manufacturerData.length >= 24) {
                 parseBinaryPayload(manufacturerData);
                 return;
             }
 
-            // 2. Try Service Data (JSON or Binary)
-            byte[] serviceData = result.getScanRecord().getServiceData(new ParcelUuid(SERVICE_UUID));
+            // 3. Fallback: Legacy JSON (Service Data)
             if (serviceData != null) {
-                if (serviceData.length >= 24) {
-                    parseBinaryPayload(serviceData);
-                } else {
-                    String packet = new String(serviceData, StandardCharsets.UTF_8);
+                String packet = new String(serviceData, StandardCharsets.UTF_8);
+                if (packet.contains("tourist_id")) {
                     handleSOSPacket(packet);
                 }
                 return;
             }
 
-            // 3. Try Connecting (iOS/GATT style)
+            // 4. Try Connecting (iOS/GATT style)
             String address = result.getDevice().getAddress();
             if (!pendingConnections.contains(address)) {
                 pendingConnections.add(address);
@@ -323,11 +374,27 @@ public class MainActivity extends BridgeActivity {
             float lng = buffer.getFloat();
             int battery = (data.length > 24) ? buffer.get() : -1;
             
+            String triggeredAt = null;
+            if (data.length >= 29) {
+                long seconds = buffer.getInt() & 0xFFFFFFFFL;
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    triggeredAt = java.time.Instant.ofEpochSecond(seconds).toString();
+                }
+            }
+            
             UUID touristId = new UUID(mostSigBits, leastSigBits);
-            String jsonPacket = String.format(Locale.US,
-                "{\"tourist_id\":\"%s\",\"latitude\":%f,\"longitude\":%f,\"battery_status\":%d}",
-                touristId, lat, lng, battery
-            );
+            String jsonPacket;
+            if (triggeredAt != null) {
+                jsonPacket = String.format(Locale.US,
+                    "{\"tourist_id\":\"%s\",\"latitude\":%f,\"longitude\":%f,\"battery_status\":%d,\"triggered_at\":\"%s\"}",
+                    touristId, lat, lng, battery, triggeredAt
+                );
+            } else {
+                jsonPacket = String.format(Locale.US,
+                    "{\"tourist_id\":\"%s\",\"latitude\":%f,\"longitude\":%f,\"battery_status\":%d}",
+                    touristId, lat, lng, battery
+                );
+            }
             handleSOSPacket(jsonPacket);
         } catch (Exception e) {
             Log.e(TAG, "Failed to parse binary SOS: " + e.getMessage());
@@ -351,9 +418,11 @@ public class MainActivity extends BridgeActivity {
         AdvertiseData advertiseData = new AdvertiseData.Builder()
             .setIncludeDeviceName(false)
             .addServiceUuid(new ParcelUuid(SERVICE_UUID))
+            .addServiceData(new ParcelUuid(SERVICE_UUID), data)
             .build();
 
         advertiser.startAdvertising(settings, advertiseData, advertiseCallback);
+        Log.i(TAG, "BLE SOS Binary advertising started with " + data.length + " bytes in Service Data");
     }
 
     private final AdvertiseCallback advertiseCallback = new AdvertiseCallback() {

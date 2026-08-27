@@ -24,11 +24,22 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
 
         // Listen for JS → native BLE bridge calls
         let nc = NotificationCenter.default
+        nc.addObserver(self, selector: #selector(handleCheckStatus(_:)), name: NSNotification.Name("BleSosRelay_checkStatus"), object: nil)
         nc.addObserver(self, selector: #selector(handleSetServerUrl(_:)), name: NSNotification.Name("BleSosRelay_setServerUrl"), object: nil)
         nc.addObserver(self, selector: #selector(handleAdvertiseBLE(_:)), name: NSNotification.Name("BleSosRelay_advertiseSOS"), object: nil)
         nc.addObserver(self, selector: #selector(handleAdvertiseBinaryBLE(_:)), name: NSNotification.Name("BleSosRelay_advertiseSOSBinary"), object: nil)
 
         return true
+    }
+
+    @objc func handleCheckStatus(_ notification: Notification) {
+        guard let call = notification.userInfo?["call"] as? CAPPluginCall else { return }
+        let enabled = peripheralManager?.state == .poweredOn
+        let supported = peripheralManager != nil
+        call.resolve([
+            "enabled": enabled,
+            "supported": supported
+        ])
     }
 
     @objc func handleSetServerUrl(_ notification: Notification) {
@@ -71,6 +82,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
         // 1 byte Battery
         let batteryByte = Int8(battery)
         data.append(UInt8(bitPattern: batteryByte))
+
+        // 4 bytes Timestamp (UInt32 seconds, Big-Endian)
+        var timestamp = UInt32(Date().timeIntervalSince1970).bigEndian
+        if let triggeredAtStr = notification.userInfo?["triggeredAt"] as? String {
+            let formatter = ISO8601DateFormatter()
+            if let date = formatter.date(from: triggeredAtStr) {
+                timestamp = UInt32(date.timeIntervalSince1970).bigEndian
+            }
+        }
+        withUnsafeBytes(of: &timestamp) { data.append(contentsOf: $0) }
 
         advertiseSOSBinary(data: data)
     }
@@ -198,6 +219,15 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
         let lngData = data.subdata(in: 20..<24)
         let battery = data.count > 24 ? Int(data[24]) : -1
 
+        var triggeredAt: String? = nil
+        if data.count >= 29 {
+            let tsData = data.subdata(in: 25..<29)
+            let timestamp = tsData.withUnsafeBytes { $0.load(as: UInt32.self) }.bigEndian
+            let date = Date(timeIntervalSince1970: TimeInterval(timestamp))
+            let formatter = ISO8601DateFormatter()
+            triggeredAt = formatter.string(from: date)
+        }
+
         let touristId = UUID(uuid: (
             uuidData[0], uuidData[1], uuidData[2], uuidData[3],
             uuidData[4], uuidData[5], uuidData[6], uuidData[7],
@@ -211,7 +241,12 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
         let lngPattern = lngData.withUnsafeBytes { $0.load(as: UInt32.self) }.bigEndian
         let lng = Float32(bitPattern: lngPattern)
 
-        let jsonPacket = "{\"tourist_id\":\"\(touristId.uuidString.lowercased())\",\"latitude\":\(lat),\"longitude\":\(lng),\"battery_status\":\(battery)}"
+        var jsonPacket = "{\"tourist_id\":\"\(touristId.uuidString.lowercased())\",\"latitude\":\(lat),\"longitude\":\(lng),\"battery_status\":\(battery)"
+        if let ts = triggeredAt {
+            jsonPacket += ",\"triggered_at\":\"\(ts)\"}"
+        } else {
+            jsonPacket += "}"
+        }
         handleSOSPacket(jsonPacket)
     }
 

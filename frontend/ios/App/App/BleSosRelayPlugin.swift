@@ -5,6 +5,14 @@ import Capacitor
 /// plugin which posts a notification that AppDelegate picks up to start BLE advertising.
 @objc(BleSosRelayPlugin)
 public class BleSosRelayPlugin: CAPPlugin {
+    @objc func checkStatus(_ call: CAPPluginCall) {
+        NotificationCenter.default.post(
+            name: NSNotification.Name("BleSosRelay_checkStatus"),
+            object: nil,
+            userInfo: ["call": call]
+        )
+    }
+
     @objc func setServerUrl(_ call: CAPPluginCall) {
         let url = call.getString("url") ?? ""
         if !url.isEmpty {

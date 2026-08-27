@@ -78,6 +78,7 @@ export default function TouristApp({
   const [mapFilter, setMapFilter] = useState<string | null>(null);
   const [recenterTrigger, setRecenterTrigger] = useState(0);
   const [geofenceAlert, setGeofenceAlert] = useState<string | null>(null);
+  const [btStatus, setBtStatus] = useState<{ enabled: boolean; supported: boolean }>({ enabled: true, supported: true });
   const [activeRouteTarget, setActiveRouteTarget] = useState<{
     lat: number;
     lng: number;
@@ -138,9 +139,20 @@ export default function TouristApp({
 
     initNetworkSync();
 
+    // Check Bluetooth Status periodically
+    const checkBT = async () => {
+      try {
+        const status = await (window as any).Capacitor?.Plugins?.BleSosRelay?.checkStatus();
+        if (status) setBtStatus(status);
+      } catch { /* ignore */ }
+    };
+    checkBT();
+    const btInterval = setInterval(checkBT, 5000);
+
     return () => {
       if (nativeListener) nativeListener.remove();
       window.removeEventListener('online', trySync);
+      clearInterval(btInterval);
     };
   }, []);
 
@@ -239,7 +251,8 @@ export default function TouristApp({
             touristId: user.id,
             latitude: loc.latitude,
             longitude: loc.longitude,
-            battery: batteryLevel
+            battery: batteryLevel,
+            triggeredAt: localRecord.triggered_at
           }).catch(() => {});
         } else {
           // Fallback to legacy JSON format
@@ -397,6 +410,13 @@ export default function TouristApp({
             paddingTop: 'calc(env(safe-area-inset-top, 0px) + 16px)'
           }}
         >
+          {/* Bluetooth Off Warning */}
+          {!btStatus.enabled && btStatus.supported && (
+            <div className="bg-red-600/90 text-white text-[11px] font-bold px-3 py-1.5 rounded-lg flex items-center gap-2 pointer-events-auto shadow-lg animate-pulse">
+              <span className="text-sm">⚠</span> Bluetooth is OFF — Offline SOS mesh is inactive. Please enable Bluetooth for maximum safety.
+            </div>
+          )}
+
           {/* Controls Row: Search Bar + Quick Actions */}
           <div className="flex flex-col md:flex-row md:items-center gap-3 w-full md:pr-14">
             {/* Search Bar Container */}

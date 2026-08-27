@@ -10,6 +10,7 @@ class SOSCreate(BaseModel):
     longitude: float
     battery_status: int | None = None
     trigger_source: str | None = "APP"
+    triggered_at: datetime | None = None
 
 
 class SOSResponse(BaseModel):
