@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from db import is_db_active, get_authenticated_cursor
 from geofence_engine import GeofenceZone, evaluate_point, row_to_zone, BREACH_ZONE_TYPES
+from realtime import broadcast_sync, manager
 from routers.auth import get_current_user, require_authority
 from schemas.auth import SessionResponse
 from schemas.geofence import (
@@ -102,7 +103,9 @@ def create_geofence(
                 payload.center_lat, payload.center_lng, payload.radius_m,
                 payload.severity, payload.warning_message, payload.is_crowd_zone,
             ))
-            return _row_to_geofence(cur.fetchone())
+            created_gf = _row_to_geofence(cur.fetchone())
+        broadcast_sync(manager.broadcast_to_authorities, "geofence.created", created_gf.model_dump(mode="json"))
+        return created_gf
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Failed to create geofence: {str(e)}")
 
@@ -167,7 +170,9 @@ def update_geofence(
             row = cur.fetchone()
             if not row:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Geofence not found")
-            return _row_to_geofence(row)
+            updated_gf = _row_to_geofence(row)
+        broadcast_sync(manager.broadcast_to_authorities, "geofence.updated", updated_gf.model_dump(mode="json"))
+        return updated_gf
     except HTTPException as he:
         raise he
     except Exception as e:
@@ -187,10 +192,23 @@ def delete_geofence(
 
     try:
         with get_authenticated_cursor(current_user.auth_user_id, commit=True) as cur:
+            # public.geofence_breaches.geofence_id references this row. A
+            # zone that has been triggering repeated breaches (the exact
+            # "sending 90-100 SOS automatically" scenario) accumulates many
+            # breach rows, and deleting the geofence directly would either
+            # be rejected outright by the FK constraint (if it isn't
+            # ON DELETE CASCADE on the live DB) or silently leave orphaned
+            # breach rows behind (if it is) — either way this is the delete
+            # that was previously failing with the zone staying visible on
+            # both dashboards and continuing to fire new incidents on every
+            # GPS ping. Clearing breach history first makes the delete
+            # unconditional regardless of what the live constraint is.
+            cur.execute("DELETE FROM public.geofence_breaches WHERE geofence_id = %s;", (geofence_id,))
             cur.execute("DELETE FROM public.geofences WHERE id = %s RETURNING id;", (geofence_id,))
             if not cur.fetchone():
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Geofence not found")
-            return None
+        broadcast_sync(manager.broadcast_to_authorities, "geofence.deleted", {"id": str(geofence_id)})
+        return None
     except HTTPException as he:
         raise he
     except Exception as e:

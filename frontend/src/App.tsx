@@ -407,6 +407,16 @@ export default function App() {
         refreshTouristsFromBackend().then((freshTourists) => {
           refreshIncidentsFromBackend(freshTourists);
         });
+      } else if (
+        event.type === 'geofence.created' ||
+        event.type === 'geofence.updated' ||
+        event.type === 'geofence.deleted'
+      ) {
+        // Backend now broadcasts these on every geofence create/update/
+        // delete (see routers/geofences.py), so a zone removed on one
+        // authority screen disappears everywhere immediately instead of
+        // waiting for the 15s poll below.
+        refreshGeofencesFromBackend();
       } else if (event.type === 'location.ping' && event.data?.tourist_id) {
         setLiveLocations((prev) => ({ ...prev, [event.data.tourist_id]: event.data }));
       }
