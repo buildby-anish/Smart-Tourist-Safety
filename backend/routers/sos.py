@@ -304,6 +304,25 @@ def relay_sos(body: BLERelayPayload):
     # Fallback mode — no DB
     if not is_db_active():
         from routers.incidents import _in_memory_incident_store
+
+        # Same dedup rule as the DB-mode branch below and as create_sos's
+        # fallback branch above: skip creating a second incident for a
+        # tourist who already has one unresolved, instead of only
+        # deduplicating in DB mode (which the endpoint's own docstring
+        # claims applies unconditionally).
+        existing_unresolved = next(
+            (
+                s for s in _in_memory_sos_store.values()
+                if s.tourist_id == tourist_id
+                and (inc := _in_memory_incident_store.get(s.incident_id)) is not None
+                and inc.status in _UNRESOLVED_INCIDENT_STATUSES
+            ),
+            None,
+        )
+        if existing_unresolved:
+            logger.info(f"[BLE Relay] Duplicate SOS from {tourist_id} — skipping (fallback mode)")
+            return {"status": "duplicate_skipped"}
+
         incident_id = uuid4()
         incident = IncidentResponse(
             id=incident_id, incident_type="SOS", tourist_id=tourist_id,
@@ -318,6 +337,7 @@ def relay_sos(body: BLERelayPayload):
             battery_status=battery_status, triggered_at=triggered_at,
             trigger_source="BLE_RELAY", sos_status="PENDING",
         )
+        _in_memory_sos_store[sos.sos_id] = sos
         broadcast_sync(manager.broadcast_to_authorities, "sos.created", sos.model_dump(mode="json"))
         return {"status": "relayed", "sos_id": str(sos_id)}
 

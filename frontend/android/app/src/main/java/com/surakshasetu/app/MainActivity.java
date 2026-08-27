@@ -551,15 +551,29 @@ public class MainActivity extends BridgeActivity {
 
         @Override
         public void onServicesDiscovered(BluetoothGatt gatt, int status) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
-                BluetoothGattService service = gatt.getService(SERVICE_UUID);
-                if (service != null) {
-                    BluetoothGattCharacteristic characteristic = service.getCharacteristic(CHARACTERISTIC_UUID);
-                    if (characteristic != null) {
-                        gatt.readCharacteristic(characteristic);
-                    }
-                }
+            // Was: fell through silently on failure/status!=SUCCESS/missing
+            // service/missing characteristic, never calling disconnect() —
+            // same GATT connection leak as the iOS
+            // didDiscoverServices/didDiscoverCharacteristicsFor bug (see
+            // AppDelegate.swift). Left unclosed, each failed peripheral eats
+            // one of Android's small pool of concurrent GATT connections
+            // (~4-7 depending on chipset) until scanning stops working
+            // entirely.
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                gatt.disconnect();
+                return;
             }
+            BluetoothGattService service = gatt.getService(SERVICE_UUID);
+            if (service == null) {
+                gatt.disconnect();
+                return;
+            }
+            BluetoothGattCharacteristic characteristic = service.getCharacteristic(CHARACTERISTIC_UUID);
+            if (characteristic == null) {
+                gatt.disconnect();
+                return;
+            }
+            gatt.readCharacteristic(characteristic);
         }
 
         @Override

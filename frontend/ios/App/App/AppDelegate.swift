@@ -115,7 +115,16 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
               let touristId = UUID(uuidString: touristIdStr) else { return }
 
         let sosIdStr = notification.userInfo?["sosId"] as? String
-        let sosId = (sosIdStr != nil && !sosIdStr!.isEmpty) ? UUID(uuidString: sosIdStr!)! : UUID()
+        // Was: force-unwrapping UUID(uuidString: sosIdStr!)! — if the JS
+        // side ever sends a sosId that's a non-empty but malformed UUID
+        // string, UUID(uuidString:) returns nil and the second "!" crashes
+        // the whole app. Fall back to a freshly generated UUID instead.
+        let sosId: UUID = {
+            if let str = sosIdStr, !str.isEmpty, let parsed = UUID(uuidString: str) {
+                return parsed
+            }
+            return UUID()
+        }()
         let emergencyType = notification.userInfo?["emergencyType"] as? String ?? "GENERAL"
         let severity = notification.userInfo?["severity"] as? String ?? "HIGH"
 
@@ -362,27 +371,59 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
         peripheral.discoverServices([serviceUUID])
     }
 
+    func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        // Was missing entirely. Without this, a peripheral whose connect()
+        // call fails (out of range, radio busy, etc.) stayed in
+        // pendingPeripherals forever — didDiscover's dedup check
+        // ("if !pendingPeripherals.contains(peripheral)") then silently
+        // refused to ever retry connecting to that peripheral again for
+        // the lifetime of the app.
+        print("iOS BLE SOS Mesh: failed to connect to \(peripheral.identifier): \(error?.localizedDescription ?? "unknown error")")
+        pendingPeripherals.remove(peripheral)
+    }
+
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         pendingPeripherals.remove(peripheral)
     }
 
     // MARK: - CBPeripheralDelegate
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
-        guard let services = peripheral.services else { return }
+        // Was: guard returned on error/no-match without ever disconnecting,
+        // leaking the GATT connection — same failure mode as the Android
+        // scanner's equivalent bug (must close on !GATT_SUCCESS). Every
+        // peripheral that failed here or didn't expose the mesh service
+        // stayed connected indefinitely, eventually exhausting the
+        // platform's concurrent-GATT-connection limit and blocking all
+        // future mesh reads.
+        guard error == nil, let services = peripheral.services,
+              services.contains(where: { $0.uuid == serviceUUID }) else {
+            centralManager?.cancelPeripheralConnection(peripheral)
+            return
+        }
         for service in services where service.uuid == serviceUUID {
             peripheral.discoverCharacteristics([characteristicUUID], for: service)
         }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverCharacteristicsFor service: CBService, error: Error?) {
-        guard let characteristics = service.characteristics else { return }
+        // Same leak as above, same fix: disconnect on error or on a
+        // service that doesn't actually expose our characteristic, instead
+        // of silently returning and holding the connection open forever.
+        guard error == nil, let characteristics = service.characteristics,
+              characteristics.contains(where: { $0.uuid == characteristicUUID }) else {
+            centralManager?.cancelPeripheralConnection(peripheral)
+            return
+        }
         for char in characteristics where char.uuid == characteristicUUID {
             peripheral.readValue(for: char)
         }
     }
 
     func peripheral(_ peripheral: CBPeripheral, didUpdateValueFor characteristic: CBCharacteristic, error: Error?) {
-        guard let data = characteristic.value else { return }
+        guard error == nil, let data = characteristic.value else {
+            centralManager?.cancelPeripheralConnection(peripheral)
+            return
+        }
 
         if data.count == 49 {
             handleIncomingMeshPacket(data: data)
