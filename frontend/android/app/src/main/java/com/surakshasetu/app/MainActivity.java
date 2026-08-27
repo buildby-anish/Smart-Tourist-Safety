@@ -48,6 +48,7 @@ import java.util.UUID;
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "BLE_SOS_Relay";
     private static final UUID SERVICE_UUID = UUID.fromString("505b9110-3fa1-4e6a-913a-c4345b080001");
+    private static final UUID SERVICE_UUID_16 = UUID.fromString("00009110-0000-1000-8000-00805f9b34fb");
     private static final UUID CHARACTERISTIC_UUID = UUID.fromString("505b9110-3fa1-4e6a-913a-c4345b080002");
     private static final int MANUFACTURER_ID = 0xFFFF; // Using reserved for testing
     private static final int REQUEST_PERMISSIONS = 121;
@@ -260,6 +261,7 @@ public class MainActivity extends BridgeActivity {
         
         List<ScanFilter> filters = new ArrayList<>();
         filters.add(new ScanFilter.Builder().setServiceUuid(new ParcelUuid(SERVICE_UUID)).build());
+        filters.add(new ScanFilter.Builder().setServiceData(new ParcelUuid(SERVICE_UUID_16), null).build());
 
         ScanSettings settings = new ScanSettings.Builder()
             .setScanMode(ScanSettings.SCAN_MODE_LOW_LATENCY)
@@ -291,7 +293,14 @@ public class MainActivity extends BridgeActivity {
             super.onScanResult(callbackType, result);
             if (result.getScanRecord() == null) return;
             
-            // 1. Try Service Data (New Binary Format)
+            // 1. Try 16-bit Service Data (New Compact Binary format)
+            byte[] serviceData16 = result.getScanRecord().getServiceData(new ParcelUuid(SERVICE_UUID_16));
+            if (serviceData16 != null && serviceData16.length >= 24) {
+                parseBinaryPayload(serviceData16);
+                return;
+            }
+
+            // 1b. Try Legacy Service Data (128-bit UUID)
             byte[] serviceData = result.getScanRecord().getServiceData(new ParcelUuid(SERVICE_UUID));
             if (serviceData != null && serviceData.length >= 24) {
                 parseBinaryPayload(serviceData);
@@ -415,14 +424,19 @@ public class MainActivity extends BridgeActivity {
             .setConnectable(true)
             .build();
 
+        // 1. Primary Advertising Packet: Contains 16-bit Service Data (fits under 31-byte limit)
         AdvertiseData advertiseData = new AdvertiseData.Builder()
             .setIncludeDeviceName(false)
-            .addServiceUuid(new ParcelUuid(SERVICE_UUID))
-            .addServiceData(new ParcelUuid(SERVICE_UUID), data)
+            .addServiceData(new ParcelUuid(SERVICE_UUID_16), data)
             .build();
 
-        advertiser.startAdvertising(settings, advertiseData, advertiseCallback);
-        Log.i(TAG, "BLE SOS Binary advertising started with " + data.length + " bytes in Service Data");
+        // 2. Scan Response Packet: Contains the 128-bit Service UUID so iOS/Android scanners can discover GATT services
+        AdvertiseData scanResponse = new AdvertiseData.Builder()
+            .addServiceUuid(new ParcelUuid(SERVICE_UUID))
+            .build();
+
+        advertiser.startAdvertising(settings, advertiseData, scanResponse, advertiseCallback);
+        Log.i(TAG, "BLE SOS Binary advertising started (connectionless 16-bit + 128-bit Scan Response) with " + data.length + " bytes");
     }
 
     private final AdvertiseCallback advertiseCallback = new AdvertiseCallback() {
