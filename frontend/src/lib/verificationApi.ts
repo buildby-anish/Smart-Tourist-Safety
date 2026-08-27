@@ -105,7 +105,7 @@ const DEFAULT_BASE_URL =
   (import.meta.env.VITE_VERIFICATION_API_URL ||
    // @ts-ignore
    import.meta.env.VITE_API_BASE_URL ||
-   "http://localhost:8000/api/v1") + "/verifications";
+   "https://smart-tourist-safety-production.up.railway.app/api/v1") + "/verifications";
 
 /**
  * Upload document image or PDF for OCR processing and identity extraction.

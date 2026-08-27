@@ -31,7 +31,7 @@ export function getApiBaseUrl(): string {
   if (localUrl && !localUrl.includes("localhost") && !localUrl.includes("127.0.0.1")) {
     return localUrl;
   }
-  return envUrl || localUrl || "http://localhost:8000/api/v1";
+  return envUrl || localUrl || "https://smart-tourist-safety-production.up.railway.app/api/v1";
 }
 
 export function getAuthToken(): string {
