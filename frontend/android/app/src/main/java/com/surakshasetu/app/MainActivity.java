@@ -25,30 +25,74 @@ import com.getcapacitor.annotation.CapacitorPlugin;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
+import java.nio.ByteBuffer;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.Locale;
 import java.util.Set;
 import java.util.UUID;
 
 public class MainActivity extends BridgeActivity {
     private static final String TAG = "BLE_SOS_Relay";
     private static final UUID SERVICE_UUID = UUID.fromString("505b9110-3fa1-4e6a-913a-c4345b080001");
+    private static final int MANUFACTURER_ID = 0xFFFF; // Using reserved for testing
     private static final int REQUEST_PERMISSIONS = 121;
     
     private BluetoothLeAdvertiser advertiser;
     private BluetoothLeScanner scanner;
+    private String serverUrl = "https://smart-tourist-safety-production.up.railway.app/api/v1/sos/relay";
     private final Set<String> processedSOSPackets = Collections.synchronizedSet(new HashSet<>());
 
     // Inner Capacitor plugin so JS can call window.Capacitor.Plugins.BleSosRelay.advertiseSOS()
     @CapacitorPlugin(name = "BleSosRelay")
     public class BleSosRelayPlugin extends Plugin {
         @PluginMethod
+        public void setServerUrl(PluginCall call) {
+            String url = call.getString("url");
+            if (url != null && !url.isEmpty()) {
+                serverUrl = url;
+                Log.i(TAG, "Relay Server URL updated: " + serverUrl);
+            }
+            call.resolve();
+        }
+
+        @PluginMethod
         public void advertiseSOS(PluginCall call) {
             String packet = call.getString("packet", "");
             if (packet != null && !packet.isEmpty()) {
+                Log.i(TAG, "JS requested SOS advertisement (Legacy). Packet: " + packet);
                 advertiseSOSPacket(packet);
             }
             call.resolve();
+        }
+
+        @PluginMethod
+        public void advertiseSOSBinary(PluginCall call) {
+            String touristId = call.getString("touristId");
+            Double lat = call.getDouble("latitude");
+            Double lng = call.getDouble("longitude");
+            Integer battery = call.getInt("battery");
+
+            if (touristId != null && lat != null && lng != null) {
+                try {
+                    UUID uuid = UUID.fromString(touristId);
+                    ByteBuffer buffer = ByteBuffer.allocate(25);
+                    buffer.putLong(uuid.getMostSignificantBits());
+                    buffer.putLong(uuid.getLeastSignificantBits());
+                    buffer.putFloat(lat.floatValue());
+                    buffer.putFloat(lng.floatValue());
+                    buffer.put((byte) (battery != null ? battery.intValue() : -1));
+                    
+                    byte[] data = buffer.array();
+                    advertiseBinaryData(data);
+                    Log.i(TAG, "BLE SOS Binary advertising started for " + touristId);
+                    call.resolve();
+                } catch (Exception e) {
+                    call.reject("Invalid data: " + e.getMessage());
+                }
+            } else {
+                call.reject("Missing required fields");
+            }
         }
     }
 
@@ -99,6 +143,12 @@ public class MainActivity extends BridgeActivity {
         setupBLERelay();
     }
 
+    @Override
+    public void onResume() {
+        super.onResume();
+        setupBLERelay();
+    }
+
     private void setupBLERelay() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             if (checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
@@ -130,7 +180,7 @@ public class MainActivity extends BridgeActivity {
 
     private void startScanning() {
         ScanFilter filter = new ScanFilter.Builder()
-            .setServiceUuid(new ParcelUuid(SERVICE_UUID))
+            .setManufacturerData(MANUFACTURER_ID, new byte[]{})
             .build();
 
         ScanSettings settings = new ScanSettings.Builder()
@@ -138,20 +188,75 @@ public class MainActivity extends BridgeActivity {
             .build();
 
         scanner.startScan(Collections.singletonList(filter), settings, scanCallback);
-        Log.i(TAG, "BLE Scanning started for Service UUID: " + SERVICE_UUID);
+        Log.i(TAG, "BLE Scanning started for Manufacturer ID: " + String.format("0x%04X", MANUFACTURER_ID));
     }
 
     private final ScanCallback scanCallback = new ScanCallback() {
         @Override
         public void onScanResult(int callbackType, ScanResult result) {
             super.onScanResult(callbackType, result);
-            byte[] payload = result.getScanRecord() != null ? result.getScanRecord().getServiceData(new ParcelUuid(SERVICE_UUID)) : null;
+            if (result.getScanRecord() == null) return;
+            
+            // Try Binary Format (Manufacturer Data)
+            byte[] manufacturerData = result.getScanRecord().getManufacturerSpecificData(MANUFACTURER_ID);
+            if (manufacturerData != null && manufacturerData.length >= 24) {
+                try {
+                    ByteBuffer buffer = ByteBuffer.wrap(manufacturerData);
+                    long mostSigBits = buffer.getLong();
+                    long leastSigBits = buffer.getLong();
+                    float lat = buffer.getFloat();
+                    float lng = buffer.getFloat();
+                    int battery = (manufacturerData.length > 24) ? buffer.get() : -1;
+                    
+                    UUID touristId = new UUID(mostSigBits, leastSigBits);
+                    String jsonPacket = String.format(Locale.US,
+                        "{\"tourist_id\":\"%s\",\"latitude\":%f,\"longitude\":%f,\"battery_status\":%d}",
+                        touristId, lat, lng, battery
+                    );
+                    handleSOSPacket(jsonPacket);
+                } catch (Exception e) {
+                    Log.e(TAG, "Failed to parse binary SOS: " + e.getMessage());
+                }
+                return;
+            }
+
+            // Fallback: Legacy JSON (Service Data)
+            byte[] payload = result.getScanRecord().getServiceData(new ParcelUuid(SERVICE_UUID));
             if (payload != null) {
                 String packet = new String(payload, StandardCharsets.UTF_8);
                 handleSOSPacket(packet);
             }
         }
     };
+
+    private void advertiseBinaryData(byte[] data) {
+        if (advertiser == null) return;
+
+        AdvertiseSettings settings = new AdvertiseSettings.Builder()
+            .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
+            .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
+            .setConnectable(false)
+            .build();
+
+        AdvertiseData advertiseData = new AdvertiseData.Builder()
+            .setIncludeDeviceName(false)
+            .addManufacturerData(MANUFACTURER_ID, data)
+            .build();
+
+        advertiser.startAdvertising(settings, advertiseData, new AdvertiseCallback() {
+            @Override
+            public void onStartSuccess(AdvertiseSettings settingsInEffect) {
+                super.onStartSuccess(settingsInEffect);
+                Log.i(TAG, "BLE SOS Binary advertising started successfully.");
+            }
+
+            @Override
+            public void onStartFailure(int errorCode) {
+                super.onStartFailure(errorCode);
+                Log.e(TAG, "BLE SOS Binary advertising failed: " + errorCode);
+            }
+        });
+    }
 
     private void handleSOSPacket(final String packet) {
         if (processedSOSPackets.contains(packet)) return;
@@ -203,7 +308,7 @@ public class MainActivity extends BridgeActivity {
 
     private boolean relayToServer(String packet) {
         try {
-            URL url = new URL("https://smart-tourist-safety-production.up.railway.app/api/v1/sos/relay");
+            URL url = new URL(serverUrl);
             HttpURLConnection conn = (HttpURLConnection) url.openConnection();
             conn.setRequestMethod("POST");
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");

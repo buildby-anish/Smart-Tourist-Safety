@@ -105,6 +105,14 @@ export default function TouristApp({
   useEffect(() => {
     const trySync = () => { syncQueuedSOS().catch(() => {}); };
     
+    // Set the relay server URL for the native BLE layer
+    try {
+      const apiUrl = `${getApiBaseUrl()}/sos/relay`;
+      (window as any).Capacitor?.Plugins?.BleSosRelay?.setServerUrl?.({ url: apiUrl });
+    } catch (e) {
+      console.warn("Could not set BLE relay server URL:", e);
+    }
+
     // Fallback standard online check
     if (navigator.onLine) trySync();
 
@@ -216,19 +224,32 @@ export default function TouristApp({
 
     // Broadcast SOS over BLE mesh so nearby devices can relay it to the
     // server even if this device has no internet. The native Android/iOS
-    // layer (MainActivity.java / AppDelegate.swift) exposes advertiseBLESOS
+    // layer (MainActivity.java / AppDelegate.swift) exposes advertiseSOS
     // via the Capacitor bridge. We call it fire-and-forget — failure here
     // must never block the main SOS submission flow.
     try {
-      const blePacket = JSON.stringify({
-        tourist_id: user.id,
-        latitude: loc.latitude,
-        longitude: loc.longitude,
-        battery_status: batteryLevel,
-        triggered_at: new Date().toISOString(),
-      });
-      (window as any).Capacitor?.Plugins?.BleSosRelay?.advertiseSOS?.({ packet: blePacket })
-        .catch?.(() => { /* BLE not available on this device — silent */ });
+      const blePlugin = (window as any).Capacitor?.Plugins?.BleSosRelay;
+      if (blePlugin) {
+        // Try the new binary format first (fits in legacy BLE 31-byte limit)
+        if (blePlugin.advertiseSOSBinary) {
+          blePlugin.advertiseSOSBinary({
+            touristId: user.id,
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+            battery: batteryLevel
+          }).catch(() => {});
+        } else {
+          // Fallback to legacy JSON format
+          const blePacket = JSON.stringify({
+            tourist_id: user.id,
+            latitude: loc.latitude,
+            longitude: loc.longitude,
+            battery_status: batteryLevel,
+            triggered_at: new Date().toISOString(),
+          });
+          blePlugin.advertiseSOS?.({ packet: blePacket }).catch(() => {});
+        }
+      }
     } catch { /* Ignore any BLE advertising failure */ }
 
     const locStr = `${loc.latitude?.toFixed(4) ?? '—'}, ${loc.longitude?.toFixed(4) ?? '—'}`;
