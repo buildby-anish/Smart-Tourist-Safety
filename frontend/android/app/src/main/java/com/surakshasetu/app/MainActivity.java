@@ -511,7 +511,7 @@ public class MainActivity extends BridgeActivity {
                 String address = result.getDevice().getAddress();
                 if (!pendingConnections.contains(address)) {
                     pendingConnections.add(address);
-                    result.getDevice().connectGatt(MainActivity.this, false, gattClientCallback);
+                    result.getDevice().connectGatt(MainActivity.this, false, gattClientCallback, BluetoothDevice.TRANSPORT_LE);
                 }
                 return;
             }
@@ -524,7 +524,7 @@ public class MainActivity extends BridgeActivity {
                         String address = result.getDevice().getAddress();
                         if (!pendingConnections.contains(address)) {
                             pendingConnections.add(address);
-                            result.getDevice().connectGatt(MainActivity.this, false, gattClientCallback);
+                            result.getDevice().connectGatt(MainActivity.this, false, gattClientCallback, BluetoothDevice.TRANSPORT_LE);
                         }
                         break;
                     }
@@ -536,6 +536,11 @@ public class MainActivity extends BridgeActivity {
     private final BluetoothGattCallback gattClientCallback = new BluetoothGattCallback() {
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                pendingConnections.remove(gatt.getDevice().getAddress());
+                gatt.close();
+                return;
+            }
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 gatt.discoverServices();
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
