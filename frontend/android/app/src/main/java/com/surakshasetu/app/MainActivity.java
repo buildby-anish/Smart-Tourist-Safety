@@ -1,11 +1,14 @@
 package com.surakshasetu.app;
 
 import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothManager;
+import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothGatt;
 import android.bluetooth.BluetoothGattCallback;
 import android.bluetooth.BluetoothGattCharacteristic;
+import android.bluetooth.BluetoothGattServer;
+import android.bluetooth.BluetoothGattServerCallback;
 import android.bluetooth.BluetoothGattService;
+import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
 import android.bluetooth.le.AdvertiseCallback;
 import android.bluetooth.le.AdvertiseData;
@@ -49,6 +52,9 @@ public class MainActivity extends BridgeActivity {
     
     private BluetoothLeAdvertiser advertiser;
     private BluetoothLeScanner scanner;
+    private BluetoothGattServer gattServer;
+    private BluetoothGattCharacteristic sosCharacteristic;
+    
     private String serverUrl = "https://smart-tourist-safety-production.up.railway.app/api/v1/sos/relay";
     private final Set<String> processedSOSPackets = Collections.synchronizedSet(new HashSet<>());
     private final Set<String> pendingConnections = Collections.synchronizedSet(new HashSet<>());
@@ -84,21 +90,21 @@ public class MainActivity extends BridgeActivity {
             Integer battery = call.getInt("battery");
 
             if (touristId != null && lat != null && lng != null) {
-            try {
-                UUID uuid = UUID.fromString(touristId);
-                ByteBuffer buffer = ByteBuffer.allocate(25);
-                buffer.order(ByteOrder.BIG_ENDIAN);
-                buffer.putLong(uuid.getMostSignificantBits());
-                buffer.putLong(uuid.getLeastSignificantBits());
-                buffer.putFloat(lat.floatValue());
-                buffer.putFloat(lng.floatValue());
-                buffer.put((byte) (battery != null ? battery.intValue() : -1));
-                
-                byte[] data = buffer.array();
-                advertiseBinaryData(data);
-                Log.i(TAG, "BLE SOS Binary advertising started for " + touristId);
-                call.resolve();
-            } catch (Exception e) {
+                try {
+                    UUID uuid = UUID.fromString(touristId);
+                    ByteBuffer buffer = ByteBuffer.allocate(25);
+                    buffer.order(ByteOrder.BIG_ENDIAN);
+                    buffer.putLong(uuid.getMostSignificantBits());
+                    buffer.putLong(uuid.getLeastSignificantBits());
+                    buffer.putFloat(lat.floatValue());
+                    buffer.putFloat(lng.floatValue());
+                    buffer.put((byte) (battery != null ? battery.intValue() : -1));
+                    
+                    byte[] data = buffer.array();
+                    advertiseBinaryData(data);
+                    Log.i(TAG, "BLE SOS Binary advertising started for " + touristId);
+                    call.resolve();
+                } catch (Exception e) {
                     call.reject("Invalid data: " + e.getMessage());
                 }
             } else {
@@ -181,6 +187,10 @@ public class MainActivity extends BridgeActivity {
             advertiser = adapter.getBluetoothLeAdvertiser();
             scanner = adapter.getBluetoothLeScanner();
 
+            if (gattServer == null) {
+                setupGattServer(manager);
+            }
+
             if (scanner != null) {
                 startScanning();
             }
@@ -189,13 +199,33 @@ public class MainActivity extends BridgeActivity {
         }
     }
 
+    private void setupGattServer(BluetoothManager manager) {
+        gattServer = manager.openGattServer(this, gattServerCallback);
+        if (gattServer == null) return;
+
+        BluetoothGattService service = new BluetoothGattService(SERVICE_UUID, BluetoothGattService.SERVICE_TYPE_PRIMARY);
+        sosCharacteristic = new BluetoothGattCharacteristic(
+            CHARACTERISTIC_UUID,
+            BluetoothGattCharacteristic.PROPERTY_READ | BluetoothGattCharacteristic.PROPERTY_NOTIFY,
+            BluetoothGattCharacteristic.PERMISSION_READ
+        );
+        service.addCharacteristic(sosCharacteristic);
+        gattServer.addService(service);
+        Log.i(TAG, "GATT Server started with SOS Service");
+    }
+
+    private final BluetoothGattServerCallback gattServerCallback = new BluetoothGattServerCallback() {
+        @Override
+        public void onConnectionStateChange(BluetoothDevice device, int status, int newState) {
+            super.onConnectionStateChange(device, status, newState);
+            if (newState == BluetoothProfile.STATE_CONNECTED) {
+                Log.i(TAG, "Device connected to GATT server: " + device.getAddress());
+            }
+        }
+    };
+
     private void startScanning() {
         List<ScanFilter> filters = new ArrayList<>();
-        
-        // Filter 1: Android Manufacturer Data (Binary Format)
-        filters.add(new ScanFilter.Builder().setManufacturerData(MANUFACTURER_ID, new byte[]{}).build());
-        
-        // Filter 2: iOS Service UUID (Characteristic-based Format)
         filters.add(new ScanFilter.Builder().setServiceUuid(new ParcelUuid(SERVICE_UUID)).build());
 
         ScanSettings settings = new ScanSettings.Builder()
@@ -203,7 +233,7 @@ public class MainActivity extends BridgeActivity {
             .build();
 
         scanner.startScan(filters, settings, scanCallback);
-        Log.i(TAG, "BLE Scanning started for Manufacturer ID and Service UUID");
+        Log.i(TAG, "BLE Scanning started for Service UUID");
     }
 
     private final ScanCallback scanCallback = new ScanCallback() {
@@ -212,39 +242,37 @@ public class MainActivity extends BridgeActivity {
             super.onScanResult(callbackType, result);
             if (result.getScanRecord() == null) return;
             
-            // 1. Try Binary Format (Manufacturer Data - Android)
+            // 1. Try Binary Format (Manufacturer Data)
             byte[] manufacturerData = result.getScanRecord().getManufacturerSpecificData(MANUFACTURER_ID);
             if (manufacturerData != null && manufacturerData.length >= 24) {
                 parseBinaryPayload(manufacturerData);
                 return;
             }
 
-            // 2. Try iOS Service UUID (Connection-based)
-            List<ParcelUuid> services = result.getScanRecord().getServiceUuids();
-            if (services != null) {
-                for (ParcelUuid uuid : services) {
-                    if (uuid.getUuid().equals(SERVICE_UUID)) {
-                        String address = result.getDevice().getAddress();
-                        if (!pendingConnections.contains(address)) {
-                            pendingConnections.add(address);
-                            result.getDevice().connectGatt(MainActivity.this, false, gattCallback);
-                        }
-                    }
+            // 2. Try Service Data (JSON or Binary)
+            byte[] serviceData = result.getScanRecord().getServiceData(new ParcelUuid(SERVICE_UUID));
+            if (serviceData != null) {
+                if (serviceData.length >= 24) {
+                    parseBinaryPayload(serviceData);
+                } else {
+                    String packet = new String(serviceData, StandardCharsets.UTF_8);
+                    handleSOSPacket(packet);
                 }
+                return;
             }
 
-            // Fallback: Legacy JSON (Service Data)
-            byte[] payload = result.getScanRecord().getServiceData(new ParcelUuid(SERVICE_UUID));
-            if (payload != null) {
-                String packet = new String(payload, StandardCharsets.UTF_8);
-                handleSOSPacket(packet);
+            // 3. Try Connecting (iOS/GATT style)
+            String address = result.getDevice().getAddress();
+            if (!pendingConnections.contains(address)) {
+                pendingConnections.add(address);
+                result.getDevice().connectGatt(MainActivity.this, false, gattClientCallback);
             }
         }
     };
 
-    private final BluetoothGattCallback gattCallback = new BluetoothGattCallback() {
+    private final android.bluetooth.BluetoothGattCallback gattClientCallback = new android.bluetooth.BluetoothGattCallback() {
         @Override
-        public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+        public void onConnectionStateChange(android.bluetooth.BluetoothGatt gatt, int status, int newState) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
                 gatt.discoverServices();
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
@@ -254,8 +282,8 @@ public class MainActivity extends BridgeActivity {
         }
 
         @Override
-        public void onServicesDiscovered(BluetoothGatt gatt, int status) {
-            if (status == BluetoothGatt.GATT_SUCCESS) {
+        public void onServicesDiscovered(android.bluetooth.BluetoothGatt gatt, int status) {
+            if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS) {
                 BluetoothGattService service = gatt.getService(SERVICE_UUID);
                 if (service != null) {
                     BluetoothGattCharacteristic characteristic = service.getCharacteristic(CHARACTERISTIC_UUID);
@@ -267,8 +295,8 @@ public class MainActivity extends BridgeActivity {
         }
 
         @Override
-        public void onCharacteristicRead(BluetoothGatt gatt, BluetoothGattCharacteristic characteristic, int status) {
-            if (status == BluetoothGatt.GATT_SUCCESS && characteristic.getUuid().equals(CHARACTERISTIC_UUID)) {
+        public void onCharacteristicRead(android.bluetooth.BluetoothGatt gatt, android.bluetooth.BluetoothGattCharacteristic characteristic, int status) {
+            if (status == android.bluetooth.BluetoothGatt.GATT_SUCCESS && characteristic.getUuid().equals(CHARACTERISTIC_UUID)) {
                 byte[] data = characteristic.getValue();
                 if (data != null) {
                     if (data.length >= 24) {
@@ -306,32 +334,39 @@ public class MainActivity extends BridgeActivity {
 
     private void advertiseBinaryData(byte[] data) {
         if (advertiser == null) return;
+        advertiser.stopAdvertising(advertiseCallback);
+
+        if (sosCharacteristic != null) {
+            sosCharacteristic.setValue(data);
+        }
 
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
-            .setConnectable(false)
+            .setConnectable(true)
             .build();
 
         AdvertiseData advertiseData = new AdvertiseData.Builder()
             .setIncludeDeviceName(false)
-            .addManufacturerData(MANUFACTURER_ID, data)
+            .addServiceUuid(new ParcelUuid(SERVICE_UUID))
             .build();
 
-        advertiser.startAdvertising(settings, advertiseData, new AdvertiseCallback() {
-            @Override
-            public void onStartSuccess(AdvertiseSettings settingsInEffect) {
-                super.onStartSuccess(settingsInEffect);
-                Log.i(TAG, "BLE SOS Binary advertising started successfully.");
-            }
-
-            @Override
-            public void onStartFailure(int errorCode) {
-                super.onStartFailure(errorCode);
-                Log.e(TAG, "BLE SOS Binary advertising failed: " + errorCode);
-            }
-        });
+        advertiser.startAdvertising(settings, advertiseData, advertiseCallback);
     }
+
+    private final AdvertiseCallback advertiseCallback = new AdvertiseCallback() {
+        @Override
+        public void onStartSuccess(AdvertiseSettings settingsInEffect) {
+            super.onStartSuccess(settingsInEffect);
+            Log.i(TAG, "BLE SOS advertising started successfully.");
+        }
+
+        @Override
+        public void onStartFailure(int errorCode) {
+            super.onStartFailure(errorCode);
+            Log.e(TAG, "BLE SOS advertising failed: " + errorCode);
+        }
+    };
 
     private void handleSOSPacket(final String packet) {
         if (processedSOSPackets.contains(packet)) return;
@@ -353,32 +388,23 @@ public class MainActivity extends BridgeActivity {
 
     private void advertiseSOSPacket(String packet) {
         if (advertiser == null) return;
+        byte[] payload = packet.getBytes(StandardCharsets.UTF_8);
+        
+        if (sosCharacteristic != null) {
+            sosCharacteristic.setValue(payload);
+        }
 
         AdvertiseSettings settings = new AdvertiseSettings.Builder()
             .setAdvertiseMode(AdvertiseSettings.ADVERTISE_MODE_LOW_LATENCY)
             .setTxPowerLevel(AdvertiseSettings.ADVERTISE_TX_POWER_HIGH)
-            .setConnectable(false)
+            .setConnectable(true)
             .build();
 
-        byte[] payload = packet.getBytes(StandardCharsets.UTF_8);
         AdvertiseData data = new AdvertiseData.Builder()
             .addServiceUuid(new ParcelUuid(SERVICE_UUID))
-            .addServiceData(new ParcelUuid(SERVICE_UUID), payload)
             .build();
 
-        advertiser.startAdvertising(settings, data, new AdvertiseCallback() {
-            @Override
-            public void onStartSuccess(AdvertiseSettings settingsInEffect) {
-                super.onStartSuccess(settingsInEffect);
-                Log.i(TAG, "BLE SOS advertising started successfully.");
-            }
-
-            @Override
-            public void onStartFailure(int errorCode) {
-                super.onStartFailure(errorCode);
-                Log.e(TAG, "BLE SOS advertising failed: " + errorCode);
-            }
-        });
+        advertiser.startAdvertising(settings, data, advertiseCallback);
     }
 
     private boolean relayToServer(String packet) {

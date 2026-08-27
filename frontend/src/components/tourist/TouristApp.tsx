@@ -108,7 +108,10 @@ export default function TouristApp({
     // Set the relay server URL for the native BLE layer
     try {
       const apiUrl = `${getApiBaseUrl()}/sos/relay`;
-      (window as any).Capacitor?.Plugins?.BleSosRelay?.setServerUrl?.({ url: apiUrl });
+      const blePlugin = (window as any).Capacitor?.Plugins?.BleSosRelay;
+      if (blePlugin) {
+        blePlugin.setServerUrl?.({ url: apiUrl });
+      }
     } catch (e) {
       console.warn("Could not set BLE relay server URL:", e);
     }

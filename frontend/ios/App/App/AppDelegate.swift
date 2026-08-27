@@ -52,17 +52,25 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
               let touristId = UUID(uuidString: touristIdStr) else { return }
 
         var data = Data()
-        var uuidBytes = touristId.uuid
-        withUnsafeBytes(of: &uuidBytes) { data.append(contentsOf: $0) }
 
+        // 16 bytes UUID
+        let uuid = touristId.uuid
+        data.append(contentsOf: [
+            uuid.0, uuid.1, uuid.2, uuid.3, uuid.4, uuid.5, uuid.6, uuid.7,
+            uuid.8, uuid.9, uuid.10, uuid.11, uuid.12, uuid.13, uuid.14, uuid.15
+        ])
+
+        // 4 bytes Lat (Float32, Big-Endian)
         var latFloat = Float32(lat).bitPattern.bigEndian
         withUnsafeBytes(of: &latFloat) { data.append(contentsOf: $0) }
 
+        // 4 bytes Lng (Float32, Big-Endian)
         var lngFloat = Float32(lng).bitPattern.bigEndian
         withUnsafeBytes(of: &lngFloat) { data.append(contentsOf: $0) }
 
-        var batteryByte = Int8(battery)
-        data.append(contentsOf: [UInt8(bitPattern: batteryByte)])
+        // 1 byte Battery
+        let batteryByte = Int8(battery)
+        data.append(UInt8(bitPattern: batteryByte))
 
         advertiseSOSBinary(data: data)
     }
@@ -72,6 +80,21 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
         if peripheral.state == .poweredOn {
             print("iOS BLE Peripheral Manager ready")
             setupSOSService()
+        }
+    }
+
+    func peripheralManager(_ peripheral: CBPeripheralManager, didReceiveRead request: CBATTRequest) {
+        if request.characteristic.uuid == characteristicUUID {
+            if let charValue = sosCharacteristic?.value {
+                if request.offset > charValue.count {
+                    peripheral.respond(to: request, withResult: .invalidOffset)
+                    return
+                }
+                request.value = charValue.subdata(in: request.offset..<charValue.count)
+                peripheral.respond(to: request, withResult: .success)
+            } else {
+                peripheral.respond(to: request, withResult: .requestNotSupported)
+            }
         }
     }
 
@@ -98,12 +121,14 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
         pm.stopAdvertising()
 
         if let char = sosCharacteristic {
+            // Update the dynamic value so readers get the latest SOS
             pm.updateValue(data, for: char, onSubscribedCentrals: nil)
+            // Also update the static value property for direct reads if possible
+            char.value = data
         }
 
         let advertisementData: [String: Any] = [
-            CBAdvertisementDataServiceUUIDsKey: [serviceUUID],
-            CBAdvertisementDataLocalNameKey: "SurakshaSOS"
+            CBAdvertisementDataServiceUUIDsKey: [serviceUUID]
         ]
         
         pm.startAdvertising(advertisementData)
