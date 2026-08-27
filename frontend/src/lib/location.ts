@@ -1,13 +1,48 @@
 import { saveLastKnownLocation, getLastKnownLocation, LocationData } from "./db";
+import { Geolocation } from '@capacitor/geolocation';
+import { Capacitor } from '@capacitor/core';
 
 export async function getLiveLocation(
-  options = { timeout: 2000, maxAge: 10000, enableHighAccuracy: true }
+  options = { timeout: 10000, maxAge: 10000, enableHighAccuracy: true }
 ): Promise<LocationData> {
+  // On Native (Android/iOS), use the Capacitor Geolocation plugin for better
+  // permission handling and background reliability.
+  if (Capacitor.isNativePlatform()) {
+    try {
+      const perm = await Geolocation.checkPermissions();
+      if (perm.location !== 'granted') {
+        const req = await Geolocation.requestPermissions();
+        if (req.location !== 'granted') {
+          throw new Error("Location permission denied by user");
+        }
+      }
+
+      const position = await Geolocation.getCurrentPosition({
+        enableHighAccuracy: options.enableHighAccuracy,
+        timeout: options.timeout,
+      });
+
+      const locData: LocationData = {
+        latitude: position.coords.latitude,
+        longitude: position.coords.longitude,
+        accuracy: position.coords.accuracy,
+        timestamp: new Date(position.timestamp).toISOString(),
+        location_source: "live",
+      };
+
+      await saveLastKnownLocation(locData).catch(() => {});
+      return locData;
+    } catch (err: any) {
+      throw new Error(`Native GPS failed: ${err.message || err}`);
+    }
+  }
+
+  // Fallback to Browser Geolocation for web/pwa
   if (!navigator.geolocation) {
     throw new Error("Geolocation API not supported by browser");
   }
 
-  const geoPromise = new Promise<LocationData>((resolve, reject) => {
+  return new Promise<LocationData>((resolve, reject) => {
     navigator.geolocation.getCurrentPosition(
       async (position) => {
         const locData: LocationData = {
@@ -18,12 +53,7 @@ export async function getLiveLocation(
           location_source: "live",
         };
 
-        try {
-          await saveLastKnownLocation(locData);
-        } catch (err) {
-          console.warn("Could not save last known location to IndexedDB:", err);
-        }
-
+        await saveLastKnownLocation(locData).catch(() => {});
         resolve(locData);
       },
       (error) => {
@@ -32,14 +62,6 @@ export async function getLiveLocation(
       options
     );
   });
-
-  const timeoutPromise = new Promise<LocationData>((_, reject) => {
-    setTimeout(() => {
-      reject(new Error("Location request timed out (safety wrapper)"));
-    }, options.timeout + 500);
-  });
-
-  return Promise.race([geoPromise, timeoutPromise]);
 }
 
 export async function getSOSLocation(): Promise<LocationData> {
