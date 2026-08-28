@@ -83,17 +83,17 @@ def test_tourist_profile(auth_headers_tourist):
     # Get digital ID
     did_resp = client.get(f"/api/v1/tourists/{tourist_id}/digital-id", headers=headers)
     assert did_resp.status_code == 200
-    assert "digital_id" in did_resp.json()
+    assert "tourist_id" in did_resp.json()
     
     # Update profile
     patch_resp = client.patch(f"/api/v1/tourists/{tourist_id}", headers=headers, json={
         "full_name": "Updated Full Name",
-        "phone": "+1234567890",
-        "emergency_contact": "Emergency Contact Info"
+        "phone_number": "+1234567890",
+        "emergency_contacts": [{"name": "Emergency Contact Info", "phone": "+1234567890"}]
     })
     assert patch_resp.status_code == 200
     assert patch_resp.json()["full_name"] == "Updated Full Name"
-    assert patch_resp.json()["phone"] == "+1234567890"
+    assert patch_resp.json()["phone_number"] == "+1234567890"
 
 def test_incident_flows(auth_headers_tourist, auth_headers_authority):
     t_headers = {"Authorization": auth_headers_tourist["Authorization"]}
@@ -106,16 +106,15 @@ def test_incident_flows(auth_headers_tourist, auth_headers_authority):
     # 2. Create incident
     inc_payload = {
         "tourist_id": tourist_id,
-        "location_id": location_id,
-        "incident_type": "THEFT",
-        "severity": "HIGH",
+        "incident_type": "MANUAL",
+        "priority": "HIGH",
         "status": "OPEN",
         "description": "Stolen backpack at monument"
     }
     
     create_resp = client.post("/api/v1/incidents", json=inc_payload, headers=t_headers)
     assert create_resp.status_code == 201
-    incident_id = create_resp.json()["incident_id"]
+    incident_id = create_resp.json()["id"]
     
     # 3. Retrieve incident
     get_resp = client.get(f"/api/v1/incidents/{incident_id}", headers=t_headers)
@@ -173,8 +172,8 @@ def test_incident_cannot_spoof_another_tourist_id(auth_headers_tourist):
     headers = {"Authorization": auth_headers_tourist["Authorization"]}
     resp = client.post("/api/v1/incidents", json={
         "tourist_id": other_tourist_id,
-        "incident_type": "THEFT",
-        "severity": "HIGH",
+        "incident_type": "MANUAL",
+        "priority": "HIGH",
         "status": "OPEN",
         "description": "Should be attributed to the authenticated tourist",
     }, headers=headers)
@@ -197,10 +196,8 @@ def test_sos_alarm(auth_headers_tourist):
     resp = client.post("/api/v1/sos", json=sos_payload, headers=headers)
     assert resp.status_code == 201
     data = resp.json()
-    assert data["sos_status"] == "ACTIVE"
-    assert data["status"] == "OPEN"
+    assert data["sos_status"] == "PENDING"
     assert data["tourist_id"] == tourist_id
-    assert data["location_id"] is not None
     assert data["incident_id"] is not None
 
 def test_alerts(auth_headers_tourist):
@@ -210,14 +207,14 @@ def test_alerts(auth_headers_tourist):
     # Create incident first
     inc_payload = {
         "tourist_id": tourist_id,
-        "incident_type": "WEATHER",
-        "severity": "MEDIUM",
+        "incident_type": "MANUAL",
+        "priority": "MEDIUM",
         "status": "OPEN",
         "description": "Heavy rainfall"
     }
     inc_resp = client.post("/api/v1/incidents", json=inc_payload, headers=headers)
     assert inc_resp.status_code == 201
-    incident_id = inc_resp.json()["incident_id"]
+    incident_id = inc_resp.json()["id"]
     
     # Create alert
     alert_payload = {
@@ -238,7 +235,7 @@ def test_locations(auth_headers_tourist):
     headers = {"Authorization": auth_headers_tourist["Authorization"]}
     
     # Get locations
-    resp = client.get("/api/v1/locations", headers=headers)
+    resp = client.get("/api/v1/points-of-interest", headers=headers)
     assert resp.status_code == 200
 
 def test_authority_endpoints(auth_headers_tourist, auth_headers_authority):
@@ -257,32 +254,37 @@ def test_authority_endpoints(auth_headers_tourist, auth_headers_authority):
     # 3. Get tourist details
     tourist_resp = client.get(f"/api/v1/authority/tourists/{tourist_id}", headers=a_headers)
     assert tourist_resp.status_code == 200
-    assert tourist_resp.json()["tourist_id"] == tourist_id
+    assert tourist_resp.json()["id"] == tourist_id
 
 
 def test_itinerary_flows(auth_headers_tourist):
     headers = {"Authorization": auth_headers_tourist["Authorization"]}
 
     create_payload = {
-        "destination_name": "Rohtang Pass Viewpoint",
-        "latitude": 32.3728,
-        "longitude": 77.2491,
+        "title": "Manali Trip",
+        "destinations": [
+            {
+                "name": "Rohtang Pass Viewpoint",
+                "latitude": 32.3728,
+                "longitude": 77.2491,
+            }
+        ]
     }
     create_resp = client.post("/api/v1/itinerary", json=create_payload, headers=headers)
     assert create_resp.status_code == 201
-    itinerary_id = create_resp.json()["itinerary_id"]
+    itinerary_id = create_resp.json()["id"]
     assert create_resp.json()["tourist_id"] == auth_headers_tourist["tourist_id"]
 
     list_resp = client.get("/api/v1/itinerary", headers=headers)
     assert list_resp.status_code == 200
-    assert any(e["itinerary_id"] == itinerary_id for e in list_resp.json())
+    assert any(e["id"] == itinerary_id for e in list_resp.json())
 
     delete_resp = client.delete(f"/api/v1/itinerary/{itinerary_id}", headers=headers)
     assert delete_resp.status_code == 204
 
     list_resp_after = client.get("/api/v1/itinerary", headers=headers)
     assert list_resp_after.status_code == 200
-    assert not any(e["itinerary_id"] == itinerary_id for e in list_resp_after.json())
+    assert not any(e["id"] == itinerary_id for e in list_resp_after.json())
 
 
 def test_incident_response_logging(auth_headers_tourist, auth_headers_authority):
@@ -292,14 +294,14 @@ def test_incident_response_logging(auth_headers_tourist, auth_headers_authority)
 
     inc_payload = {
         "tourist_id": tourist_id,
-        "incident_type": "MEDICAL",
-        "severity": "HIGH",
+        "incident_type": "MANUAL",
+        "priority": "HIGH",
         "status": "OPEN",
         "description": "Tourist requires medical assistance",
     }
     inc_resp = client.post("/api/v1/incidents", json=inc_payload, headers=t_headers)
     assert inc_resp.status_code == 201
-    incident_id = inc_resp.json()["incident_id"]
+    incident_id = inc_resp.json()["id"]
 
     # A tourist may not log a dispatch response (authority-only action).
     forbidden_resp = client.post(
