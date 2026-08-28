@@ -389,7 +389,7 @@ export default function TouristApp({
             setHasNewNotification(false);
           }}
           aria-label="Alerts"
-          aria-current={tab === 'alerts' ? 'page' : undefined}
+          aria-current={(tab as Tab) === 'alerts' ? 'page' : undefined}
           className="absolute z-30 w-10 h-10 rounded-full flex items-center justify-center transition-all duration-150 hover:scale-105 active:scale-95"
           style={{
             // Matches the search bar's vertical center (search bar starts at
@@ -399,7 +399,7 @@ export default function TouristApp({
             top: 'calc(env(safe-area-inset-top, 0px) + 20px)',
             right: 14,
             background: dm ? 'rgba(10,20,40,0.92)' : 'rgba(255,255,255,0.95)',
-            border: `1.5px solid ${tab === 'alerts' ? '#FF9933' : dm ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
+            border: `1.5px solid ${(tab as Tab) === 'alerts' ? '#FF9933' : dm ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)'}`,
             boxShadow: '0 2px 14px rgba(0,0,0,0.25)',
             backdropFilter: 'blur(16px)',
           }}
@@ -407,7 +407,7 @@ export default function TouristApp({
           {hasNewNotification && (
             <div className="absolute inset-[-4px] rounded-full border-2 border-red-500 border-t-transparent animate-spin" />
           )}
-          <Bell size={17} strokeWidth={2.2} style={{ color: tab === 'alerts' ? '#FF9933' : dm ? '#f1f5f9' : '#0c2340' }} />
+          <Bell size={17} strokeWidth={2.2} style={{ color: (tab as Tab) === 'alerts' ? '#FF9933' : dm ? '#f1f5f9' : '#0c2340' }} />
         </button>
       )}
 
