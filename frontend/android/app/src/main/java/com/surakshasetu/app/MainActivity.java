@@ -803,6 +803,7 @@ public class MainActivity extends BridgeActivity {
             conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
             conn.setDoOutput(true);
             conn.setConnectTimeout(5000);
+            conn.setReadTimeout(5000);
             
             JSONObject json = new JSONObject();
             json.put("payload", jsonPayload);

@@ -351,7 +351,8 @@ def relay_sos(body: BLERelayPayload):
                 try:
                     cur.execute("""
                         INSERT INTO public.tourist_profiles (id, username, full_name, kyc_status)
-                        VALUES (%s, %s, %s, 'VERIFIED');
+                        VALUES (%s, %s, %s, 'VERIFIED')
+                        ON CONFLICT (id) DO NOTHING;
                     """, (tourist_id, username, "Mock Tourist (BLE Mesh)"))
                 except Exception as e:
                     logger.warning(f"Failed to insert mock profile for BLE relay: {e}")
