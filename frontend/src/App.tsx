@@ -367,6 +367,9 @@ export default function App() {
             address: 'Live Location',
           } : undefined,
           kyc_verified: t.kyc_status === 'VERIFIED',
+          photoUrl: t.id_photo_url || '',
+          digitalBandId: t.digital_id || '',
+          pastSOSHistory: [],
         };
       });
       setTourists(mapped);
