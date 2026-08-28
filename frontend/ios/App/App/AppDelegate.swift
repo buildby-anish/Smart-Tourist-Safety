@@ -360,6 +360,22 @@ class AppDelegate: UIResponder, UIApplicationDelegate, CBPeripheralManagerDelega
     }
 
     func centralManager(_ central: CBCentralManager, didDiscover peripheral: CBPeripheral, advertisementData: [String : Any], rssi RSSI: NSNumber) {
+        if let serviceDataDict = advertisementData[CBAdvertisementDataServiceDataKey] as? [CBUUID: Data],
+           let serviceData = serviceDataDict[serviceUUID16] ?? serviceDataDict[CBUUID(string: "00009110-0000-1000-8000-00805F9B34FB")] {
+            if serviceData.count == 25 {
+                let sosUuidBytes = serviceData.subdata(in: 0..<16)
+                let sosId = UUID(uuid: (
+                    sosUuidBytes[0], sosUuidBytes[1], sosUuidBytes[2], sosUuidBytes[3],
+                    sosUuidBytes[4], sosUuidBytes[5], sosUuidBytes[6], sosUuidBytes[7],
+                    sosUuidBytes[8], sosUuidBytes[9], sosUuidBytes[10], sosUuidBytes[11],
+                    sosUuidBytes[12], sosUuidBytes[13], sosUuidBytes[14], sosUuidBytes[15]
+                ))
+                if processedSosIds.contains(sosId) {
+                    return // Skip duplicate connectionless
+                }
+            }
+        }
+
         if !pendingPeripherals.contains(peripheral) {
             pendingPeripherals.insert(peripheral)
             centralManager?.connect(peripheral, options: nil)
