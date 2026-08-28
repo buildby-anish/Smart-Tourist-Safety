@@ -31,7 +31,7 @@ def auth_headers_tourist():
     })
     assert login_resp.status_code == 200
     token = login_resp.json()["access_token"]
-    tourist_id = login_resp.json()["tourist_id"]
+    tourist_id = login_resp.json()["tourist_profile_id"]
     return {
         "Authorization": f"Bearer {token}",
         "tourist_id": tourist_id,
@@ -142,7 +142,7 @@ def test_sos_cannot_spoof_another_tourist_id(auth_headers_tourist):
         "mfa_enabled": False,
     })
     assert reg_resp.status_code == 201
-    other_tourist_id = reg_resp.json()["tourist_id"]
+    other_tourist_id = reg_resp.json()["tourist_profile_id"]
     assert other_tourist_id != auth_headers_tourist["tourist_id"]
 
     headers = {"Authorization": auth_headers_tourist["Authorization"]}
@@ -168,7 +168,7 @@ def test_incident_cannot_spoof_another_tourist_id(auth_headers_tourist):
         "mfa_enabled": False,
     })
     assert reg_resp.status_code == 201
-    other_tourist_id = reg_resp.json()["tourist_id"]
+    other_tourist_id = reg_resp.json()["tourist_profile_id"]
 
     headers = {"Authorization": auth_headers_tourist["Authorization"]}
     resp = client.post("/api/v1/incidents", json={
