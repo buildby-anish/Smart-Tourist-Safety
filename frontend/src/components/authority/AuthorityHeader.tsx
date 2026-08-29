@@ -19,6 +19,8 @@ interface Props {
   onSosCounterClick: () => void;
   lockedCity: any;
   onLockCityChange: (city: any) => void;
+  viewMode?: 'map' | 'split';
+  onViewModeChange?: (mode: 'map' | 'split') => void;
 }
 
 export const LOCKABLE_CITIES = [
@@ -52,7 +54,7 @@ export default function AuthorityHeader({
   language, onLanguageChange, darkMode: dm, onToggleDarkMode, onLogout,
   officerName, activeSosCount, touristsTrackedCount, patrolUnitsOnlineCount,
   searchQuery, onSearchChange, onExecuteSearch, onSosCounterClick,
-  lockedCity, onLockCityChange,
+  lockedCity, onLockCityChange, viewMode, onViewModeChange,
 }: Props) {
   const t = i18n[language];
 
@@ -109,6 +111,27 @@ export default function AuthorityHeader({
             />
             <Search size={13} className="text-slate-400 absolute left-2.5 top-2.5" />
           </div>
+
+          {onViewModeChange && viewMode && (
+            <div className="flex bg-white/10 rounded-full p-0.5 border border-white/15">
+              <button
+                onClick={() => onViewModeChange('map')}
+                className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase transition-all tracking-wide cursor-pointer ${
+                  viewMode === 'map' ? 'bg-white text-slate-900 shadow-sm' : 'text-white hover:bg-white/5'
+                }`}
+              >
+                Map
+              </button>
+              <button
+                onClick={() => onViewModeChange('split')}
+                className={`px-2.5 py-1 rounded-full text-[9px] font-black uppercase transition-all tracking-wide cursor-pointer ${
+                  viewMode === 'split' ? 'bg-white text-slate-900 shadow-sm' : 'text-white hover:bg-white/5'
+                }`}
+              >
+                Grid
+              </button>
+            </div>
+          )}
 
           <select
             value={lockedCity ? lockedCity.name : ''}

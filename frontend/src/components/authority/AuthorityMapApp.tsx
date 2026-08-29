@@ -6,7 +6,11 @@ import AuthorityRightRail from './AuthorityRightRail';
 import AuthorityBottomBar from './AuthorityBottomBar';
 import SOSTakeover from './SOSTakeover';
 import { ModuleAnalyticsAudit } from '../ModuleAnalyticsAudit';
-import { X } from 'lucide-react';
+import {
+  X, Users, Radio, MapPin, ShieldAlert, HeartPulse, Building2, Flame, Layers,
+  ChevronLeft, ChevronRight, CheckSquare, Square, Clock, AlertTriangle, Send,
+  Settings, Trash2, Edit, Plus, Activity, Search, ShieldCheck, CheckCircle2
+} from 'lucide-react';
 import { getLiveTouristLocations, deleteGeofence, updateGeofence } from '../../lib/api';
 import {
   Language, TouristProfile, SOSIncident, PatrollingUnit, PoliceStation,
@@ -37,6 +41,10 @@ interface Props {
   onBulkResolveIncidents: (incidentIds: string[]) => void;
   onMarkTouristSafe: (touristId: string) => void;
   onSendBroadcast: (newAlert: Omit<BroadcastAlert, 'id' | 'timestamp' | 'deliveredCount' | 'status'>) => void;
+
+  viewMode?: 'map' | 'split';
+  onViewModeChange?: (mode: 'map' | 'split') => void;
+  onUpdateUnitStatus?: (unitId: string, status: PatrollingUnit['status']) => void;
 }
 
 const DEFAULT_CENTER = { lat: 20.5937, lng: 78.9629 }; // India centroid
@@ -59,6 +67,7 @@ export default function AuthorityMapApp({
   language, onLanguageChange, darkMode: dm, onToggleDarkMode, onLogout, officerName,
   tourists, incidents, units, stations, hospitals, clusters, auditLogs, liveLocations, geofences, onGeofenceCreated,
   onDispatchUnit, onResolveIncident, onBulkResolveIncidents, onMarkTouristSafe, onSendBroadcast,
+  viewMode = 'split', onViewModeChange, onUpdateUnitStatus,
 }: Props) {
   const convertedGeofenceZones = useMemo<GeoFenceZone[]>(() => {
     return geofences.map((z) => {
@@ -199,6 +208,13 @@ export default function AuthorityMapApp({
   const [takeoverIndex, setTakeoverIndex] = useState(0);
   const [takeoverDismissed, setTakeoverDismissed] = useState<Set<string>>(new Set());
   const [manualTakeoverIncident, setManualTakeoverIncident] = useState<SOSIncident | null>(null);
+
+  // Split-view tabs & filter states
+  const [leftTab, setLeftTab] = useState<'tourists' | 'responders'>('tourists');
+  const [rightTab, setRightTab] = useState<'incidents' | 'broadcast'>('incidents');
+  const [centerTab, setCenterTab] = useState<'geofences' | 'audits'>('geofences');
+  const [touristSearch, setTouristSearch] = useState('');
+  const [touristFilter, setTouristFilter] = useState<'All' | 'SOS Active' | 'Watch' | 'Safe'>('All');
 
   const visibleQueue = sosQueue.filter((i) => !takeoverDismissed.has(i.id));
   const activeTakeoverIncident = manualTakeoverIncident || visibleQueue[Math.min(takeoverIndex, visibleQueue.length - 1)] || null;

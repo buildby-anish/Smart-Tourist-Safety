@@ -99,6 +99,7 @@ export default function App() {
   // polling.
   const [liveLocations, setLiveLocations] = useState<Record<string, LiveLocationPing>>({});
   const [geofences, setGeofences] = useState<any[]>([]);
+  const [viewMode, setViewMode] = useState<'map' | 'split'>('split');
 
   const [globalSearchQuery, setGlobalSearchQuery] = useState('');
   const [prefilledTouristId, setPrefilledTouristId] = useState('');
@@ -640,6 +641,18 @@ export default function App() {
     );
   };
 
+  const handleUpdateUnitStatus = (unitId: string, status: PatrollingUnit['status']) => {
+    setUnits((prev) =>
+      prev.map((u) => (u.id === unitId ? { ...u, status } : u))
+    );
+    handleLogAudit(
+      'DISPATCH_UNIT',
+      unitId,
+      'Unit Status Update',
+      `Manually updated patrol unit status to ${status}`
+    );
+  };
+
   // Bulk-resolve incidents — powers the authority dashboard's "select all
   // SOS + resolve" action (previously bulk-delete; switched to resolve per
   // request, since deleting was also erasing the record of what happened —
@@ -887,6 +900,9 @@ export default function App() {
           onBulkResolveIncidents={handleBulkResolveIncidents}
           onMarkTouristSafe={handleMarkTouristSafe}
           onSendBroadcast={handleSendBroadcast}
+          viewMode={viewMode}
+          onViewModeChange={setViewMode}
+          onUpdateUnitStatus={handleUpdateUnitStatus}
         />
       )}
 
