@@ -213,6 +213,11 @@ def update_tourist(
         # fallback/mock mode doesn't silently diverge from production.
         if update_data.get("kyc_status") == "VERIFIED" and tourist.tourist_id is None:
             update_data["tourist_id"] = _generate_tourist_code()
+        if "emergency_contacts" in update_data and update_data["emergency_contacts"] is not None:
+            update_data["emergency_contacts"] = [
+                EmergencyContact(**c) if isinstance(c, dict) else c
+                for c in update_data["emergency_contacts"]
+            ]
         updated = tourist.model_copy(update=update_data)
         _in_memory_tourist_store[profile_id] = updated
         broadcast_sync(manager.broadcast_to_authorities, "tourist.updated", updated.model_dump(mode="json"))

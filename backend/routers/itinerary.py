@@ -119,6 +119,11 @@ def update_itinerary(
         entry = _in_memory_itinerary_store.get(itinerary_id)
         if entry is None or entry.tourist_id != current_user.tourist_profile_id:
             raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Itinerary not found")
+        if "destinations" in update_data and update_data["destinations"] is not None:
+            update_data["destinations"] = [
+                Destination(**d) if isinstance(d, dict) else d
+                for d in update_data["destinations"]
+            ]
         updated = entry.model_copy(update=update_data)
         _in_memory_itinerary_store[itinerary_id] = updated
         return updated
